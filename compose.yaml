@@ -29,7 +29,7 @@ services:
     volumes:
       - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
 
   backend:
     build: ./backend
@@ -39,6 +39,10 @@ services:
       DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-ftms/v1/telemetry}
+      MQTT_QOS: ${MQTT_QOS:-1}
     ports:
       - "8000:8000"
     depends_on:
@@ -63,10 +67,23 @@ services:
       redis:
         condition: service_healthy
 
+  mqtt-ingestor:
+    build: ./backend
+    command: python manage.py run_mqtt_ingestor
+    environment: *backend-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
   frontend:
     build: ./frontend
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8000}
     ports:
       - "5173:5173"
     depends_on:

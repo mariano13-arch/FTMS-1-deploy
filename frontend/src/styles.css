@@ -25,7 +25,7 @@ main {
 }
 
 .shell {
-  width: min(760px, 100%);
+  width: min(960px, 100%);
   padding: clamp(1.5rem, 5vw, 3.5rem);
   border: 1px solid #27443a;
   border-radius: 1.5rem;
@@ -154,9 +154,50 @@ h2 {
   color: #ffaaa5;
 }
 
+.realtime {
+  color: #b8d9cd;
+}
+
+.realtime--live,
+.freshness--fresh {
+  color: #5ce3a6;
+}
+
+.realtime--reconnecting,
+.freshness--stale {
+  color: #f3c56d;
+}
+
+.map-panel,
+.map-waiting {
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid #345348;
+  border-radius: 1rem;
+  background: #10241e;
+}
+
+.map-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.map-panel__header p {
+  color: #b8d9cd;
+}
+
+.leaflet-container {
+  height: min(45vh, 420px);
+  min-height: 280px;
+  border-radius: 0.75rem;
+}
+
 @media (max-width: 520px) {
   .pilot-card__header,
-  .vehicle-identity {
+  .vehicle-identity,
+  .map-panel__header {
     align-items: stretch;
     flex-direction: column;
   }

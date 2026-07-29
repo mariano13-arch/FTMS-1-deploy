@@ -1,7 +1,7 @@
 # Telemetry contract v1
 
-Sprint 1 implements this shared contract for the local simulator through REST ingestion.
-It does not implement MQTT or real LILYGO hardware integration.
+REST and MQTT share this exact Sprint 2 schema. Physical LILYGO integration remains out
+of scope.
 
 ```json
 {
@@ -35,6 +35,12 @@ It does not implement MQTT or real LILYGO hardware integration.
 Accepted events are append-only. Replaying the exact semantic event is idempotent; reusing
 its ID for different data returns `409 Conflict`.
 
+MQTT publishes with QoS 1 and `retain=false` to
+`ftms/v1/telemetry/{device_id}`. The final topic segment must exactly match `device_id`.
+The dedicated ingestor rejects invalid messages without terminating and never logs full
+payloads or exact coordinates. Local Mosquitto also disables retained publications
+because MQTT clears the retained-delivery flag for current subscribers.
+
 The seeded local pilot is exactly:
 
 ```text
@@ -54,6 +60,6 @@ python simulator/telemetry_simulator.py \
   --interval 0.1
 ```
 
-This REST endpoint is intentionally unauthenticated for local Sprint 1 development only.
+REST, anonymous MQTT, and WebSocket are intentionally local-development-only.
 See `docs/api-contracts.md` for complete request, success, duplicate, validation, conflict,
 latest-status, and unknown-device JSON examples.

@@ -31,3 +31,19 @@ def semantic_values(event):
     data = event_data(event)
     data.pop("received_at")
     return data
+
+
+def vehicle_status_data(vehicle, event):
+    return {
+        "vehicle": {
+            "device_id": vehicle.device_id,
+            "plate_number": vehicle.plate_number,
+            "display_name": vehicle.display_name,
+        },
+        "latest": None if event is None else event_data(event),
+    }
+
+
+def latest_status_data(vehicle):
+    event = vehicle.telemetry_events.select_related("vehicle").first()
+    return vehicle_status_data(vehicle, event)

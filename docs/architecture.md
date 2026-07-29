@@ -2,22 +2,23 @@
 
 ## Target architecture
 
-FTMS uses a Django modular monolith. React presents the browser UI and communicates only with Django over REST and, in a later sprint, WebSocket. Django owns validation, permissions, application behavior, and all PostgreSQL/PostGIS access.
+FTMS uses a Django modular monolith. React communicates with Django over REST and
+WebSocket. Django owns validation, application behavior, and all PostGIS access.
 
 ```text
 React -> Django REST/WebSocket -> PostgreSQL 17 + PostGIS
                      |
                      +-> Redis/Channels and Celery
 
-Sprint 1: simulator -> Django REST ingestion -> database -> latest-status REST -> React
-
-Planned: LILYGO/simulator -> Mosquitto MQTT -> Django ingestion
-                                        -> WebSocket -> React
+REST simulator -> shared ingestion service -> PostGIS
+MQTT simulator -> Mosquitto -> Django MQTT ingestor -> shared ingestion service
+                                             |-> PostGIS
+                                             `-> Channels/Redis -> WebSocket -> React
 ```
 
 ## Component status
 
-Implemented through Sprint 1:
+Implemented through Sprint 2:
 
 - Minimal React page with a backend health state
 - Django ASGI application and database-connected health endpoint
@@ -26,23 +27,25 @@ Implemented through Sprint 1:
 - Minimal `fleet` and `telemetry` Django modules for a single simulated pilot vehicle
 - Strict telemetry `1.0` REST ingestion with race-safe event ID idempotency
 - Append-only PostGIS telemetry events and deterministic latest-status REST lookup
-- Standard-library simulator and a five-second polling React pilot card
+- REST and MQTT simulators, a dedicated reconnecting MQTT ingestor, and shared ingestion
+- Commit-safe latest-only Channels/Redis broadcasts and vehicle WebSocket snapshots
+- React reconnect with five-second REST fallback and one Leaflet/OpenStreetMap marker
 
 Planned, not implemented:
 
-- MQTT telemetry ingestion and browser WebSocket updates
-- Fleet CRUD, driver, dispatch, route, authentication, and mapping features
+- Fleet CRUD, driver, dispatch, route, and authentication features
 - Celery business jobs and ETL workflows
 - OR-Tools dispatch optimization and XGBoost predictive analytics
 - LILYGO edge firmware and TensorFlow Lite Micro classification
 
-The Sprint 1 simulator intentionally calls REST directly. Mosquitto, Channels, Celery, and
-their locked configuration remain available but are not used by this slice. Celery will
-handle durable asynchronous work in a later approved sprint; OR-Tools and XGBoost likewise
-remain future work.
+Leaflet/OpenStreetMap is the bounded Sprint 2 live-location presentation layer. Google
+Maps/Routes routing and OR-Tools dispatch optimization remain explicitly planned work.
+Celery business jobs, physical LILYGO integration, and TensorFlow Lite Micro remain future
+work.
 
-The REST ingestion endpoint is unauthenticated for local Sprint 1 development only. The
+REST, anonymous MQTT, and WebSocket are local-development-only and unauthenticated. The
 backend assigns `received_at`, normalizes device observation times to UTC, and stores
 coordinates as PostGIS points with SRID 4326. Latest status is chosen by `recorded_at`,
 then sequence number, receipt time, and primary key; delayed older observations do not
-replace a newer vehicle status.
+replace a newer vehicle status. Mosquitto disables retained publications for this
+ephemeral telemetry stream.

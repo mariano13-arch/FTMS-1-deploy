@@ -40,3 +40,16 @@ python simulator/telemetry_simulator.py \
 ```
 
 The simulator requires no third-party Python packages.
+
+## Sprint 2 real-time exercise
+
+Configure `MQTT_HOST`, `MQTT_PORT`, `MQTT_TOPIC_PREFIX`, `MQTT_QOS`,
+`VITE_API_BASE_URL`, and `VITE_WS_BASE_URL` as shown in `.env.example`. The MQTT ingestor
+retries initial and later broker connections. React reconnects with exponential backoff
+capped at 30 seconds and polls REST every five seconds only while WebSocket is unavailable.
+Telemetry is stale when `recorded_at` is more than 60 seconds old.
+
+The Leaflet marker receives `[latitude, longitude]`; PostGIS stores the same point as
+longitude X and latitude Y. OpenStreetMap attribution remains visible. If MQTT, Redis,
+WebSocket, frontend, or tiles fail, inspect the corresponding Compose service logs and
+confirm the configured host URLs. These local anonymous interfaces must not be exposed.

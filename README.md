@@ -1,10 +1,9 @@
 # Fleet and Transportation Management System
 
-FTMS is a capstone project for a logistics fleet platform. Sprint 1 adds a bounded
-simulated-telemetry vertical slice to the Sprint 0 development foundation: a seeded pilot
-vehicle, REST ingestion, PostGIS persistence, latest-status lookup, a simulator, and one
-React status card. Authentication, dispatching, maps, MQTT ingestion, optimization,
-analytics, and real IoT integration are not implemented.
+FTMS is a capstone project for a logistics fleet platform. Sprint 2 extends the seeded
+single-vehicle pilot with MQTT ingestion, commit-safe WebSocket updates, REST fallback,
+and one OpenStreetMap/Leaflet live marker. Authentication, dispatching, routing,
+optimization, analytics, and physical IoT integration are not implemented.
 
 ## Locked stack
 
@@ -42,8 +41,9 @@ Services:
 - Telemetry ingestion: http://localhost:8000/api/v1/telemetry/
 - Pilot latest status: http://localhost:8000/api/v1/vehicles/LILYGO-001/latest-status/
 - MQTT: `localhost:1883` (anonymous access is development-only)
+- WebSocket: `ws://localhost:8000/ws/v1/vehicles/LILYGO-001/status/`
 
-Prepare the Sprint 1 database state and run the simulator:
+Prepare the database state and run the REST simulator:
 
 ```bash
 docker compose exec backend python manage.py migrate
@@ -56,8 +56,8 @@ python simulator/telemetry_simulator.py \
 ```
 
 The seed command idempotently reconciles `LILYGO-001`, plate `DEMO-001`, display name
-`Sprint 1 Demo Vehicle`, and active status. Local Sprint 1 ingestion is intentionally
-unauthenticated and must not be exposed as a production API.
+`Sprint 1 Demo Vehicle`, and active status. Local MQTT is anonymous and the REST and
+WebSocket endpoints are unauthenticated; none may be exposed as production services.
 
 ## Verification commands
 
@@ -95,6 +95,10 @@ docker compose config
 
 - If the backend is unhealthy, inspect `docker compose logs backend db` and confirm the database variables match.
 - If the frontend reports an error, confirm the backend health URL responds and `VITE_API_BASE_URL` is correct.
+- If live updates fail, inspect `mqtt-ingestor`, Mosquitto, and Redis logs, then confirm
+  `VITE_WS_BASE_URL`; the UI polls REST every five seconds until WebSocket reconnects.
+- If map tiles fail, telemetry remains in the card; confirm the browser can reach
+  OpenStreetMap and that content blockers allow its tile host.
 - If a port is occupied, stop the conflicting local service; only development ports are published.
 - The initial database can take a short time to become healthy before Django starts.
 

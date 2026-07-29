@@ -53,6 +53,16 @@ class TelemetryEventInputSerializer(serializers.Serializer):
     )
     driving_event = serializers.ChoiceField(choices=TelemetryEvent.DrivingEvent.values)
 
+    def to_internal_value(self, data):
+        if not isinstance(data, dict):
+            raise serializers.ValidationError("A JSON object is required.")
+        unknown = set(data) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError(
+                {"non_field_errors": [f"Unknown fields: {', '.join(sorted(unknown))}."]}
+            )
+        return super().to_internal_value(data)
+
     def validate_schema_version(self, value):
         if value != "1.0":
             raise serializers.ValidationError("Only schema_version 1.0 is supported.")

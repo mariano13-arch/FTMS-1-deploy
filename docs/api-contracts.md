@@ -164,3 +164,32 @@ Unknown device (`404 Not Found`):
 Latest means `recorded_at` first, followed by sequence number, server receipt time, and
 primary key as deterministic tie-breakers. A late-arriving older observation cannot replace
 the current status. No telemetry update or delete endpoint exists.
+
+## MQTT and WebSocket
+
+MQTT uses QoS 1 at `ftms/v1/telemetry/{device_id}` and the exact REST request payload
+above. The topic suffix must equal the payload `device_id`; retained, malformed,
+oversized, extra-field, invalid, mismatched, and conflicting messages are rejected.
+Identical retransmissions remain idempotent.
+
+Connect to `/ws/v1/vehicles/{device_id}/status/`. A known vehicle receives:
+
+```json
+{
+  "type": "vehicle.status.snapshot",
+  "data": {
+    "vehicle": {
+      "device_id": "LILYGO-001",
+      "plate_number": "DEMO-001",
+      "display_name": "Sprint 1 Demo Vehicle"
+    },
+    "latest": null
+  }
+}
+```
+
+A newly committed actual-latest event sends `vehicle.status.updated`; its `data` is
+exactly the latest-status REST response shown above. Duplicates, conflicts, and stored
+late arrivals do not broadcast. Unknown vehicles close with code `4404`. The
+local-development WebSocket is unauthenticated. Delivery failure never changes a
+successful persistence result.
