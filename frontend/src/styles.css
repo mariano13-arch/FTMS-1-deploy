@@ -24,9 +24,9 @@ main {
     #081411;
 }
 
-section {
+.shell {
   width: min(760px, 100%);
-  padding: clamp(2rem, 7vw, 5rem);
+  padding: clamp(1.5rem, 5vw, 3.5rem);
   border: 1px solid #27443a;
   border-radius: 1.5rem;
   background: rgba(13, 31, 26, 0.88);
@@ -43,8 +43,8 @@ section {
 
 h1 {
   max-width: 18ch;
-  margin: 1rem 0 2.5rem;
-  font-size: clamp(2.2rem, 7vw, 4.75rem);
+  margin: 1rem 0 2rem;
+  font-size: clamp(2.2rem, 6vw, 4rem);
   line-height: 0.98;
   letter-spacing: -0.045em;
 }
@@ -73,4 +73,103 @@ h1 {
 
 .status--error .status__indicator {
   background: #ff756d;
+}
+
+.pilot-card {
+  margin-top: 2rem;
+  padding: clamp(1.25rem, 4vw, 2rem);
+  border: 1px solid #345348;
+  border-radius: 1rem;
+  background: #10241e;
+}
+
+.pilot-card__header,
+.vehicle-identity {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pilot-card__label {
+  margin: 0 0 0.35rem;
+  color: #6de0b2;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h2 {
+  margin: 0;
+  font-size: clamp(1.35rem, 4vw, 1.8rem);
+}
+
+.pilot-card__device {
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.4rem;
+  background: #1c3a31;
+  color: #b8d9cd;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+
+.vehicle-identity {
+  margin: 1.5rem 0;
+  color: #c3d1cc;
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.telemetry-grid div {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid #27443a;
+  border-radius: 0.7rem;
+  background: #0c1b17;
+}
+
+.telemetry-grid dt {
+  margin-bottom: 0.3rem;
+  color: #8aa399;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.telemetry-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.telemetry-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.message--error {
+  color: #ffaaa5;
+}
+
+@media (max-width: 520px) {
+  .pilot-card__header,
+  .vehicle-identity {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pilot-card__device {
+    align-self: flex-start;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .telemetry-grid__wide {
+    grid-column: auto;
+  }
 }

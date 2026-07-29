@@ -20,6 +20,8 @@ INSTALLED_APPS = [
     "channels",
     "corsheaders",
     "health",
+    "fleet",
+    "telemetry",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

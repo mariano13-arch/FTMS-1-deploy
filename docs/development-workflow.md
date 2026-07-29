@@ -18,3 +18,25 @@ Use Conventional Commits, for example:
 - `docs: clarify telemetry units`
 
 Never force-push shared branches or commit credentials.
+
+## Sprint 1 local telemetry exercise
+
+After starting Compose, apply migrations and run the idempotent seed command:
+
+```bash
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py seed_demo_vehicle
+docker compose exec backend python manage.py seed_demo_vehicle
+```
+
+Then send pilot data with:
+
+```bash
+python simulator/telemetry_simulator.py \
+  --api-base-url http://localhost:8000 \
+  --device-id LILYGO-001 \
+  --count 5 \
+  --interval 0.1
+```
+
+The simulator requires no third-party Python packages.

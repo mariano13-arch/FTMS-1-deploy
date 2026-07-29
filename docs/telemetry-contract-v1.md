@@ -1,6 +1,7 @@
-# Planned telemetry contract v1
+# Telemetry contract v1
 
-This is a future shared contract for the simulator and LILYGO device. Sprint 0 does not implement telemetry publishing, ingestion, storage, or processing.
+Sprint 1 implements this shared contract for the local simulator through REST ingestion.
+It does not implement MQTT or real LILYGO hardware integration.
 
 ```json
 {
@@ -19,8 +20,40 @@ This is a future shared contract for the simulator and LILYGO device. Sprint 0 d
 }
 ```
 
-- Timestamps will be stored in UTC. `recorded_at` is the device observation time and differs from server `received_at`.
-- Speed uses kilometers per hour, distance kilometers, fuel liters, and temperature Celsius.
-- Coordinates are planned as a PostGIS `Point`.
+- `schema_version` must be exactly `"1.0"`.
+- `event_id` is required and globally unique; `sequence_number` must be a non-negative integer.
+- `device_id` must identify an active `Vehicle`.
+- `recorded_at` must include a timezone. It is normalized and stored in UTC, and differs
+  from the server-generated and persisted `received_at`.
+- Latitude is `-90..90`, longitude is `-180..180`, speed is `0..300` km/h, RPM is
+  `0..12000`, and engine load is `0..100` percent.
+- Coordinates are stored as a PostGIS point with SRID 4326 in longitude/latitude order.
 - Unsupported OBD-II values must be `null`, never falsely converted to zero.
-- `event_id` supports deduplication; `sequence_number` supports device-stream ordering and gap detection.
+- `driving_event` is one of `NORMAL`, `HARSH_BRAKING`, `HARSH_ACCELERATION`, or
+  `SHARP_TURN`.
+
+Accepted events are append-only. Replaying the exact semantic event is idempotent; reusing
+its ID for different data returns `409 Conflict`.
+
+The seeded local pilot is exactly:
+
+```text
+device_id: LILYGO-001
+plate_number: DEMO-001
+display_name: Sprint 1 Demo Vehicle
+is_active: true
+```
+
+Run the standard-library simulator with:
+
+```bash
+python simulator/telemetry_simulator.py \
+  --api-base-url http://localhost:8000 \
+  --device-id LILYGO-001 \
+  --count 5 \
+  --interval 0.1
+```
+
+This REST endpoint is intentionally unauthenticated for local Sprint 1 development only.
+See `docs/api-contracts.md` for complete request, success, duplicate, validation, conflict,
+latest-status, and unknown-device JSON examples.
