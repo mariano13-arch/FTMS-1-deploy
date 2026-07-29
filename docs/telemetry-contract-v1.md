@@ -63,3 +63,8 @@ python simulator/telemetry_simulator.py \
 REST, anonymous MQTT, and WebSocket are intentionally local-development-only.
 See `docs/api-contracts.md` for complete request, success, duplicate, validation, conflict,
 latest-status, and unknown-device JSON examples.
+## Sprint 3 access boundary
+
+Sprint 3 does not alter telemetry payloads or status message shapes. Authenticated staff
+sessions protect latest-status and WebSocket reads. REST/MQTT ingestion remains anonymous
+only for local simulation; MQTT authentication and TLS remain future work.

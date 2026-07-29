@@ -23,18 +23,13 @@ export type LatestStatusResponse = {
   latest: TelemetryEvent | null;
 };
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+import { api } from "./api";
 
 export async function getLatestStatus(
   deviceId: string,
   signal?: AbortSignal,
 ): Promise<LatestStatusResponse> {
-  const response = await fetch(
-    `${apiBaseUrl}/api/v1/vehicles/${encodeURIComponent(deviceId)}/latest-status/`,
-    { signal },
+  return api<LatestStatusResponse>(
+    `/api/v1/vehicles/${encodeURIComponent(deviceId)}/latest-status/`, { signal },
   );
-  if (!response.ok) {
-    throw new Error("Latest vehicle status request failed");
-  }
-  return response.json() as Promise<LatestStatusResponse>;
 }

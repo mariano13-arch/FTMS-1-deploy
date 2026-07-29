@@ -2,11 +2,13 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from accounts.models import StaffProfile
 from fleet.models import Vehicle
 from telemetry.models import TelemetryEvent
 
@@ -14,6 +16,11 @@ from telemetry.models import TelemetryEvent
 class TelemetryApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.user = get_user_model().objects.create_user(
+            username="dispatcher", password="Strong-test-password-42!", is_staff=True
+        )
+        StaffProfile.objects.create(user=self.user, role=StaffProfile.Role.DISPATCHER)
+        self.client.force_authenticate(self.user)
         self.vehicle = Vehicle.objects.create(
             device_id="LILYGO-001",
             plate_number="DEMO-001",

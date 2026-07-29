@@ -131,7 +131,7 @@ export function useVehicleStatus(deviceId: string) {
       candidate.onclose = (event) => {
         if (!active || socket !== candidate) return;
         socket = null;
-        if (event.code === 4404) {
+        if ([4401, 4403, 4404].includes(event.code)) {
           stopFallback();
           setRealtimeState("disconnected");
           return;

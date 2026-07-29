@@ -1,9 +1,9 @@
 # Fleet and Transportation Management System
 
-FTMS is a capstone project for a logistics fleet platform. Sprint 2 extends the seeded
-single-vehicle pilot with MQTT ingestion, commit-safe WebSocket updates, REST fallback,
-and one OpenStreetMap/Leaflet live marker. Authentication, dispatching, routing,
-optimization, analytics, and physical IoT integration are not implemented.
+FTMS is a capstone project for a logistics fleet platform. Sprint 3 adds a secure staff
+vehicle registry around the seeded MQTT/WebSocket pilot, with REST fallback,
+and one OpenStreetMap/Leaflet live marker. Dispatching, route optimization, analytics,
+device authentication, and physical IoT integration are not implemented.
 
 ## Locked stack
 
@@ -57,7 +57,19 @@ python simulator/telemetry_simulator.py \
 
 The seed command idempotently reconciles `LILYGO-001`, plate `DEMO-001`, display name
 `Sprint 1 Demo Vehicle`, and active status. Local MQTT is anonymous and the REST and
-WebSocket endpoints are unauthenticated; none may be exposed as production services.
+Registry, latest-status, and WebSocket access require an authorized staff session.
+REST/MQTT ingestion remains anonymous and local-development-only pending device security.
+
+Create regular staff through the hidden validated password prompt:
+
+```bash
+docker compose exec backend python manage.py create_staff_user \
+  --username fleetmanager --role FLEET_MANAGER
+```
+
+Create Super Admins only with `createsuperuser`. Configure credentialed origins and
+secure-cookie behavior with the four `DJANGO_CORS_*`, `DJANGO_CSRF_*`, and
+`DJANGO_*_COOKIE_SECURE` settings shown in `.env.example`; wildcard origins are forbidden.
 
 ## Verification commands
 

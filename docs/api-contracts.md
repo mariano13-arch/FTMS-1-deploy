@@ -190,6 +190,27 @@ Connect to `/ws/v1/vehicles/{device_id}/status/`. A known vehicle receives:
 
 A newly committed actual-latest event sends `vehicle.status.updated`; its `data` is
 exactly the latest-status REST response shown above. Duplicates, conflicts, and stored
-late arrivals do not broadcast. Unknown vehicles close with code `4404`. The
-local-development WebSocket is unauthenticated. Delivery failure never changes a
+late arrivals do not broadcast. Authentication is checked before existence using the
+Sprint 3 close codes below. Delivery failure never changes a
 successful persistence result.
+## Sprint 3 auth and vehicle registry
+
+`GET /api/v1/auth/csrf/` sets and returns a masked CSRF token. CSRF-protected
+`POST /api/v1/auth/login/` accepts exactly `username` and `password`, rotates session and
+CSRF state, and returns `user` plus the new token. `GET /api/v1/auth/me/` restores the
+session; CSRF-protected `POST /api/v1/auth/logout/` flushes it and returns `204`.
+Authentication failures use `401`, authorization and CSRF failures `403`, and throttling
+`429`.
+
+Vehicle endpoints are `GET/POST /api/v1/vehicles/`,
+`GET/PATCH /api/v1/vehicles/{device_id}/`, and idempotent `POST` actions at
+`deactivate/` and `reactivate/`. There is no `PUT`, `DELETE`, hard deletion, direct
+`is_active` edit, or device-ID edit. Lists use DRF pagination (`count`, `next`,
+`previous`, `results`), deterministic device-ID ordering, default size 20/max 100, and
+strict `search`, `is_active`, and `vehicle_type` filters.
+
+Super Admin may create/edit/change status; Fleet Manager may edit mutable details;
+Dispatcher is read-only. All may view registry and live status. Latest-status requires a
+staff session. WebSocket closes are `4401` unauthenticated, `4403` unauthorized, and
+`4404` authorized but unknown, checked in that order. Existing snapshot/update schemas
+remain unchanged.

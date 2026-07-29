@@ -53,3 +53,12 @@ The Leaflet marker receives `[latitude, longitude]`; PostGIS stores the same poi
 longitude X and latitude Y. OpenStreetMap attribution remains visible. If MQTT, Redis,
 WebSocket, frontend, or tiles fail, inspect the corresponding Compose service logs and
 confirm the configured host URLs. These local anonymous interfaces must not be exposed.
+## Sprint 3 local staff workflow
+
+Set the credentialed CORS, trusted CSRF origin, and cookie-secure variables from
+`.env.example`; migrate; then use `create_staff_user --username ... --role ...` for a
+regular user or `createsuperuser` for Super Admin. Password entry is hidden and validated.
+The browser obtains CSRF before login, restores sessions with `/auth/me/`, includes
+credentials on REST, and sends CSRF on unsafe calls. A `401` or WebSocket `4401` requires
+sign-in; `403`/`4403` indicates insufficient staff authorization. Never log or paste
+passwords, session cookies, or CSRF tokens.

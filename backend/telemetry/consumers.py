@@ -1,6 +1,7 @@
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from accounts.roles import can_view
 from fleet.models import Vehicle
 from telemetry.presentation import latest_status_data
 from telemetry.realtime import vehicle_status_group
@@ -8,6 +9,13 @@ from telemetry.realtime import vehicle_status_group
 
 class VehicleStatusConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
+        user = self.scope.get("user")
+        if not user or not user.is_authenticated:
+            await self.close(code=4401)
+            return
+        if not await self._authorized(user):
+            await self.close(code=4403)
+            return
         device_id = self.scope["url_route"]["kwargs"]["device_id"]
         self.group_name = vehicle_status_group(device_id)
         self.group_joined = False
@@ -48,3 +56,7 @@ class VehicleStatusConsumer(AsyncJsonWebsocketConsumer):
         except Vehicle.DoesNotExist:
             return None
         return latest_status_data(vehicle)
+
+    @database_sync_to_async
+    def _authorized(self, user):
+        return can_view(user)
