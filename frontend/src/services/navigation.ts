@@ -6,7 +6,7 @@ export function safeInternalPath(requested: unknown): string {
     requested.includes("\\") ||
     /^[a-z][a-z0-9+.-]*:/i.test(requested)
   ) {
-    return "/vehicles";
+    return "/transport-requests";
   }
   return requested;
 }

@@ -255,6 +255,7 @@ describe("Sprint 3 secure registry", () => {
     renderAt("/vehicles");
     fireEvent.click(screen.getByText("Sign out"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to sign out. Please try again.");
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
   });
   test("rapid logout clicks invoke sign-out once and expose busy state", async () => {
     const pending = deferred<void>(); auth.signOut.mockReturnValue(pending.promise);

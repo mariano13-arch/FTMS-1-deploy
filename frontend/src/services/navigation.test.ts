@@ -9,6 +9,6 @@ describe("safe login redirects", () => {
     "https://evil.example", "//evil.example/path", "\\\\evil.example",
     "javascript:alert(1)", null, 42,
   ])("rejects external or protocol-relative value %s", (value) => {
-    expect(safeInternalPath(value)).toBe("/vehicles");
+    expect(safeInternalPath(value)).toBe("/transport-requests");
   });
 });

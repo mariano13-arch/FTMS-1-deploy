@@ -1,9 +1,9 @@
 # Fleet and Transportation Management System
 
-FTMS is a capstone project for a logistics fleet platform. Sprint 3 adds a secure staff
-vehicle registry around the seeded MQTT/WebSocket pilot, with REST fallback,
-and one OpenStreetMap/Leaflet live marker. Dispatching, route optimization, analytics,
-device authentication, and physical IoT integration are not implemented.
+FTMS is a capstone project for a logistics fleet platform. Sprint 4 adds Transport Requests
+as the authenticated operational vertical slice, while retaining the secure Vehicle Registry,
+MQTT/WebSocket pilot, REST fallback, and OpenStreetMap/Leaflet live marker. Dispatch execution,
+route optimization, analytics, device authentication, and physical IoT integration are not implemented.
 
 ## Locked stack
 
@@ -36,6 +36,7 @@ docker compose down
 Services:
 
 - Frontend: http://localhost:5173
+- Transport Requests: http://localhost:5173/transport-requests
 - Backend: http://localhost:8000
 - Health API: http://localhost:8000/api/health/
 - Telemetry ingestion: http://localhost:8000/api/v1/telemetry/
@@ -48,6 +49,7 @@ Prepare the database state and run the REST simulator:
 ```bash
 docker compose exec backend python manage.py migrate
 docker compose exec backend python manage.py seed_demo_vehicle
+docker compose exec backend python manage.py seed_transport_requests
 python simulator/telemetry_simulator.py \
   --api-base-url http://localhost:8000 \
   --device-id LILYGO-001 \
@@ -55,10 +57,29 @@ python simulator/telemetry_simulator.py \
   --interval 0.1
 ```
 
-The seed command idempotently reconciles `LILYGO-001`, plate `DEMO-001`, display name
+The seed commands idempotently reconcile the demo vehicle and create realistic development
+Transport Request records. The vehicle command reconciles `LILYGO-001`, plate `DEMO-001`, display name
 `Sprint 1 Demo Vehicle`, and active status. Local MQTT is anonymous and the REST and
 Registry, latest-status, and WebSocket access require an authorized staff session.
 REST/MQTT ingestion remains anonymous and local-development-only pending device security.
+
+Sprint 4 uses `Asia/Manila` as its default operational timezone while retaining
+timezone-aware timestamps (stored instants may remain UTC). Calendar grouping and the
+scheduled-today summary use that operational timezone. Sprint 4 uses manual vehicle assignment and a configurable planning duration for schedule
+conflict detection; planning duration is not route ETA. Dispatch Queue contains approved
+requests, while `READY_FOR_DISPATCH` is the handoff to future driver assignment and trip
+lifecycle work. The daily/weekly calendar is served from the real request calendar API;
+weekly columns may scroll inside the calendar panel on narrower screens.
+
+On desktop, the application sidebar can switch between expanded and mini modes. Mini mode
+keeps accessible navigation icons while hiding long visual labels, and the main content
+automatically uses the released width. The preference is stored only in the current browser;
+tablet and mobile layouts continue to use the overlay navigation drawer. This shell refinement
+requires no API key and no database schema migration.
+
+Still planned: HRMS driver synchronization, driver assignment, OR-Tools recommendation,
+Google Routes and real ETA, active trips, safety monitoring, proof of service, fuel and cost
+estimation, and feedback.
 
 Create regular staff through the hidden validated password prompt:
 

@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "accounts",
     "health",
     "fleet",
+    "transport_requests",
     "telemetry",
 ]
 MIDDLEWARE = [
@@ -75,7 +76,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
+TIME_ZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Manila")
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
