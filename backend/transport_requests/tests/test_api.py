@@ -29,7 +29,9 @@ class TransportRequestApiTests(TestCase):
         self.manager = self.make_user("manager", StaffProfile.Role.FLEET_MANAGER)
         self.dispatcher = self.make_user("dispatcher", StaffProfile.Role.DISPATCHER)
         self.vehicle = Vehicle.objects.create(
-            device_id="VAN-01", plate_number="VAN-01", display_name="Guest Van",
+            device_id="VAN-01",
+            plate_number="VAN-01",
+            display_name="Guest Van",
             passenger_capacity=6,
         )
 
@@ -46,20 +48,31 @@ class TransportRequestApiTests(TestCase):
 
     def payload(self, external="HMS-100"):
         return {
-            "source_system": "HOTEL_MANAGEMENT_SYSTEM", "external_reference": external,
-            "request_type": "AIRPORT_PICKUP", "requester_name": " Front Desk ",
-            "requester_contact": "+63 900 000 0000", "pickup_name": "NAIA Terminal 3",
-            "pickup_address": "Pasay City", "pickup_latitude": "14.508600",
-            "pickup_longitude": "121.019800", "destination_name": "Oxford Suites Makati",
-            "destination_address": "Makati City", "destination_latitude": "14.565200",
+            "source_system": "HOTEL_MANAGEMENT_SYSTEM",
+            "external_reference": external,
+            "request_type": "AIRPORT_PICKUP",
+            "requester_name": " Front Desk ",
+            "requester_contact": "+63 900 000 0000",
+            "pickup_name": "NAIA Terminal 3",
+            "pickup_address": "Pasay City",
+            "pickup_latitude": "14.508600",
+            "pickup_longitude": "121.019800",
+            "destination_name": "Oxford Suites Makati",
+            "destination_address": "Makati City",
+            "destination_latitude": "14.565200",
             "destination_longitude": "121.028600",
             "scheduled_pickup_at": (timezone.now() + timedelta(hours=2)).isoformat(),
-            "passenger_count": 4, "luggage_count": 2, "priority": "HIGH", "notes": " Guest ",
+            "passenger_count": 4,
+            "luggage_count": 2,
+            "priority": "HIGH",
+            "notes": " Guest ",
         }
 
     def create_request(self, user=None, external="HMS-100"):
         self.login(user or self.manager)
-        response = self.client.post("/api/v1/transport-requests/", self.payload(external), format="json")
+        response = self.client.post(
+            "/api/v1/transport-requests/", self.payload(external), format="json"
+        )
         self.assertEqual(response.status_code, 201)
         return response
 
@@ -74,11 +87,10 @@ class TransportRequestApiTests(TestCase):
 
     @override_settings(TIME_ZONE="Asia/Manila")
     def test_request_number_uses_manila_local_date_after_midnight(self):
-        shortly_after_midnight = datetime(
-            2026, 8, 6, 16, 15, tzinfo=datetime_timezone.utc
-        )
-        with timezone.override("Asia/Manila"), patch(
-            "django.utils.timezone.now", return_value=shortly_after_midnight
+        shortly_after_midnight = datetime(2026, 8, 6, 16, 15, tzinfo=datetime_timezone.utc)
+        with (
+            timezone.override("Asia/Manila"),
+            patch("django.utils.timezone.now", return_value=shortly_after_midnight),
         ):
             request_number = generate_request_number()
         self.assertRegex(request_number, r"^TR-20260807-[A-F0-9]{6}$")
@@ -86,15 +98,33 @@ class TransportRequestApiTests(TestCase):
     def test_manager_transitions_and_dispatcher_permissions(self):
         request_id = self.create_request().json()["id"]
         self.login(self.dispatcher)
-        self.assertEqual(self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json").status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json"
+            ).status_code,
+            403,
+        )
         self.login(self.manager)
-        self.assertEqual(self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json").status_code, 200)
-        invalid = self.client.post(f"/api/v1/transport-requests/{request_id}/reject/", {}, format="json")
+        self.assertEqual(
+            self.client.post(
+                f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json"
+            ).status_code,
+            200,
+        )
+        invalid = self.client.post(
+            f"/api/v1/transport-requests/{request_id}/reject/", {}, format="json"
+        )
         self.assertEqual(invalid.status_code, 400)
         self.login(self.dispatcher)
-        assigned = self.client.post(f"/api/v1/transport-requests/{request_id}/assign-vehicle/", {"vehicle_device_id": self.vehicle.device_id}, format="json")
+        assigned = self.client.post(
+            f"/api/v1/transport-requests/{request_id}/assign-vehicle/",
+            {"vehicle_device_id": self.vehicle.device_id},
+            format="json",
+        )
         self.assertEqual(assigned.status_code, 200)
-        ready = self.client.post(f"/api/v1/transport-requests/{request_id}/prepare-dispatch/", {}, format="json")
+        ready = self.client.post(
+            f"/api/v1/transport-requests/{request_id}/prepare-dispatch/", {}, format="json"
+        )
         self.assertEqual(ready.status_code, 200)
         self.assertEqual(ready.json()["status"], "READY_FOR_DISPATCH")
         self.assertEqual(TransportRequestEvent.objects.filter(request_id=request_id).count(), 4)
@@ -103,19 +133,34 @@ class TransportRequestApiTests(TestCase):
         request_id = self.create_request().json()["id"]
         self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
         small = Vehicle.objects.create(
-            device_id="CAR-01", plate_number="CAR-01", display_name="Small Car",
+            device_id="CAR-01",
+            plate_number="CAR-01",
+            display_name="Small Car",
             passenger_capacity=2,
         )
-        response = self.client.post(f"/api/v1/transport-requests/{request_id}/assign-vehicle/", {"vehicle_device_id": small.device_id}, format="json")
+        response = self.client.post(
+            f"/api/v1/transport-requests/{request_id}/assign-vehicle/",
+            {"vehicle_device_id": small.device_id},
+            format="json",
+        )
         self.assertEqual(response.status_code, 400)
         self.vehicle.is_active = False
         self.vehicle.save(update_fields=["is_active", "updated_at"])
-        response = self.client.post(f"/api/v1/transport-requests/{request_id}/assign-vehicle/", {"vehicle_device_id": self.vehicle.device_id}, format="json")
+        response = self.client.post(
+            f"/api/v1/transport-requests/{request_id}/assign-vehicle/",
+            {"vehicle_device_id": self.vehicle.device_id},
+            format="json",
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_filters_summary_and_edit_audit(self):
         request_id = self.create_request().json()["id"]
-        self.assertEqual(self.client.patch(f"/api/v1/transport-requests/{request_id}/", {"notes": "Updated"}, format="json").status_code, 200)
+        self.assertEqual(
+            self.client.patch(
+                f"/api/v1/transport-requests/{request_id}/", {"notes": "Updated"}, format="json"
+            ).status_code,
+            200,
+        )
         summary = self.client.get("/api/v1/transport-requests/summary/").json()
         self.assertEqual(summary["total"], 1)
         self.assertEqual(summary["for_approval"], 1)
@@ -144,7 +189,8 @@ class TransportRequestApiTests(TestCase):
         self.login(self.dispatcher)
         edited = self.client.patch(
             f"/api/v1/transport-requests/{request_id}/",
-            {"notes": "Room 712 confirmed"}, format="json",
+            {"notes": "Room 712 confirmed"},
+            format="json",
         )
         self.assertEqual(edited.status_code, 200)
         resubmitted = self.client.post(
@@ -152,16 +198,16 @@ class TransportRequestApiTests(TestCase):
         )
         self.assertEqual(resubmitted.status_code, 200)
         self.assertEqual(resubmitted.json()["status"], "FOR_APPROVAL")
-        self.assertTrue(
-            TransportRequestEvent.objects.filter(event_type="RESUBMITTED").exists()
-        )
+        self.assertTrue(TransportRequestEvent.objects.filter(event_type="RESUBMITTED").exists())
 
     def test_reject_cancel_require_notes_and_approved_records_cannot_be_edited(self):
         reject_id = self.create_request(external="REJECT-1").json()["id"]
         reject_url = f"/api/v1/transport-requests/{reject_id}/reject/"
         self.assertEqual(self.client.post(reject_url, {}, format="json").status_code, 400)
         self.assertEqual(
-            self.client.post(reject_url, {"note": "Duplicate guest request"}, format="json").status_code,
+            self.client.post(
+                reject_url, {"note": "Duplicate guest request"}, format="json"
+            ).status_code,
             200,
         )
         cancel_id = self.create_request(external="CANCEL-1").json()["id"]
@@ -172,15 +218,14 @@ class TransportRequestApiTests(TestCase):
             200,
         )
         approved_id = self.create_request(external="APPROVED-EDIT").json()["id"]
-        self.client.post(
-            f"/api/v1/transport-requests/{approved_id}/approve/", {}, format="json"
-        )
+        self.client.post(f"/api/v1/transport-requests/{approved_id}/approve/", {}, format="json")
         edited_events = TransportRequestEvent.objects.filter(
             request_id=approved_id, event_type="EDITED"
         ).count()
         stale = self.client.patch(
             f"/api/v1/transport-requests/{approved_id}/",
-            {"notes": "Silent operational edit"}, format="json",
+            {"notes": "Silent operational edit"},
+            format="json",
         )
         self.assertEqual(stale.status_code, 409)
         self.assertIn("changed workflow status", stale.json()["status"])
@@ -194,14 +239,13 @@ class TransportRequestApiTests(TestCase):
 
     def test_super_admin_cannot_bypass_stale_edit_after_transition(self):
         request_id = self.create_request(external="STALE-SUPER").json()["id"]
-        self.client.post(
-            f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json"
-        )
+        self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
         super_admin = self.make_user("super-admin", superuser=True)
         self.login(super_admin)
         response = self.client.patch(
             f"/api/v1/transport-requests/{request_id}/",
-            {"requester_name": "Stale overwrite"}, format="json",
+            {"requester_name": "Stale overwrite"},
+            format="json",
         )
         self.assertEqual(response.status_code, 409)
         self.assertEqual(
@@ -221,9 +265,7 @@ class TransportRequestApiTests(TestCase):
         payload["scheduled_pickup_at"] = manila_today.isoformat()
         self.login(self.manager)
         self.assertEqual(
-            self.client.post(
-                "/api/v1/transport-requests/", payload, format="json"
-            ).status_code,
+            self.client.post("/api/v1/transport-requests/", payload, format="json").status_code,
             201,
         )
         previous_day = self.payload("MANILA-PREVIOUS")
@@ -234,9 +276,12 @@ class TransportRequestApiTests(TestCase):
             ).status_code,
             201,
         )
-        with timezone.override("Asia/Manila"), patch(
-            "django.utils.timezone.now",
-            return_value=datetime(2026, 8, 6, 16, 30, tzinfo=datetime_timezone.utc),
+        with (
+            timezone.override("Asia/Manila"),
+            patch(
+                "django.utils.timezone.now",
+                return_value=datetime(2026, 8, 6, 16, 30, tzinfo=datetime_timezone.utc),
+            ),
         ):
             summary = self.client.get("/api/v1/transport-requests/summary/").json()
             calendar = self.client.get(
@@ -263,9 +308,7 @@ class TransportRequestApiTests(TestCase):
 
     def test_dispatch_queue_summary_assignment_filter_and_serializer_shapes(self):
         request_id = self.create_request().json()["id"]
-        self.client.post(
-            f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json"
-        )
+        self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
         dispatch = self.client.get("/api/v1/transport-requests/?status=APPROVED")
         self.assertEqual(dispatch.json()["count"], 1)
         self.assertNotIn("events", dispatch.json()["results"][0])
@@ -275,9 +318,7 @@ class TransportRequestApiTests(TestCase):
         )
         self.assertEqual(combined.status_code, 200)
         self.assertEqual(
-            self.client.get(
-                "/api/v1/transport-requests/?assignment=unassigned"
-            ).json()["count"],
+            self.client.get("/api/v1/transport-requests/?assignment=unassigned").json()["count"],
             1,
         )
         summary = self.client.get("/api/v1/transport-requests/summary/").json()
@@ -287,15 +328,14 @@ class TransportRequestApiTests(TestCase):
         self.assertIn("events", detail.json())
         self.client.post(
             f"/api/v1/transport-requests/{request_id}/assign-vehicle/",
-            {"vehicle_device_id": self.vehicle.device_id}, format="json",
+            {"vehicle_device_id": self.vehicle.device_id},
+            format="json",
         )
         unassigned_id = self.create_request(external="QUEUE-UNASSIGNED").json()["id"]
-        self.client.post(
-            f"/api/v1/transport-requests/{unassigned_id}/approve/", {}, format="json"
-        )
-        ordered_dispatch = self.client.get(
-            "/api/v1/transport-requests/?status=APPROVED"
-        ).json()["results"]
+        self.client.post(f"/api/v1/transport-requests/{unassigned_id}/approve/", {}, format="json")
+        ordered_dispatch = self.client.get("/api/v1/transport-requests/?status=APPROVED").json()[
+            "results"
+        ]
         self.assertEqual(ordered_dispatch[0]["id"], unassigned_id)
         self.assertEqual(
             self.client.get(
@@ -316,17 +356,19 @@ class TransportRequestApiTests(TestCase):
             {"required_vehicle_type": "VAN", "estimated_duration_minutes": 120},
             format="json",
         )
-        self.client.post(
-            f"/api/v1/transport-requests/{first_id}/approve/", {}, format="json"
-        )
+        self.client.post(f"/api/v1/transport-requests/{first_id}/approve/", {}, format="json")
         wrong_type = Vehicle.objects.create(
-            device_id="SUV-01", plate_number="SUV-01", display_name="SUV",
-            vehicle_type="SUV", passenger_capacity=6,
+            device_id="SUV-01",
+            plate_number="SUV-01",
+            display_name="SUV",
+            vehicle_type="SUV",
+            passenger_capacity=6,
         )
         self.assertEqual(
             self.client.post(
                 f"/api/v1/transport-requests/{first_id}/assign-vehicle/",
-                {"vehicle_device_id": wrong_type.device_id}, format="json",
+                {"vehicle_device_id": wrong_type.device_id},
+                format="json",
             ).status_code,
             400,
         )
@@ -335,7 +377,8 @@ class TransportRequestApiTests(TestCase):
         self.assertEqual(
             self.client.post(
                 f"/api/v1/transport-requests/{first_id}/assign-vehicle/",
-                {"vehicle_device_id": self.vehicle.device_id}, format="json",
+                {"vehicle_device_id": self.vehicle.device_id},
+                format="json",
             ).status_code,
             200,
         )
@@ -345,12 +388,11 @@ class TransportRequestApiTests(TestCase):
             {"required_vehicle_type": "VAN", "estimated_duration_minutes": 120},
             format="json",
         )
-        self.client.post(
-            f"/api/v1/transport-requests/{second_id}/approve/", {}, format="json"
-        )
+        self.client.post(f"/api/v1/transport-requests/{second_id}/approve/", {}, format="json")
         conflict = self.client.post(
             f"/api/v1/transport-requests/{second_id}/assign-vehicle/",
-            {"vehicle_device_id": self.vehicle.device_id}, format="json",
+            {"vehicle_device_id": self.vehicle.device_id},
+            format="json",
         )
         self.assertEqual(conflict.status_code, 409)
         self.assertIn("already allocated", conflict.json()["vehicle"])
@@ -363,39 +405,31 @@ class TransportRequestApiTests(TestCase):
 
     def test_calendar_validation_conflicts_and_ready_constraint(self):
         first_id = self.create_request(external="CAL-1").json()["id"]
-        self.client.post(
-            f"/api/v1/transport-requests/{first_id}/approve/", {}, format="json"
-        )
+        self.client.post(f"/api/v1/transport-requests/{first_id}/approve/", {}, format="json")
         self.client.post(
             f"/api/v1/transport-requests/{first_id}/assign-vehicle/",
-            {"vehicle_device_id": self.vehicle.device_id}, format="json",
+            {"vehicle_device_id": self.vehicle.device_id},
+            format="json",
         )
         second_id = self.create_request(external="CAL-2").json()["id"]
-        self.client.post(
-            f"/api/v1/transport-requests/{second_id}/approve/", {}, format="json"
-        )
-        TransportRequest.objects.filter(pk=second_id).update(
-            assigned_vehicle=self.vehicle
-        )
+        self.client.post(f"/api/v1/transport-requests/{second_id}/approve/", {}, format="json")
+        TransportRequest.objects.filter(pk=second_id).update(assigned_vehicle=self.vehicle)
         day = timezone.localdate(
             TransportRequest.objects.get(pk=first_id).scheduled_pickup_at
         ).isoformat()
-        calendar = self.client.get(
-            f"/api/v1/transport-requests/calendar/?start={day}&end={day}"
-        )
+        calendar = self.client.get(f"/api/v1/transport-requests/calendar/?start={day}&end={day}")
         self.assertEqual(calendar.status_code, 200)
         self.assertEqual(calendar.json()["timezone"], str(timezone.get_current_timezone()))
         self.assertEqual(calendar.json()["results"][0]["calendar_date"], day)
         self.assertTrue(all(item["vehicle_conflict"] for item in calendar.json()["results"]))
         self.assertTrue(calendar.json()["results"][0]["conflicting_requests"])
         for query in (
-            "start=nope&end=nope", "start=2026-08-02&end=2026-08-01",
+            "start=nope&end=nope",
+            "start=2026-08-02&end=2026-08-01",
             "start=2026-01-01&end=2026-03-01",
         ):
             self.assertEqual(
-                self.client.get(
-                    f"/api/v1/transport-requests/calendar/?{query}"
-                ).status_code,
+                self.client.get(f"/api/v1/transport-requests/calendar/?{query}").status_code,
                 400,
             )
         third_id = self.create_request(external="INVALID-READY").json()["id"]
@@ -408,22 +442,78 @@ class TransportRequestApiTests(TestCase):
         output = StringIO()
         errors = StringIO()
         call_command("seed_transport_requests", stdout=output, stderr=errors)
-        count = TransportRequest.objects.filter(
-            external_reference__startswith="SEED-"
-        ).count()
+        seeds = TransportRequest.objects.filter(external_reference__startswith="DEV-SEED-")
+        count = seeds.count()
+        self.assertEqual(count, 20)
+        self.assertEqual(
+            seeds.filter(
+                source_system=TransportRequest.SourceSystem.MANUAL_STAFF_ENTRY
+            ).count(),
+            20,
+        )
+        self.assertEqual(
+            seeds.filter(
+                request_category=TransportRequest.RequestCategory.PASSENGER_TRANSPORT
+            ).count(),
+            12,
+        )
+        self.assertEqual(
+            seeds.filter(
+                request_category=TransportRequest.RequestCategory.DELIVERY_LOGISTICS
+            ).count(),
+            8,
+        )
+        self.assertFalse(seeds.filter(assigned_vehicle__isnull=False).exists())
+        self.assertFalse(
+            seeds.filter(
+                request_category=TransportRequest.RequestCategory.PASSENGER_TRANSPORT,
+                passenger_count__lt=1,
+            ).exists()
+        )
+        self.assertFalse(
+            seeds.filter(
+                request_category=TransportRequest.RequestCategory.DELIVERY_LOGISTICS
+            ).exclude(passenger_count=0).exists()
+        )
+        for delivery in seeds.filter(
+            request_category=TransportRequest.RequestCategory.DELIVERY_LOGISTICS
+        ):
+            self.assertTrue(delivery.load_description)
+            self.assertTrue(
+                delivery.load_quantity is not None
+                or delivery.estimated_weight_kg is not None
+            )
+            self.assertEqual(delivery.luggage_count, 0)
+        self.assertEqual(
+            {
+                status: seeds.filter(status=status).count()
+                for status in (
+                    TransportRequest.Status.FOR_APPROVAL,
+                    TransportRequest.Status.APPROVED,
+                    TransportRequest.Status.NEEDS_MORE_DETAILS,
+                    TransportRequest.Status.REJECTED,
+                    TransportRequest.Status.CANCELLED,
+                )
+            },
+            {
+                TransportRequest.Status.FOR_APPROVAL: 9,
+                TransportRequest.Status.APPROVED: 4,
+                TransportRequest.Status.NEEDS_MORE_DETAILS: 3,
+                TransportRequest.Status.REJECTED: 2,
+                TransportRequest.Status.CANCELLED: 2,
+            },
+        )
         event_count = TransportRequestEvent.objects.filter(
-            request__external_reference__startswith="SEED-"
+            request__external_reference__startswith="DEV-SEED-"
         ).count()
         call_command("seed_transport_requests", stdout=StringIO(), stderr=StringIO())
         self.assertEqual(
-            TransportRequest.objects.filter(
-                external_reference__startswith="SEED-"
-            ).count(),
+            TransportRequest.objects.filter(external_reference__startswith="DEV-SEED-").count(),
             count,
         )
         self.assertEqual(
             TransportRequestEvent.objects.filter(
-                request__external_reference__startswith="SEED-"
+                request__external_reference__startswith="DEV-SEED-"
             ).count(),
             event_count,
         )

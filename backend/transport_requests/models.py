@@ -1,5 +1,6 @@
 import secrets
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -18,7 +19,8 @@ class TransportRequest(models.Model):
     class SourceSystem(models.TextChoices):
         HOTEL_MANAGEMENT_SYSTEM = "HOTEL_MANAGEMENT_SYSTEM", "Hotel management system"
         RESTAURANT_MANAGEMENT_SYSTEM = (
-            "RESTAURANT_MANAGEMENT_SYSTEM", "Restaurant management system"
+            "RESTAURANT_MANAGEMENT_SYSTEM",
+            "Restaurant management system",
         )
         MANUAL_STAFF_ENTRY = "MANUAL_STAFF_ENTRY", "Manual staff entry"
         OTHER_SUBSYSTEM = "OTHER_SUBSYSTEM", "Other subsystem"
@@ -35,6 +37,10 @@ class TransportRequest(models.Model):
         BANQUET_LOGISTICS = "BANQUET_LOGISTICS", "Banquet logistics"
         BRANCH_TRANSFER = "BRANCH_TRANSFER", "Branch transfer"
         OTHER = "OTHER", "Other"
+
+    class RequestCategory(models.TextChoices):
+        PASSENGER_TRANSPORT = "PASSENGER_TRANSPORT", "Passenger transport"
+        DELIVERY_LOGISTICS = "DELIVERY_LOGISTICS", "Delivery logistics"
 
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
@@ -57,26 +63,33 @@ class TransportRequest(models.Model):
     source_system = models.CharField(max_length=40, choices=SourceSystem.choices)
     external_reference = models.CharField(max_length=120, blank=True, default="")
     request_type = models.CharField(max_length=30, choices=RequestType.choices)
+    request_category = models.CharField(  # noqa: DJ001 - null preserves ambiguous legacy rows
+        max_length=24, choices=RequestCategory.choices, null=True, blank=True
+    )
     requester_name = models.CharField(max_length=160)
     requester_contact = models.CharField(max_length=160, blank=True, default="")
     pickup_name = models.CharField(max_length=200)
     pickup_address = models.CharField(max_length=300)
     pickup_latitude = models.DecimalField(
-        max_digits=9, decimal_places=6,
+        max_digits=9,
+        decimal_places=6,
         validators=[MinValueValidator(-90), MaxValueValidator(90)],
     )
     pickup_longitude = models.DecimalField(
-        max_digits=9, decimal_places=6,
+        max_digits=9,
+        decimal_places=6,
         validators=[MinValueValidator(-180), MaxValueValidator(180)],
     )
     destination_name = models.CharField(max_length=200)
     destination_address = models.CharField(max_length=300)
     destination_latitude = models.DecimalField(
-        max_digits=9, decimal_places=6,
+        max_digits=9,
+        decimal_places=6,
         validators=[MinValueValidator(-90), MaxValueValidator(90)],
     )
     destination_longitude = models.DecimalField(
-        max_digits=9, decimal_places=6,
+        max_digits=9,
+        decimal_places=6,
         validators=[MinValueValidator(-180), MaxValueValidator(180)],
     )
     scheduled_pickup_at = models.DateTimeField()
@@ -86,25 +99,41 @@ class TransportRequest(models.Model):
     estimated_duration_minutes = models.PositiveSmallIntegerField(
         default=60, validators=[MinValueValidator(15), MaxValueValidator(1440)]
     )
-    passenger_count = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(100)]
-    )
+    passenger_count = models.PositiveSmallIntegerField(validators=[MaxValueValidator(100)])
     luggage_count = models.PositiveSmallIntegerField(default=0, validators=[MaxValueValidator(100)])
+    load_description = models.TextField(blank=True, default="")
+    load_quantity = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1)]
+    )
+    estimated_weight_kg = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    handling_instructions = models.TextField(blank=True, default="")
+    temperature_requirement = models.TextField(blank=True, default="")
     priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.NORMAL)
     notes = models.TextField(blank=True, default="")
-    status = models.CharField(
-        max_length=24, choices=Status.choices, default=Status.FOR_APPROVAL
-    )
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.FOR_APPROVAL)
     assigned_vehicle = models.ForeignKey(
-        "fleet.Vehicle", null=True, blank=True, on_delete=models.PROTECT,
+        "fleet.Vehicle",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
         related_name="transport_requests",
     )
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
         related_name="created_transport_requests",
     )
     approved_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
         related_name="approved_transport_requests",
     )
     approved_at = models.DateTimeField(null=True, blank=True)
@@ -122,13 +151,11 @@ class TransportRequest(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["source_system", "external_reference"],
-                condition=~Q(external_reference=""), name="tr_source_external_unique",
+                condition=~Q(external_reference=""),
+                name="tr_source_external_unique",
             ),
             models.CheckConstraint(
-                condition=(
-                    ~Q(status="READY_FOR_DISPATCH")
-                    | Q(assigned_vehicle__isnull=False)
-                ),
+                condition=(~Q(status="READY_FOR_DISPATCH") | Q(assigned_vehicle__isnull=False)),
                 name="tr_ready_requires_vehicle",
             ),
         ]
@@ -138,8 +165,17 @@ class TransportRequest(models.Model):
 
     def save(self, *args, **kwargs):
         for field in (
-            "external_reference", "requester_name", "requester_contact", "pickup_name",
-            "pickup_address", "destination_name", "destination_address", "notes",
+            "external_reference",
+            "requester_name",
+            "requester_contact",
+            "pickup_name",
+            "pickup_address",
+            "destination_name",
+            "destination_address",
+            "notes",
+            "load_description",
+            "handling_instructions",
+            "temperature_requirement",
         ):
             value = getattr(self, field)
             setattr(self, field, value.strip() if isinstance(value, str) else value)

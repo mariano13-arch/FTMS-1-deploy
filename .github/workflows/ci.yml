@@ -43,8 +43,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       DATABASE_URL: postgis://ftms:ci-only@localhost:5432/ftms
+      REDIS_URL: redis://localhost:6379/0
       DJANGO_SECRET_KEY: ci-only-not-production
       DJANGO_DEBUG: "false"
     defaults:

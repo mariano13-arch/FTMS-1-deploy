@@ -5,6 +5,9 @@ from .views import (
     AssignVehicleView,
     CalendarView,
     CancelView,
+    DispatchMatrixView,
+    PlaceDetailsView,
+    PlaceSuggestView,
     PrepareDispatchView,
     RejectView,
     RequestMoreDetailsView,
@@ -12,6 +15,7 @@ from .views import (
     SummaryView,
     TransportRequestDetailView,
     TransportRequestListView,
+    TransportRequestRouteView,
 )
 
 urlpatterns = [
@@ -19,8 +23,23 @@ urlpatterns = [
     path("summary/", SummaryView.as_view(), name="transport-request-summary"),
     path("calendar/", CalendarView.as_view(), name="transport-request-calendar"),
     path(
-        "<uuid:request_id>/", TransportRequestDetailView.as_view(),
+        "dispatch-matrix/", DispatchMatrixView.as_view(), name="transport-request-dispatch-matrix"
+    ),
+    path("places/suggest/", PlaceSuggestView.as_view(), name="transport-request-place-suggest"),
+    path(
+        "places/details/<str:place_type>/<path:place_id>/",
+        PlaceDetailsView.as_view(),
+        name="transport-request-place-details",
+    ),
+    path(
+        "<uuid:request_id>/",
+        TransportRequestDetailView.as_view(),
         name="transport-request-detail",
+    ),
+    path(
+        "<uuid:request_id>/route/",
+        TransportRequestRouteView.as_view(),
+        name="transport-request-route",
     ),
     path("<uuid:request_id>/approve/", ApproveView.as_view()),
     path("<uuid:request_id>/reject/", RejectView.as_view()),

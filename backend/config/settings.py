@@ -60,6 +60,16 @@ DATABASES = {
     )
 }
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
+DISPATCH_TELEMETRY_MAX_AGE_SECONDS = int(
+    os.getenv("DISPATCH_TELEMETRY_MAX_AGE_SECONDS", "300")
+)
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    }
+}
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",

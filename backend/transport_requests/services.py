@@ -77,9 +77,7 @@ def record_event(request, event_type, user, previous_status="", note=""):
 
 
 def planning_end(request):
-    return request.scheduled_pickup_at + timedelta(
-        minutes=request.estimated_duration_minutes
-    )
+    return request.scheduled_pickup_at + timedelta(minutes=request.estimated_duration_minutes)
 
 
 def allocation_conflicts(request, vehicle):
@@ -104,18 +102,13 @@ def validate_vehicle(request, vehicle):
         vehicle.passenger_capacity is not None
         and vehicle.passenger_capacity < request.passenger_count
     ):
-        raise serializers.ValidationError({
-            "vehicle": "Vehicle passenger capacity is lower than the passenger count."
-        })
-    if (
-        request.required_vehicle_type
-        and vehicle.vehicle_type != request.required_vehicle_type
-    ):
-        raise serializers.ValidationError({
-            "vehicle": (
-                f"Vehicle type must be {request.get_required_vehicle_type_display()}."
-            )
-        })
+        raise serializers.ValidationError(
+            {"vehicle": "Vehicle passenger capacity is lower than the passenger count."}
+        )
+    if request.required_vehicle_type and vehicle.vehicle_type != request.required_vehicle_type:
+        raise serializers.ValidationError(
+            {"vehicle": (f"Vehicle type must be {request.get_required_vehicle_type_display()}.")}
+        )
     conflicts = allocation_conflicts(request, vehicle)
     if conflicts:
         raise AllocationConflict(vehicle, conflicts)
@@ -134,9 +127,9 @@ def lock_relevant_vehicles(*vehicle_ids):
 
 def apply_transition(current, new_status, user, event_type, note=""):
     if new_status not in TRANSITIONS.get(current.status, set()):
-        raise serializers.ValidationError({
-            "status": f"Cannot transition from {current.status} to {new_status}."
-        })
+        raise serializers.ValidationError(
+            {"status": f"Cannot transition from {current.status} to {new_status}."}
+        )
     previous = current.status
     current.status = new_status
     fields = ["status", "updated_at"]
@@ -157,9 +150,7 @@ def transition(request, new_status, user, event_type, note=""):
 
 def approve(request, user, note=""):
     require_role(user, MANAGERS)
-    return transition(
-        request, TransportRequest.Status.APPROVED, user, "APPROVED", note.strip()
-    )
+    return transition(request, TransportRequest.Status.APPROVED, user, "APPROVED", note.strip())
 
 
 def reject(request, user, note=""):
@@ -203,18 +194,18 @@ def assign_vehicle(request, vehicle, user, note=""):
     require_role(user, OPERATORS)
     current = TransportRequest.objects.select_for_update().get(pk=request.pk)
     if current.status != TransportRequest.Status.APPROVED:
-        raise serializers.ValidationError({
-            "status": "Only approved requests can be assigned or reassigned."
-        })
+        raise serializers.ValidationError(
+            {"status": "Only approved requests can be assigned or reassigned."}
+        )
     locked_vehicles = lock_relevant_vehicles(
         current.assigned_vehicle_id,
         vehicle.pk,
     )
     selected_vehicle = locked_vehicles[vehicle.pk]
     if current.assigned_vehicle_id == selected_vehicle.pk:
-        raise serializers.ValidationError({
-            "vehicle": f"Vehicle {selected_vehicle.device_id} is already assigned."
-        })
+        raise serializers.ValidationError(
+            {"vehicle": f"Vehicle {selected_vehicle.device_id} is already assigned."}
+        )
     validate_vehicle(current, selected_vehicle)
     previous_vehicle = locked_vehicles.get(current.assigned_vehicle_id)
     old_device_id = previous_vehicle.device_id if previous_vehicle else ""
@@ -237,14 +228,12 @@ def prepare_dispatch(request, user, note=""):
     require_role(user, OPERATORS)
     current = TransportRequest.objects.select_for_update().get(pk=request.pk)
     if current.status != TransportRequest.Status.APPROVED:
-        raise serializers.ValidationError({
-            "status": "Only approved requests can be prepared for dispatch."
-        })
+        raise serializers.ValidationError(
+            {"status": "Only approved requests can be prepared for dispatch."}
+        )
     if not current.assigned_vehicle_id:
         raise serializers.ValidationError({"assigned_vehicle": "Assign a vehicle first."})
-    vehicle = lock_relevant_vehicles(current.assigned_vehicle_id)[
-        current.assigned_vehicle_id
-    ]
+    vehicle = lock_relevant_vehicles(current.assigned_vehicle_id)[current.assigned_vehicle_id]
     validate_vehicle(current, vehicle)
     current.assigned_vehicle = vehicle
     return apply_transition(

@@ -5,21 +5,58 @@ from rest_framework import serializers
 from fleet.models import Vehicle
 from fleet.serializers import StrictFieldsMixin
 
+from .domain import validate_request_semantics
 from .models import TransportRequest, TransportRequestEvent
 from .services import planning_end, record_event
 
 BASE_FIELDS = [
-    "id", "request_number", "source_system", "external_reference", "request_type",
-    "requester_name", "requester_contact", "pickup_name", "pickup_address",
-    "pickup_latitude", "pickup_longitude", "destination_name", "destination_address",
-    "destination_latitude", "destination_longitude", "scheduled_pickup_at",
-    "required_vehicle_type", "estimated_duration_minutes", "passenger_count",
-    "luggage_count", "priority", "notes", "status", "assigned_vehicle", "created_by",
-    "approved_by", "approved_at", "created_at", "updated_at",
+    "id",
+    "request_number",
+    "source_system",
+    "external_reference",
+    "request_type",
+    "request_category",
+    "requester_name",
+    "requester_contact",
+    "pickup_name",
+    "pickup_address",
+    "pickup_latitude",
+    "pickup_longitude",
+    "destination_name",
+    "destination_address",
+    "destination_latitude",
+    "destination_longitude",
+    "scheduled_pickup_at",
+    "required_vehicle_type",
+    "estimated_duration_minutes",
+    "passenger_count",
+    "luggage_count",
+    "load_description",
+    "load_quantity",
+    "estimated_weight_kg",
+    "handling_instructions",
+    "temperature_requirement",
+    "priority",
+    "notes",
+    "status",
+    "assigned_vehicle",
+    "created_by",
+    "approved_by",
+    "approved_at",
+    "created_at",
+    "updated_at",
 ]
 IMMUTABLE_FIELDS = {
-    "id", "request_number", "status", "assigned_vehicle", "created_by", "approved_by",
-    "approved_at", "created_at", "updated_at", "events",
+    "id",
+    "request_number",
+    "status",
+    "assigned_vehicle",
+    "created_by",
+    "approved_by",
+    "approved_at",
+    "created_at",
+    "updated_at",
+    "events",
 }
 
 
@@ -94,6 +131,9 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
             "destination_name",
             "destination_address",
             "notes",
+            "load_description",
+            "handling_instructions",
+            "temperature_requirement",
         ):
             if field in attrs:
                 attrs[field] = attrs[field].strip()
@@ -110,9 +150,22 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
             if field in attrs and not attrs[field]
         }
         source = attrs.get("source_system", getattr(self.instance, "source_system", None))
-        external = attrs.get(
-            "external_reference", getattr(self.instance, "external_reference", "")
-        )
+        external = attrs.get("external_reference", getattr(self.instance, "external_reference", ""))
+        semantic_values = {
+            field: attrs.get(field, getattr(self.instance, field, None))
+            for field in (
+                "request_type",
+                "request_category",
+                "passenger_count",
+                "load_description",
+                "load_quantity",
+                "estimated_weight_kg",
+            )
+        }
+        resolved_category, semantic_errors = validate_request_semantics(semantic_values)
+        errors.update(semantic_errors)
+        if resolved_category and "request_category" not in semantic_errors:
+            attrs["request_category"] = resolved_category
         if source and external:
             duplicate = TransportRequest.objects.filter(
                 source_system=source, external_reference=external
@@ -120,9 +173,7 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
             if self.instance:
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists():
-                errors["external_reference"] = (
-                    "This subsystem request has already been imported."
-                )
+                errors["external_reference"] = "This subsystem request has already been imported."
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
@@ -133,9 +184,9 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
         try:
             request = TransportRequest.objects.create(created_by=user, **validated_data)
         except IntegrityError as error:
-            raise serializers.ValidationError({
-                "external_reference": "This subsystem request has already been imported."
-            }) from error
+            raise serializers.ValidationError(
+                {"external_reference": "This subsystem request has already been imported."}
+            ) from error
         record_event(request, "CREATED", user)
         return request
 
@@ -153,7 +204,8 @@ class TransportRequestListSerializer(TransportRequestBaseSerializer):
 
     class Meta(TransportRequestBaseSerializer.Meta):
         fields = BASE_FIELDS + [
-            "latest_event_type", "latest_event_at",
+            "latest_event_type",
+            "latest_event_at",
         ]
 
 
@@ -172,14 +224,14 @@ class CalendarTransportRequestSerializer(TransportRequestBaseSerializer):
 
     class Meta(TransportRequestBaseSerializer.Meta):
         fields = BASE_FIELDS + [
-            "calendar_date", "planning_end_at", "vehicle_conflict",
+            "calendar_date",
+            "planning_end_at",
+            "vehicle_conflict",
             "conflicting_requests",
         ]
 
     def get_calendar_date(self, request):
-        return request.scheduled_pickup_at.astimezone(
-            timezone.get_current_timezone()
-        ).date()
+        return request.scheduled_pickup_at.astimezone(timezone.get_current_timezone()).date()
 
     def get_planning_end_at(self, request):
         return planning_end(request)

@@ -14,7 +14,7 @@ from accounts.permissions import StaffAccess
 from accounts.roles import SUPER_ADMIN, resolve_role
 from fleet.models import Vehicle
 
-from . import services
+from . import matrix, places, routing, services
 from .models import TransportRequest, TransportRequestEvent
 from .serializers import (
     CalendarTransportRequestSerializer,
@@ -32,9 +32,7 @@ class TransportRequestPagination(PageNumberPagination):
 
 
 def detail_response(item, request):
-    return Response(
-        TransportRequestDetailSerializer(item, context={"request": request}).data
-    )
+    return Response(TransportRequestDetailSerializer(item, context={"request": request}).data)
 
 
 class TransportRequestListView(APIView):
@@ -43,15 +41,23 @@ class TransportRequestListView(APIView):
 
     def get(self, request):
         allowed = {
-            "search", "status", "priority", "source_system", "request_type",
-            "scheduled_date", "assignment", "ordering", "page", "page_size",
+            "search",
+            "status",
+            "priority",
+            "source_system",
+            "request_type",
+            "scheduled_date",
+            "assignment",
+            "ordering",
+            "page",
+            "page_size",
         }
         unknown = set(request.query_params) - allowed
         if unknown:
             raise serializers.ValidationError({key: "Unknown filter." for key in unknown})
-        latest_event = TransportRequestEvent.objects.filter(
-            request_id=OuterRef("pk")
-        ).order_by("-created_at", "-pk")
+        latest_event = TransportRequestEvent.objects.filter(request_id=OuterRef("pk")).order_by(
+            "-created_at", "-pk"
+        )
         queryset = TransportRequest.objects.select_related(
             "assigned_vehicle", "created_by", "approved_by"
         ).annotate(
@@ -64,9 +70,9 @@ class TransportRequestListView(APIView):
             parsed_statuses = [value.strip() for value in statuses.split(",") if value.strip()]
             invalid = sorted(set(parsed_statuses) - set(TransportRequest.Status.values))
             if not parsed_statuses or invalid:
-                raise serializers.ValidationError({
-                    "status": f"Invalid status value(s): {', '.join(invalid) or statuses}."
-                })
+                raise serializers.ValidationError(
+                    {"status": f"Invalid status value(s): {', '.join(invalid) or statuses}."}
+                )
             queryset = queryset.filter(status__in=parsed_statuses)
         for field, choices in (
             ("priority", TransportRequest.Priority.values),
@@ -80,13 +86,11 @@ class TransportRequestListView(APIView):
                 queryset = queryset.filter(**{field: value})
         assignment = request.query_params.get("assignment", "all")
         if assignment not in {"all", "assigned", "unassigned"}:
-            raise serializers.ValidationError({
-                "assignment": "Must be all, assigned, or unassigned."
-            })
-        if assignment != "all":
-            queryset = queryset.filter(
-                assigned_vehicle__isnull=assignment == "unassigned"
+            raise serializers.ValidationError(
+                {"assignment": "Must be all, assigned, or unassigned."}
             )
+        if assignment != "all":
+            queryset = queryset.filter(assigned_vehicle__isnull=assignment == "unassigned")
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(
@@ -103,14 +107,18 @@ class TransportRequestListView(APIView):
             try:
                 parsed = date.fromisoformat(scheduled_date)
             except ValueError as error:
-                raise serializers.ValidationError({
-                    "scheduled_date": "Use YYYY-MM-DD."
-                }) from error
+                raise serializers.ValidationError({"scheduled_date": "Use YYYY-MM-DD."}) from error
             queryset = queryset.filter(scheduled_pickup_at__date=parsed)
         ordering = request.query_params.get("ordering", "scheduled_pickup_at")
         allowed_ordering = {
-            "scheduled_pickup_at", "-scheduled_pickup_at", "created_at", "-created_at",
-            "priority", "-priority", "request_number", "-request_number",
+            "scheduled_pickup_at",
+            "-scheduled_pickup_at",
+            "created_at",
+            "-created_at",
+            "priority",
+            "-priority",
+            "request_number",
+            "-request_number",
         }
         if ordering not in allowed_ordering:
             raise serializers.ValidationError({"ordering": "Invalid ordering field."})
@@ -118,7 +126,8 @@ class TransportRequestListView(APIView):
             queryset = queryset.annotate(
                 assignment_order=Case(
                     When(assigned_vehicle__isnull=True, then=Value(0)),
-                    default=Value(1), output_field=IntegerField(),
+                    default=Value(1),
+                    output_field=IntegerField(),
                 )
             ).order_by("assignment_order", ordering, "request_number")
         else:
@@ -126,9 +135,7 @@ class TransportRequestListView(APIView):
         paginator = TransportRequestPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         return paginator.get_paginated_response(
-            TransportRequestListSerializer(
-                page, many=True, context={"request": request}
-            ).data
+            TransportRequestListSerializer(page, many=True, context={"request": request}).data
         )
 
     def post(self, request):
@@ -150,9 +157,7 @@ class TransportRequestListView(APIView):
                 return Response(error.detail, status=status.HTTP_409_CONFLICT)
             raise
         return Response(
-            TransportRequestDetailSerializer(
-                saved, context={"request": request}
-            ).data,
+            TransportRequestDetailSerializer(saved, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -175,7 +180,9 @@ class TransportRequestDetailView(APIView):
     def patch(self, request, request_id):
         role = resolve_role(request.user)
         if role not in {
-            SUPER_ADMIN, StaffProfile.Role.FLEET_MANAGER, StaffProfile.Role.DISPATCHER,
+            SUPER_ADMIN,
+            StaffProfile.Role.FLEET_MANAGER,
+            StaffProfile.Role.DISPATCHER,
         }:
             self.permission_denied(
                 request,
@@ -208,6 +215,128 @@ class TransportRequestDetailView(APIView):
             return Response(serializer.data)
 
 
+class TransportRequestRouteView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["get", "options"]
+
+    def get(self, request, request_id):
+        item = get_object_or_404(TransportRequest, pk=request_id)
+        try:
+            return Response(routing.get_route(item))
+        except routing.RouteCoordinateError:
+            return Response(
+                {"detail": "The transport request has invalid route coordinates."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except routing.RouteConfigurationError:
+            return Response(
+                {"detail": "Routing service is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except routing.RouteServiceError:
+            return Response(
+                {"detail": "Route unavailable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
+def _places_error_response(error):
+    if isinstance(error, places.PlacesConfigurationError):
+        return Response(
+            {"detail": "Location search is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if isinstance(error, places.PlacesUnavailableError):
+        return Response(
+            {"detail": "Location search temporarily unavailable."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if isinstance(error, places.PlacesNotFoundError):
+        return Response({"detail": "Location was not found."}, status=status.HTTP_404_NOT_FOUND)
+    return Response({"detail": "Unable to search locations."}, status=status.HTTP_502_BAD_GATEWAY)
+
+
+class PlaceSuggestView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["query"] = serializers.CharField(trim_whitespace=True, min_length=3)
+        serializer.fields["session_id"] = serializers.UUIDField()
+        serializer.is_valid(raise_exception=True)
+        try:
+            return Response(
+                places.suggest(
+                    serializer.validated_data["query"], serializer.validated_data["session_id"]
+                )
+            )
+        except (places.PlacesConfigurationError, places.PlacesServiceError) as error:
+            return _places_error_response(error)
+
+
+class PlaceDetailsView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["get", "options"]
+
+    def get(self, request, place_type, place_id):
+        serializer = serializers.Serializer(data=request.query_params)
+        serializer.fields["session_id"] = serializers.UUIDField()
+        serializer.is_valid(raise_exception=True)
+        if place_type not in places.ALLOWED_TYPES:
+            raise serializers.ValidationError({"type": "Unsupported place type."})
+        try:
+            return Response(
+                places.details(place_type, place_id, serializer.validated_data["session_id"])
+            )
+        except (places.PlacesConfigurationError, places.PlacesServiceError) as error:
+            return _places_error_response(error)
+
+
+class DispatchMatrixView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        allowed = {"vehicle_ids", "request_ids"}
+        unknown = set(request.data) - allowed if isinstance(request.data, dict) else set()
+        if unknown:
+            raise serializers.ValidationError({field: "Unknown field." for field in unknown})
+        serializer = serializers.Serializer(data=request.data)
+        serializer.fields["vehicle_ids"] = serializers.ListField(
+            child=serializers.RegexField(r"^[A-Z0-9][A-Z0-9._-]{0,63}$"),
+            required=False,
+            allow_empty=False,
+        )
+        serializer.fields["request_ids"] = serializers.ListField(
+            child=serializers.UUIDField(),
+            required=False,
+            allow_empty=False,
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            return Response(
+                matrix.build_dispatch_matrix(
+                    serializer.validated_data.get("vehicle_ids"),
+                    serializer.validated_data.get("request_ids"),
+                )
+            )
+        except matrix.MatrixCandidateError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        except matrix.MatrixLimitError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        except matrix.MatrixConfigurationError:
+            return Response(
+                {"detail": "Dispatch matrix service is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except matrix.MatrixUpstreamError:
+            return Response(
+                {"detail": "Dispatch matrix is temporarily unavailable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+
 class SummaryView(APIView):
     permission_classes = [StaffAccess]
 
@@ -219,22 +348,27 @@ class SummaryView(APIView):
             status=TransportRequest.Status.NEEDS_MORE_DETAILS
         ).count()
         approved = queryset.filter(status=TransportRequest.Status.APPROVED)
-        return Response({
-            "total": queryset.count(),
-            "for_approval": for_approval,
-            "needs_more_details": needs_more_details,
-            "approval_queue": for_approval + needs_more_details,
-            "dispatch_queue": approved.count(),
-            "approved_unassigned": approved.filter(assigned_vehicle__isnull=True).count(),
-            "approved_assigned": approved.filter(assigned_vehicle__isnull=False).count(),
-            "ready_for_dispatch": queryset.filter(
-                status=TransportRequest.Status.READY_FOR_DISPATCH
-            ).count(),
-            "scheduled_today": queryset.filter(scheduled_pickup_at__date=today).count(),
-            "high_priority": queryset.filter(priority__in=[
-                TransportRequest.Priority.HIGH, TransportRequest.Priority.URGENT,
-            ]).count(),
-        })
+        return Response(
+            {
+                "total": queryset.count(),
+                "for_approval": for_approval,
+                "needs_more_details": needs_more_details,
+                "approval_queue": for_approval + needs_more_details,
+                "dispatch_queue": approved.count(),
+                "approved_unassigned": approved.filter(assigned_vehicle__isnull=True).count(),
+                "approved_assigned": approved.filter(assigned_vehicle__isnull=False).count(),
+                "ready_for_dispatch": queryset.filter(
+                    status=TransportRequest.Status.READY_FOR_DISPATCH
+                ).count(),
+                "scheduled_today": queryset.filter(scheduled_pickup_at__date=today).count(),
+                "high_priority": queryset.filter(
+                    priority__in=[
+                        TransportRequest.Priority.HIGH,
+                        TransportRequest.Priority.URGENT,
+                    ]
+                ).count(),
+            }
+        )
 
 
 class CalendarView(APIView):
@@ -246,45 +380,47 @@ class CalendarView(APIView):
             start_date = date.fromisoformat(request.query_params.get("start", ""))
             end_date = date.fromisoformat(request.query_params.get("end", ""))
         except ValueError as error:
-            raise serializers.ValidationError({
-                "date_range": "Start and end are required in YYYY-MM-DD format."
-            }) from error
+            raise serializers.ValidationError(
+                {"date_range": "Start and end are required in YYYY-MM-DD format."}
+            ) from error
         if end_date < start_date:
             raise serializers.ValidationError({"end": "End must not be before start."})
         if (end_date - start_date).days >= self.max_days:
-            raise serializers.ValidationError({
-                "date_range": f"Calendar ranges may not exceed {self.max_days} days."
-            })
+            raise serializers.ValidationError(
+                {"date_range": f"Calendar ranges may not exceed {self.max_days} days."}
+            )
         current_timezone = timezone.get_current_timezone()
-        range_start = timezone.make_aware(
-            datetime.combine(start_date, time.min), current_timezone
-        )
+        range_start = timezone.make_aware(datetime.combine(start_date, time.min), current_timezone)
         range_end = timezone.make_aware(
             datetime.combine(end_date + timedelta(days=1), time.min), current_timezone
         )
         visible = list(
-            TransportRequest.objects.select_related(
-                "assigned_vehicle", "created_by", "approved_by"
-            ).filter(
+            TransportRequest.objects.select_related("assigned_vehicle", "created_by", "approved_by")
+            .filter(
                 scheduled_pickup_at__gte=range_start,
                 scheduled_pickup_at__lt=range_end,
-            ).exclude(
+            )
+            .exclude(
                 status__in=[
-                    TransportRequest.Status.REJECTED, TransportRequest.Status.CANCELLED,
+                    TransportRequest.Status.REJECTED,
+                    TransportRequest.Status.CANCELLED,
                 ]
-            ).order_by("scheduled_pickup_at", "request_number")
+            )
+            .order_by("scheduled_pickup_at", "request_number")
         )
         allocations = list(
-            TransportRequest.objects.select_related("assigned_vehicle").filter(
+            TransportRequest.objects.select_related("assigned_vehicle")
+            .filter(
                 assigned_vehicle__isnull=False,
                 status__in=services.ALLOCATING_STATUSES,
                 scheduled_pickup_at__gte=range_start - timedelta(days=1),
                 scheduled_pickup_at__lt=range_end,
-            ).order_by("scheduled_pickup_at")
+            )
+            .order_by("scheduled_pickup_at")
         )
         conflict_sets = {item.pk: set() for item in visible}
         for index, first in enumerate(allocations):
-            for second in allocations[index + 1:]:
+            for second in allocations[index + 1 :]:
                 if first.assigned_vehicle_id != second.assigned_vehicle_id:
                     continue
                 if (
@@ -295,18 +431,18 @@ class CalendarView(APIView):
                         conflict_sets[first.pk].add(second.request_number)
                     if second.pk in conflict_sets:
                         conflict_sets[second.pk].add(first.request_number)
-        conflicts = {
-            key: sorted(values) for key, values in conflict_sets.items() if values
-        }
+        conflicts = {key: sorted(values) for key, values in conflict_sets.items() if values}
         serializer = CalendarTransportRequestSerializer(
             visible, many=True, context={"request": request, "conflicts": conflicts}
         )
-        return Response({
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
-            "timezone": str(current_timezone),
-            "results": serializer.data,
-        })
+        return Response(
+            {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat(),
+                "timezone": str(current_timezone),
+                "results": serializer.data,
+            }
+        )
 
 
 class ActionView(APIView):

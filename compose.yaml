@@ -44,6 +44,8 @@ services:
       DJANGO_SESSION_COOKIE_SECURE: ${DJANGO_SESSION_COOKIE_SECURE:-false}
       DJANGO_CSRF_COOKIE_SECURE: ${DJANGO_CSRF_COOKIE_SECURE:-false}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TOMTOM_API_KEY: ${TOMTOM_API_KEY:-}
+      DISPATCH_TELEMETRY_MAX_AGE_SECONDS: ${DISPATCH_TELEMETRY_MAX_AGE_SECONDS:-300}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-ftms/v1/telemetry}
@@ -89,6 +91,7 @@ services:
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
       VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8000}
+      VITE_TOMTOM_MAPS_KEY: ${VITE_TOMTOM_MAPS_KEY:-}
     ports:
       - "5173:5173"
     depends_on:
