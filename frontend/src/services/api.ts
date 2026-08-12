@@ -16,7 +16,7 @@ export async function api<T>(
 ): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) {
     headers.set("X-CSRFToken", csrfToken);
   }

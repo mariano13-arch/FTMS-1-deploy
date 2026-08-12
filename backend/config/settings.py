@@ -90,6 +90,7 @@ TIME_ZONE = os.getenv("DJANGO_TIME_ZONE", "Asia/Manila")
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 def env_list(name, default=""):

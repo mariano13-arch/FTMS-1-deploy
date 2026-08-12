@@ -1,7 +1,6 @@
 import type { RequestStatus } from "../types";
 
 const words = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, character => character.toUpperCase());
-const priorityIcon: Record<string, string> = { LOW: "↓", NORMAL: "–", HIGH: "↑", URGENT: "↑↑" };
 const statusLabel: Record<RequestStatus, string> = {
   FOR_APPROVAL: "Awaiting Decision",
   NEEDS_MORE_DETAILS: "Needs More Details",
@@ -12,7 +11,7 @@ const statusLabel: Record<RequestStatus, string> = {
 };
 
 export function PriorityChip({ value }: { value: string }) {
-  return <span className={`priority-chip priority-chip--${value.toLowerCase()}`} data-indicator="priority"><span aria-hidden="true">{priorityIcon[value] ?? "•"}</span>{words(value)}</span>;
+  return <span className={`priority-chip priority-chip--${value.toLowerCase()}`} data-indicator="priority">{words(value)}</span>;
 }
 
 export function WorkflowStatusBadge({ value }: { value: RequestStatus }) {

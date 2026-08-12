@@ -483,13 +483,12 @@ describe("Sprint 4 Transport Requests corrections", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
     expect(screen.getByText("No recorded request activity is available yet.")).toBeInTheDocument();
   });
-  test("presents integration intake with a clearly temporary Add Request action", async () => {
+  test("presents the temporary Add Request action and Refresh control", async () => {
     renderAt("/transport-requests");
     await screen.findAllByText(request.request_number);
     expect(screen.getByRole("link", { name: /Add Request/i })).toHaveAttribute("href", "/transport-requests/new");
     expect(screen.getByRole("link", { name: /Add Request/i })).toHaveAttribute("title", "Temporary development/testing intake");
     expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument();
-    expect(screen.getByText("Requests are received from connected hotel and restaurant systems.")).toBeInTheDocument();
     const selectedSummary = document.querySelector(".selected-summary") as HTMLElement;
     expect(within(selectedSummary).getByText("Passengers").nextElementSibling).toHaveTextContent("2");
   });

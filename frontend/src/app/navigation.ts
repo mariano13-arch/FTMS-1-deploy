@@ -13,7 +13,7 @@ export const navigation: NavigationGroup[] = [
   ] },
   { label: "Fleet & Safety", items: [
     { label: "Drivers & Safety Scores", path: "/drivers", icon: "drivers" },
-    { label: "Vehicles & Inspections", path: "/vehicles", icon: "vehicles" },
+    { label: "Vehicles", path: "/vehicles", icon: "vehicles" },
     { label: "Alerts & Incidents", path: "/alerts", icon: "alerts" },
   ] },
   { label: "Intelligence", items: [

@@ -24,7 +24,7 @@ describe("application sidebar shell", () => {
     expect(screen.getByRole("link", { name: "Transport Requests" })).toHaveAttribute("href", "/transport-requests");
     expect(screen.queryByRole("link", { name: "Active Trips" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Dispatch Board" })).toHaveAttribute("href", "/dispatch-board");
-    expect(screen.getByRole("link", { name: "Vehicles & Inspections" })).toHaveAttribute("href", "/vehicles");
+    expect(screen.getByRole("link", { name: "Vehicles" })).toHaveAttribute("href", "/vehicles");
     expect(screen.getByText("Route content")).toBeInTheDocument();
   });
 

@@ -4,6 +4,11 @@ from .views import (
     DeactivateVehicleView,
     ReactivateVehicleView,
     VehicleDetailView,
+    VehicleDocumentDetailView,
+    VehicleDocumentFileView,
+    VehicleDocumentListView,
+    VehicleInspectionDetailView,
+    VehicleInspectionListView,
     VehicleListView,
 )
 
@@ -12,4 +17,29 @@ urlpatterns = [
     path("<str:device_id>/", VehicleDetailView.as_view(), name="vehicle-detail"),
     path("<str:device_id>/deactivate/", DeactivateVehicleView.as_view(), name="vehicle-deactivate"),
     path("<str:device_id>/reactivate/", ReactivateVehicleView.as_view(), name="vehicle-reactivate"),
+    path(
+        "<str:device_id>/inspections/",
+        VehicleInspectionListView.as_view(),
+        name="vehicle-inspection-list",
+    ),
+    path(
+        "<str:device_id>/inspections/<int:inspection_id>/",
+        VehicleInspectionDetailView.as_view(),
+        name="vehicle-inspection-detail",
+    ),
+    path(
+        "<str:device_id>/documents/",
+        VehicleDocumentListView.as_view(),
+        name="vehicle-document-list",
+    ),
+    path(
+        "<str:device_id>/documents/<int:document_id>/",
+        VehicleDocumentDetailView.as_view(),
+        name="vehicle-document-detail",
+    ),
+    path(
+        "<str:device_id>/documents/<int:document_id>/file/",
+        VehicleDocumentFileView.as_view(),
+        name="vehicle-document-file",
+    ),
 ]
