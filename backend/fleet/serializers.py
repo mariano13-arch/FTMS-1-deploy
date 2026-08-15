@@ -4,7 +4,7 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Vehicle, VehicleDocument, VehicleInspection
+from .models import Driver, DriverDocument, Vehicle, VehicleDocument, VehicleInspection
 
 
 class VehicleInspectionSummarySerializer(serializers.ModelSerializer):
@@ -19,9 +19,9 @@ class StrictFieldsMixin:
             raise serializers.ValidationError("Expected a JSON object.")
         unknown = set(data.keys()) - set(self.fields)
         if unknown:
-            raise serializers.ValidationError({
-                field: ["Unknown field."] for field in sorted(unknown)
-            })
+            raise serializers.ValidationError(
+                {field: ["Unknown field."] for field in sorted(unknown)}
+            )
         return super().to_internal_value(data)
 
 
@@ -33,28 +33,50 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = Vehicle
         fields = [
-            "device_id", "plate_number", "display_name", "vehicle_type",
-            "manufacturer", "model", "model_year", "passenger_capacity",
-            "payload_capacity_kg", "gvwr_kg",
-            "vin", "engine_number", "chassis_number", "color", "fuel_type",
-            "transmission_type", "ownership_type", "supplier_name",
-            "purchase_order_number", "acquisition_date", "purchase_price",
-            "purchase_currency", "warranty_expiry_date",
-            "registration_expiry_date", "insurance_expiry_date",
-            "is_active", "created_at", "updated_at", "latest_inspection",
-            "document_count", "document_health",
+            "device_id",
+            "plate_number",
+            "display_name",
+            "vehicle_type",
+            "manufacturer",
+            "model",
+            "model_year",
+            "passenger_capacity",
+            "payload_capacity_kg",
+            "gvwr_kg",
+            "vin",
+            "engine_number",
+            "chassis_number",
+            "color",
+            "fuel_type",
+            "transmission_type",
+            "ownership_type",
+            "supplier_name",
+            "purchase_order_number",
+            "acquisition_date",
+            "purchase_price",
+            "purchase_currency",
+            "warranty_expiry_date",
+            "registration_expiry_date",
+            "insurance_expiry_date",
+            "is_active",
+            "created_at",
+            "updated_at",
+            "latest_inspection",
+            "document_count",
+            "document_health",
         ]
         read_only_fields = [
-            "created_at", "updated_at", "latest_inspection", "document_count",
+            "created_at",
+            "updated_at",
+            "latest_inspection",
+            "document_count",
             "document_health",
         ]
 
     def get_latest_inspection(self, obj):
         inspection = next(iter(obj.inspections.all()), None)
         return (
-            VehicleInspectionSummarySerializer(inspection).data
-            if inspection is not None
-            else None
+            VehicleInspectionSummarySerializer(inspection).data if inspection is not None else None
         )
 
     def get_document_count(self, obj):
@@ -93,8 +115,7 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
         if set(latest_by_type) != required:
             return "INCOMPLETE"
         if any(
-            document.expiry_date is not None
-            and document.expiry_date <= today + timedelta(days=30)
+            document.expiry_date is not None and document.expiry_date <= today + timedelta(days=30)
             for document in latest_documents
         ):
             return "EXPIRING_SOON"
@@ -123,8 +144,15 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
 
     def validate(self, attrs):
         for field in (
-            "display_name", "manufacturer", "model", "vin", "engine_number",
-            "chassis_number", "color", "supplier_name", "purchase_order_number",
+            "display_name",
+            "manufacturer",
+            "model",
+            "vin",
+            "engine_number",
+            "chassis_number",
+            "color",
+            "supplier_name",
+            "purchase_order_number",
             "purchase_currency",
         ):
             if field in attrs:
@@ -132,25 +160,41 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
                 attrs[field] = value.upper() if field in {"vin", "purchase_currency"} else value
         errors = {}
         for field in (
-            "created_at", "updated_at", "latest_inspection", "document_count",
+            "created_at",
+            "updated_at",
+            "latest_inspection",
+            "document_count",
             "document_health",
         ):
             if field in self.initial_data:
                 errors[field] = "This field is not accepted."
         string_fields = (
-            "device_id", "plate_number", "display_name", "vehicle_type",
-            "manufacturer", "model",
-            "vin", "engine_number", "chassis_number", "color", "fuel_type",
-            "transmission_type", "ownership_type", "supplier_name",
-            "purchase_order_number", "purchase_currency",
+            "device_id",
+            "plate_number",
+            "display_name",
+            "vehicle_type",
+            "manufacturer",
+            "model",
+            "vin",
+            "engine_number",
+            "chassis_number",
+            "color",
+            "fuel_type",
+            "transmission_type",
+            "ownership_type",
+            "supplier_name",
+            "purchase_order_number",
+            "purchase_currency",
         )
         for field in string_fields:
             if field in self.initial_data and not isinstance(self.initial_data[field], str):
                 errors[field] = "Must be a string."
         for field in ("model_year", "passenger_capacity"):
             value = self.initial_data.get(field)
-            if field in self.initial_data and value is not None and (
-                not isinstance(value, int) or isinstance(value, bool)
+            if (
+                field in self.initial_data
+                and value is not None
+                and (not isinstance(value, int) or isinstance(value, bool))
             ):
                 errors[field] = "Must be an integer or null."
         for field in ("payload_capacity_kg", "gvwr_kg"):
@@ -177,14 +221,32 @@ class VehicleDocumentSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     class Meta:
         model = VehicleDocument
         fields = [
-            "id", "vehicle", "document_type", "title", "reference_number",
-            "issuer_name", "issued_date", "effective_date", "expiry_date",
-            "file", "file_name", "download_url",
-            "uploaded_by", "uploaded_by_name", "created_at", "updated_at",
+            "id",
+            "vehicle",
+            "document_type",
+            "title",
+            "reference_number",
+            "issuer_name",
+            "issued_date",
+            "effective_date",
+            "expiry_date",
+            "file",
+            "file_name",
+            "download_url",
+            "uploaded_by",
+            "uploaded_by_name",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = [
-            "id", "vehicle", "file_name", "download_url", "uploaded_by",
-            "uploaded_by_name", "created_at", "updated_at",
+            "id",
+            "vehicle",
+            "file_name",
+            "download_url",
+            "uploaded_by",
+            "uploaded_by_name",
+            "created_at",
+            "updated_at",
         ]
         extra_kwargs = {"file": {"write_only": True}}
 
@@ -270,3 +332,194 @@ class VehicleInspectionSerializer(StrictFieldsMixin, serializers.ModelSerializer
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
+
+
+def driver_eligibility(driver):
+    today = timezone.localdate()
+    reasons = []
+    if driver.employment_status != Driver.EmploymentStatus.ACTIVE:
+        reasons.append(f"Employment status is {driver.get_employment_status_display()}")
+    if driver.license_expiry_date and driver.license_expiry_date < today:
+        reasons.append("Driver license has expired")
+    if driver.medical_certificate_expiry_date and driver.medical_certificate_expiry_date < today:
+        reasons.append("Medical certificate has expired")
+    if reasons:
+        return "NOT_ELIGIBLE", reasons
+    if not driver.license_number:
+        reasons.append("Driver license number is missing")
+    if not driver.license_expiry_date:
+        reasons.append("Driver license expiry is missing")
+    if not driver.medical_certificate_expiry_date:
+        reasons.append("Medical certificate expiry is missing")
+    return ("RESTRICTED", reasons) if reasons else ("ELIGIBLE", [])
+
+
+class DriverSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    linked_user_display = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
+    eligibility_status = serializers.SerializerMethodField()
+    eligibility_reasons = serializers.SerializerMethodField()
+    safety_score = serializers.SerializerMethodField()
+    safety_score_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Driver
+        fields = [
+            "id",
+            "driver_code",
+            "external_hr_id",
+            "first_name",
+            "middle_name",
+            "last_name",
+            "full_name",
+            "contact_number",
+            "email",
+            "photo",
+            "photo_url",
+            "employment_status",
+            "date_hired",
+            "linked_user",
+            "linked_user_display",
+            "license_number",
+            "license_category",
+            "license_codes",
+            "license_issue_date",
+            "license_expiry_date",
+            "medical_certificate_expiry_date",
+            "eligibility_status",
+            "eligibility_reasons",
+            "safety_score",
+            "safety_score_status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "full_name",
+            "photo_url",
+            "linked_user_display",
+            "eligibility_status",
+            "eligibility_reasons",
+            "safety_score",
+            "safety_score_status",
+            "created_at",
+            "updated_at",
+        ]
+        extra_kwargs = {"photo": {"write_only": True, "required": False}}
+
+    def get_full_name(self, obj):
+        return " ".join(filter(None, [obj.first_name, obj.middle_name, obj.last_name]))
+
+    def get_linked_user_display(self, obj):
+        if obj.linked_user is None:
+            return None
+        return obj.linked_user.get_full_name().strip() or obj.linked_user.username
+
+    def get_photo_url(self, obj):
+        return f"/api/v1/drivers/{obj.pk}/photo/" if obj.photo else None
+
+    def get_eligibility_status(self, obj):
+        return driver_eligibility(obj)[0]
+
+    def get_eligibility_reasons(self, obj):
+        return driver_eligibility(obj)[1]
+
+    def get_safety_score(self, obj):
+        return None
+
+    def get_safety_score_status(self, obj):
+        return "NOT_SCORED"
+
+    def validate_photo(self, value):
+        allowed_types = {"image/jpeg", "image/png"}
+        allowed_extensions = {"jpg", "jpeg", "png"}
+        extension = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if value.content_type not in allowed_types or extension not in allowed_extensions:
+            raise serializers.ValidationError("Only JPG, JPEG, and PNG files are allowed.")
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("Photo must not exceed 5 MB.")
+        return value
+
+    def validate(self, attrs):
+        for field in (
+            "driver_code",
+            "external_hr_id",
+            "first_name",
+            "middle_name",
+            "last_name",
+            "contact_number",
+            "email",
+            "license_number",
+            "license_category",
+            "license_codes",
+        ):
+            if field in attrs and attrs[field] is not None:
+                attrs[field] = attrs[field].strip()
+        request = self.context.get("request")
+        role = getattr(getattr(request.user, "staff_profile", None), "role", None)
+        if request and not request.user.is_superuser and role == "FLEET_MANAGER":
+            protected = {"external_hr_id", "employment_status", "linked_user"}
+            attempted = protected.intersection(self.initial_data)
+            if attempted:
+                raise serializers.ValidationError(
+                    {field: "Only Super Admin may change this field." for field in attempted}
+                )
+        return attrs
+
+
+class DriverDocumentSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    uploaded_by_name = serializers.SerializerMethodField()
+    file_name = serializers.SerializerMethodField()
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DriverDocument
+        fields = [
+            "id",
+            "driver",
+            "document_type",
+            "title",
+            "reference_number",
+            "issuer_name",
+            "issued_date",
+            "effective_date",
+            "expiry_date",
+            "file",
+            "file_name",
+            "download_url",
+            "uploaded_by",
+            "uploaded_by_name",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "driver",
+            "file_name",
+            "download_url",
+            "uploaded_by",
+            "uploaded_by_name",
+            "created_at",
+            "updated_at",
+        ]
+        extra_kwargs = {"file": {"write_only": True}}
+
+    def get_uploaded_by_name(self, obj):
+        return obj.uploaded_by.get_full_name().strip() or obj.uploaded_by.username
+
+    def get_file_name(self, obj):
+        return obj.file.name.rsplit("/", 1)[-1]
+
+    def get_download_url(self, obj):
+        return f"/api/v1/drivers/{obj.driver_id}/documents/{obj.pk}/file/"
+
+    def validate_file(self, value):
+        allowed_types = {"application/pdf", "image/jpeg", "image/png"}
+        allowed_extensions = {"pdf", "jpg", "jpeg", "png"}
+        extension = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if value.content_type not in allowed_types or extension not in allowed_extensions:
+            raise serializers.ValidationError("Only PDF, JPG, JPEG, and PNG files are allowed.")
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("File must not exceed 5 MB.")
+        return value

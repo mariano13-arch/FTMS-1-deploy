@@ -5,7 +5,13 @@ from .views import (
     AssignVehicleView,
     CalendarView,
     CancelView,
+    ConsolidationConfirmationView,
+    ConsolidationPrepareView,
+    ConsolidationRecommendationView,
+    DispatchBoardView,
+    DispatchConfirmationView,
     DispatchMatrixView,
+    DispatchRecommendationView,
     PlaceDetailsView,
     PlaceSuggestView,
     PrepareDispatchView,
@@ -19,6 +25,32 @@ from .views import (
 )
 
 urlpatterns = [
+    path("dispatch-board/", DispatchBoardView.as_view(), name="dispatch-board"),
+    path(
+        "dispatch-board/recommendations/",
+        DispatchRecommendationView.as_view(),
+        name="dispatch-recommendations",
+    ),
+    path(
+        "dispatch-board/confirm/",
+        DispatchConfirmationView.as_view(),
+        name="dispatch-confirmation",
+    ),
+    path(
+        "dispatch-board/consolidation-recommendations/",
+        ConsolidationRecommendationView.as_view(),
+        name="dispatch-consolidation-recommendations",
+    ),
+    path(
+        "dispatch-board/consolidations/confirm/",
+        ConsolidationConfirmationView.as_view(),
+        name="dispatch-consolidation-confirm",
+    ),
+    path(
+        "dispatch-board/consolidations/<int:plan_id>/prepare/",
+        ConsolidationPrepareView.as_view(),
+        name="dispatch-consolidation-prepare",
+    ),
     path("", TransportRequestListView.as_view(), name="transport-request-list"),
     path("summary/", SummaryView.as_view(), name="transport-request-summary"),
     path("calendar/", CalendarView.as_view(), name="transport-request-calendar"),

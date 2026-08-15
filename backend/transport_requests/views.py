@@ -12,12 +12,22 @@ from rest_framework.views import APIView
 from accounts.models import StaffProfile
 from accounts.permissions import StaffAccess
 from accounts.roles import SUPER_ADMIN, resolve_role
-from fleet.models import Vehicle
+from fleet.models import Driver, Vehicle
 
-from . import matrix, places, routing, services
-from .models import TransportRequest, TransportRequestEvent
+from . import consolidation, dispatch, matrix, places, routing, services
+from .models import (
+    DispatchAssignment,
+    DispatchAssignmentEvent,
+    TransportRequest,
+    TransportRequestEvent,
+)
 from .serializers import (
+    AssignedVehicleSerializer,
     CalendarTransportRequestSerializer,
+    DispatchAssignmentSerializer,
+    DispatchConfirmationSerializer,
+    DispatchDriverSerializer,
+    DispatchPlanSerializer,
     NoteSerializer,
     TransportRequestDetailSerializer,
     TransportRequestListSerializer,
@@ -335,6 +345,365 @@ class DispatchMatrixView(APIView):
                 {"detail": "Dispatch matrix is temporarily unavailable."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
+
+class DispatchBoardView(APIView):
+    permission_classes = [StaffAccess]
+
+    def get(self, request):
+        requests = list(
+            TransportRequest.objects.filter(
+                status__in=(
+                    TransportRequest.Status.APPROVED,
+                    TransportRequest.Status.READY_FOR_DISPATCH,
+                )
+            )
+            .select_related("assigned_vehicle", "created_by", "approved_by")
+            .order_by("scheduled_pickup_at", "pk")
+        )
+        assignments = list(DispatchAssignment.objects.filter(
+            transport_request__in=requests
+        ).select_related("transport_request", "vehicle", "driver", "confirmed_by"))
+        assignment_by_request = {
+            assignment.transport_request_id: assignment for assignment in assignments
+        }
+        drivers = [
+            driver
+            for driver in Driver.objects.all()
+            if dispatch.driver_eligibility(driver)[0] == "ELIGIBLE"
+        ]
+        vehicles = Vehicle.objects.filter(is_active=True).order_by("device_id")
+        located_vehicle_ids = {
+            item["vehicle_id"] for item in matrix.eligible_vehicle_origins()
+        }
+        approved = [item for item in requests if item.status == TransportRequest.Status.APPROVED]
+        confirmed_count = sum(item.pk in assignment_by_request for item in approved)
+        awaiting = [item for item in approved if item.pk not in assignment_by_request]
+        optimizer_eligible = sum(
+            any(
+                vehicle.device_id in located_vehicle_ids
+                and not services.allocation_conflicts(item, vehicle)
+                and (
+                    vehicle.passenger_capacity is None
+                    or vehicle.passenger_capacity >= item.passenger_count
+                )
+                and (
+                    not item.required_vehicle_type
+                    or vehicle.vehicle_type == item.required_vehicle_type
+                )
+                for vehicle in vehicles
+            )
+            and any(not dispatch.driver_conflicts(item, driver) for driver in drivers)
+            for item in awaiting
+        )
+        no_eligible_driver = schedule_conflict = no_gis_vehicle = 0
+        for item in awaiting:
+            if not drivers:
+                no_eligible_driver += 1
+                continue
+            available_drivers = [
+                driver for driver in drivers if not dispatch.driver_conflicts(item, driver)
+            ]
+            if not available_drivers:
+                schedule_conflict += 1
+                continue
+            has_gis_vehicle = any(
+                vehicle.device_id in located_vehicle_ids
+                and not services.allocation_conflicts(item, vehicle)
+                and (
+                    vehicle.passenger_capacity is None
+                    or vehicle.passenger_capacity >= item.passenger_count
+                )
+                and (
+                    not item.required_vehicle_type
+                    or vehicle.vehicle_type == item.required_vehicle_type
+                )
+                for vehicle in vehicles
+            )
+            if not has_gis_vehicle:
+                no_gis_vehicle += 1
+        assignment_events = DispatchAssignmentEvent.objects.filter(
+            assignment__in=assignments
+        ).select_related(
+            "assignment__transport_request", "new_driver", "new_vehicle", "performed_by",
+            "previous_driver", "previous_vehicle",
+        )
+        audit_by_request = {str(item.pk): [] for item in requests}
+        for event in assignment_events:
+            audit_by_request[str(event.assignment.transport_request_id)].append(
+                {
+                    "kind": (
+                        "ASSIGNMENT_CHANGED"
+                        if event.previous_driver_id or event.previous_vehicle_id
+                        else "ASSIGNMENT_CONFIRMED"
+                    ),
+                    "driver": DispatchDriverSerializer(event.new_driver).data,
+                    "vehicle": AssignedVehicleSerializer(event.new_vehicle).data,
+                    "selection_mode": event.selection_mode,
+                    "reason": event.reason,
+                    "operator": (
+                        event.performed_by.get_full_name().strip()
+                        or event.performed_by.username
+                    ),
+                    "timestamp": event.created_at,
+                }
+            )
+        prepare_events = TransportRequestEvent.objects.filter(
+            request__in=requests, event_type="PREPARED_FOR_DISPATCH"
+        ).select_related("performed_by")
+        for event in prepare_events:
+            audit_by_request[str(event.request_id)].append(
+                {
+                    "kind": "PREPARED_FOR_DISPATCH",
+                    "reason": event.note,
+                    "operator": (
+                        event.performed_by.get_full_name().strip()
+                        or event.performed_by.username
+                    ),
+                    "timestamp": event.created_at,
+                }
+            )
+        for events in audit_by_request.values():
+            events.sort(key=lambda item: item["timestamp"])
+        manual_candidates = {}
+        for item in approved:
+            existing_id = (
+                assignment_by_request[item.pk].pk
+                if item.pk in assignment_by_request
+                else None
+            )
+            manual_candidates[str(item.pk)] = {
+                "drivers": DispatchDriverSerializer(
+                    [
+                        driver
+                        for driver in drivers
+                        if not dispatch.driver_conflicts(
+                            item, driver, exclude_assignment_id=existing_id
+                        )
+                    ],
+                    many=True,
+                ).data,
+                "vehicles": [
+                    {
+                        **AssignedVehicleSerializer(vehicle).data,
+                        "current_location_available": (
+                            vehicle.device_id in located_vehicle_ids
+                        ),
+                    }
+                    for vehicle in vehicles
+                    if not services.allocation_conflicts(item, vehicle)
+                    and (
+                        vehicle.passenger_capacity is None
+                        or vehicle.passenger_capacity >= item.passenger_count
+                    )
+                    and (
+                        not item.required_vehicle_type
+                        or vehicle.vehicle_type == item.required_vehicle_type
+                    )
+                ],
+            }
+        return Response(
+            {
+                "summary": {
+                    "approved_requests": len(approved),
+                    "awaiting_assignment": len(awaiting),
+                    "confirmed_assignments": confirmed_count,
+                    "ready_for_dispatch": sum(
+                        item.status == TransportRequest.Status.READY_FOR_DISPATCH
+                        for item in requests
+                    ),
+                    "optimizer_eligible": optimizer_eligible,
+                    "needs_attention": len(awaiting) - optimizer_eligible,
+                    "no_eligible_driver": no_eligible_driver,
+                    "no_gis_vehicle": no_gis_vehicle,
+                    "schedule_conflict": schedule_conflict,
+                },
+                "requests": TransportRequestListSerializer(
+                    requests, many=True, context={"request": request}
+                ).data,
+                "assignments": DispatchAssignmentSerializer(assignments, many=True).data,
+                "eligible_drivers": DispatchDriverSerializer(drivers, many=True).data,
+                "active_vehicles": [
+                    {
+                        **AssignedVehicleSerializer(vehicle).data,
+                        "current_location_available": vehicle.device_id in located_vehicle_ids,
+                    }
+                    for vehicle in vehicles
+                ],
+                "manual_candidates": manual_candidates,
+                "assignment_audit": audit_by_request,
+            }
+        )
+
+
+class DispatchRecommendationView(APIView):
+    permission_classes = [StaffAccess]
+
+    def post(self, request):
+        request_ids = request.data.get("request_ids") if isinstance(request.data, dict) else None
+        if request_ids is not None:
+            field = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
+            request_ids = field.run_validation(request_ids)
+        try:
+            result = dispatch.recommendations(request_ids)
+        except matrix.MatrixCandidateError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        except matrix.MatrixLimitError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        except matrix.MatrixConfigurationError:
+            return Response(
+                {"detail": "Dispatch matrix service is not configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except matrix.MatrixUpstreamError:
+            return Response(
+                {"detail": "Dispatch matrix is temporarily unavailable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        recommendations = []
+        for item in result["recommendations"]:
+            recommendations.append(
+                {
+                    "transport_request_id": item["transport_request"].pk,
+                    "request_number": item["transport_request"].request_number,
+                    "recommended_vehicle": AssignedVehicleSerializer(item["vehicle"]).data,
+                    "recommended_driver": DispatchDriverSerializer(item["driver"]).data,
+                    "travel_time_seconds": item["travel_time_seconds"],
+                    "distance_meters": item["distance_meters"],
+                    "traffic_delay_seconds": item["traffic_delay_seconds"],
+                    "recommendation_token": item["recommendation_token"],
+                    "explanation": item["explanation"],
+                    "schedule_context": item["schedule_context"],
+                    "gis_preview": item["gis_preview"],
+                }
+            )
+        comparisons = {}
+        for request_id, candidates in result.get("candidate_comparison", {}).items():
+            comparisons[request_id] = [
+                {
+                    "driver": DispatchDriverSerializer(item["driver"]).data,
+                    "vehicle": AssignedVehicleSerializer(item["vehicle"]).data,
+                    "travel_time_seconds": item["travel_time_seconds"],
+                    "distance_meters": item["distance_meters"],
+                    "traffic_delay_seconds": item["traffic_delay_seconds"],
+                    "result": item["result"],
+                }
+                for item in candidates
+            ]
+        return Response(
+            {
+                "generated_at": result["generated_at"],
+                "optimizer": "GOOGLE_OR_TOOLS",
+                "routing_source": "TOMTOM",
+                "requests_considered": result["considered"],
+                "requests_recommended": len(recommendations),
+                "recommendations": recommendations,
+                "unassigned": [
+                    {
+                        "transport_request_id": item["transport_request"].pk,
+                        "request_number": item["transport_request"].request_number,
+                        "reason": item["reason"],
+                    }
+                    for item in result["unassigned"]
+                ],
+                "candidate_comparison": comparisons,
+                "excluded_candidates": result.get("excluded_candidates", {}),
+                "comparison_scope": {
+                    "limit": result.get("comparison_limit", dispatch.CANDIDATE_COMPARISON_LIMIT),
+                    "limited": any(
+                        len(items)
+                        >= result.get(
+                            "comparison_limit", dispatch.CANDIDATE_COMPARISON_LIMIT
+                        )
+                        for items in comparisons.values()
+                    ),
+                },
+            }
+        )
+
+
+class DispatchConfirmationView(APIView):
+    permission_classes = [StaffAccess]
+
+    def post(self, request):
+        serializer = DispatchConfirmationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            assignment = dispatch.confirm_assignment(
+                user=request.user, **serializer.validated_data
+            )
+        except PermissionError:
+            self.permission_denied(request)
+        except TransportRequest.DoesNotExist:
+            return Response({"detail": "Transport request was not found."}, status=404)
+        return Response(
+            DispatchAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED
+        )
+
+
+class ConsolidationRecommendationView(APIView):
+    permission_classes = [StaffAccess]
+
+    def post(self, request):
+        field = serializers.UUIDField()
+        selected_request_id = field.run_validation(request.data.get("selected_request_id"))
+        try:
+            result = consolidation.recommendations(selected_request_id)
+        except TransportRequest.DoesNotExist:
+            return Response({"detail": "Transport request was not found."}, status=404)
+        except matrix.MatrixLimitError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        except matrix.MatrixConfigurationError:
+            return Response({"detail": "Dispatch matrix service is not configured."}, status=503)
+        except matrix.MatrixUpstreamError:
+            return Response({"detail": "Dispatch matrix is temporarily unavailable."}, status=502)
+        recommendation = result["recommendation"]
+        if recommendation:
+            recommendation = {
+                "request_ids": recommendation["request_ids"],
+                "requests": TransportRequestListSerializer(
+                    recommendation["requests"], many=True, context={"request": request}
+                ).data,
+                "driver": DispatchDriverSerializer(recommendation["driver"]).data,
+                "vehicle": AssignedVehicleSerializer(recommendation["vehicle"]).data,
+                "route": recommendation["route"],
+                "explanation": recommendation["explanation"],
+                "recommendation_token": recommendation["recommendation_token"],
+                "geometry": None,
+            }
+        return Response(
+            {
+                "generated_at": result["generated_at"],
+                "optimizer": "GOOGLE_OR_TOOLS_ROUTING_MODEL",
+                "routing_source": "TOMTOM",
+                "candidate_limit": result["limit"],
+                "recommendation": recommendation,
+                "exclusions": result["exclusions"],
+            }
+        )
+
+
+class ConsolidationConfirmationView(APIView):
+    permission_classes = [StaffAccess]
+
+    def post(self, request):
+        token = serializers.CharField().run_validation(request.data.get("recommendation_token"))
+        try:
+            plan = consolidation.confirm(token, request.user)
+        except PermissionError:
+            self.permission_denied(request)
+        return Response(DispatchPlanSerializer(plan).data, status=status.HTTP_201_CREATED)
+
+
+class ConsolidationPrepareView(APIView):
+    permission_classes = [StaffAccess]
+
+    def post(self, request, plan_id):
+        try:
+            plan = consolidation.prepare(plan_id, request.user)
+        except PermissionError:
+            self.permission_denied(request)
+        return Response(DispatchPlanSerializer(plan).data)
 
 
 class SummaryView(APIView):

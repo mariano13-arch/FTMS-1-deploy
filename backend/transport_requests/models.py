@@ -8,7 +8,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
-from fleet.models import Vehicle
+from fleet.models import Driver, Vehicle
 
 
 def generate_request_number():
@@ -205,3 +205,183 @@ class TransportRequestEvent(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Transport request events are immutable.")
+
+
+class DispatchAssignment(models.Model):
+    class SelectionMode(models.TextChoices):
+        OPTIMIZED = "OPTIMIZED", "Optimized"
+        MANUAL = "MANUAL", "Manual"
+
+    transport_request = models.OneToOneField(
+        TransportRequest,
+        on_delete=models.PROTECT,
+        related_name="dispatch_assignment",
+    )
+    plan = models.ForeignKey(
+        "DispatchPlan",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="assignments",
+    )
+    vehicle = models.ForeignKey(
+        Vehicle, on_delete=models.PROTECT, related_name="dispatch_assignments"
+    )
+    driver = models.ForeignKey(
+        Driver, on_delete=models.PROTECT, related_name="dispatch_assignments"
+    )
+    selection_mode = models.CharField(max_length=12, choices=SelectionMode.choices)
+    override_reason = models.TextField(blank=True, default="")
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="confirmed_dispatch_assignments",
+    )
+    confirmed_at = models.DateTimeField(default=timezone.now)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="updated_dispatch_assignments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("transport_request__scheduled_pickup_at", "pk")
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(selection_mode="OPTIMIZED")
+                    | ~Q(override_reason="")
+                ),
+                name="dispatch_manual_reason_required",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.transport_request.request_number}: {self.driver} / {self.vehicle}"
+
+
+class DispatchAssignmentEvent(models.Model):
+    assignment = models.ForeignKey(
+        DispatchAssignment, on_delete=models.PROTECT, related_name="events"
+    )
+    previous_driver = models.ForeignKey(
+        Driver,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="previous_dispatch_events",
+    )
+    previous_vehicle = models.ForeignKey(
+        Vehicle,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="previous_dispatch_events",
+    )
+    new_driver = models.ForeignKey(
+        Driver, on_delete=models.PROTECT, related_name="new_dispatch_events"
+    )
+    new_vehicle = models.ForeignKey(
+        Vehicle, on_delete=models.PROTECT, related_name="new_dispatch_events"
+    )
+    performed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="dispatch_assignment_events",
+    )
+    selection_mode = models.CharField(
+        max_length=12, choices=DispatchAssignment.SelectionMode.choices
+    )
+    reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "pk")
+
+    def __str__(self):
+        return f"{self.assignment}: {self.selection_mode}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("Dispatch assignment events are immutable.")
+        self.reason = self.reason.strip()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Dispatch assignment events are immutable.")
+
+
+class DispatchPlan(models.Model):
+    class PlanType(models.TextChoices):
+        CONSOLIDATED = "CONSOLIDATED", "Consolidated"
+
+    plan_type = models.CharField(
+        max_length=16, choices=PlanType.choices, default=PlanType.CONSOLIDATED
+    )
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="dispatch_plans")
+    driver = models.ForeignKey(Driver, on_delete=models.PROTECT, related_name="dispatch_plans")
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="confirmed_dispatch_plans",
+    )
+    confirmed_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.plan_type}: {self.driver} / {self.vehicle}"
+
+
+class DispatchPlanStop(models.Model):
+    class StopType(models.TextChoices):
+        PICKUP = "PICKUP", "Pickup"
+        DELIVERY = "DELIVERY", "Delivery"
+
+    plan = models.ForeignKey(DispatchPlan, on_delete=models.PROTECT, related_name="stops")
+    transport_request = models.ForeignKey(
+        TransportRequest, on_delete=models.PROTECT, related_name="dispatch_plan_stops"
+    )
+    stop_type = models.CharField(max_length=10, choices=StopType.choices)
+    sequence = models.PositiveSmallIntegerField()
+
+    class Meta:
+        ordering = ("sequence", "pk")
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "sequence"], name="dispatch_plan_sequence_uq"),
+            models.UniqueConstraint(
+                fields=["plan", "transport_request", "stop_type"],
+                name="dispatch_plan_request_stop_uq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.plan_id} #{self.sequence}: {self.stop_type}"
+
+
+class DispatchPlanEvent(models.Model):
+    plan = models.ForeignKey(DispatchPlan, on_delete=models.PROTECT, related_name="events")
+    event_type = models.CharField(max_length=32)
+    performed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="dispatch_plan_events"
+    )
+    details = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "pk")
+
+    def __str__(self):
+        return f"{self.plan_id}: {self.event_type}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("Dispatch plan events are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Dispatch plan events are immutable.")

@@ -4,7 +4,7 @@ export const requestTypes = ["AIRPORT_PICKUP", "AIRPORT_DROPOFF", "GUEST_TRANSFE
 export const sourceSystems = ["HOTEL_MANAGEMENT_SYSTEM", "RESTAURANT_MANAGEMENT_SYSTEM", "MANUAL_STAFF_ENTRY", "OTHER_SUBSYSTEM"] as const;
 export const vehicleTypes = ["SEDAN", "SUV", "VAN", "SHUTTLE_BUS", "SERVICE_TRUCK", "MOTORCYCLE", "OTHER"] as const;
 export type RequestStatus = typeof statuses[number];
-export type AssignedVehicle = { device_id: string; plate_number: string; display_name: string; vehicle_type: string; passenger_capacity: number | null; is_active: boolean };
+export type AssignedVehicle = { id?: number; device_id: string; plate_number: string; display_name: string; vehicle_type: string; passenger_capacity: number | null; is_active: boolean };
 export type TransportEvent = { id: number; event_type: string; previous_status: string; new_status: string; performed_by: string; note: string; created_at: string };
 export type TransportRequestBase = {
   id: string; request_number: string; source_system: string; external_reference: string; request_type: string;

@@ -33,9 +33,9 @@ class Vehicle(models.Model):
         RENTED = "RENTED", "Rented"
         OTHER = "OTHER", "Other"
 
-    device_id = models.CharField(max_length=64, unique=True, validators=[
-        RegexValidator(r"^[A-Z0-9][A-Z0-9._-]{0,63}$")
-    ])
+    device_id = models.CharField(
+        max_length=64, unique=True, validators=[RegexValidator(r"^[A-Z0-9][A-Z0-9._-]{0,63}$")]
+    )
     plate_number = models.CharField(max_length=32)
     display_name = models.CharField(max_length=120)
     vehicle_type = models.CharField(
@@ -44,7 +44,8 @@ class Vehicle(models.Model):
     manufacturer = models.CharField(max_length=120, blank=True, default="")
     model = models.CharField(max_length=120, blank=True, default="")
     model_year = models.PositiveSmallIntegerField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         validators=[MinValueValidator(1980)],
     )
     passenger_capacity = models.PositiveSmallIntegerField(
@@ -105,8 +106,7 @@ class Vehicle(models.Model):
                 name="fleet_vehicle_capacity_range",
             ),
             models.CheckConstraint(
-                condition=models.Q(purchase_price__isnull=True)
-                | models.Q(purchase_price__gte=0),
+                condition=models.Q(purchase_price__isnull=True) | models.Q(purchase_price__gte=0),
                 name="fleet_vehicle_purchase_price_nonnegative",
             ),
             models.CheckConstraint(
@@ -130,14 +130,17 @@ class Vehicle(models.Model):
         self.manufacturer = self.manufacturer.strip()
         self.model = self.model.strip()
         for field in (
-            "vin", "engine_number", "chassis_number", "color", "supplier_name",
-            "purchase_order_number", "purchase_currency",
+            "vin",
+            "engine_number",
+            "chassis_number",
+            "color",
+            "supplier_name",
+            "purchase_order_number",
+            "purchase_currency",
         ):
             value = getattr(self, field)
             normalized = (
-                value.strip().upper()
-                if field in {"vin", "purchase_currency"}
-                else value.strip()
+                value.strip().upper() if field in {"vin", "purchase_currency"} else value.strip()
             )
             setattr(self, field, normalized)
         if self.pk:
@@ -163,9 +166,7 @@ class VehicleInspection(models.Model):
         NEEDS_ATTENTION = "NEEDS_ATTENTION", "Needs attention"
         NOT_CHECKED = "NOT_CHECKED", "Not checked"
 
-    vehicle = models.ForeignKey(
-        Vehicle, on_delete=models.PROTECT, related_name="inspections"
-    )
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name="inspections")
     inspection_date = models.DateField()
     inspection_type = models.CharField(max_length=20, choices=InspectionType.choices)
     result = models.CharField(max_length=20, choices=Result.choices)
@@ -196,8 +197,7 @@ class VehicleInspection(models.Model):
         ordering = ("-inspection_date", "-created_at", "-pk")
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(odometer_km__isnull=True)
-                | models.Q(odometer_km__gte=0),
+                condition=models.Q(odometer_km__isnull=True) | models.Q(odometer_km__gte=0),
                 name="fleet_inspection_odometer_nonnegative",
             ),
             models.CheckConstraint(
@@ -245,3 +245,94 @@ class VehicleDocument(models.Model):
 
     def __str__(self):
         return f"{self.vehicle.device_id} {self.title}"
+
+
+class Driver(models.Model):
+    class EmploymentStatus(models.TextChoices):
+        ACTIVE = "ACTIVE", "Active"
+        ON_LEAVE = "ON_LEAVE", "On leave"
+        SUSPENDED = "SUSPENDED", "Suspended"
+        TERMINATED = "TERMINATED", "Terminated"
+
+    driver_code = models.CharField(max_length=64, unique=True)
+    external_hr_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    first_name = models.CharField(max_length=100)
+    middle_name = models.CharField(max_length=100, blank=True, default="")
+    last_name = models.CharField(max_length=100)
+    contact_number = models.CharField(max_length=40, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    photo = models.FileField(upload_to="driver_photos/%Y/%m/", null=True, blank=True)
+    employment_status = models.CharField(
+        max_length=20,
+        choices=EmploymentStatus.choices,
+        default=EmploymentStatus.ACTIVE,
+    )
+    date_hired = models.DateField(null=True, blank=True)
+    linked_user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="driver_record",
+        null=True,
+        blank=True,
+    )
+    license_number = models.CharField(max_length=80, blank=True, default="")
+    license_category = models.CharField(max_length=80, blank=True, default="")
+    license_codes = models.CharField(max_length=160, blank=True, default="")
+    license_issue_date = models.DateField(null=True, blank=True)
+    license_expiry_date = models.DateField(null=True, blank=True)
+    medical_certificate_expiry_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("last_name", "first_name", "driver_code")
+
+    def __str__(self):
+        return f"{self.driver_code} ({self.first_name} {self.last_name})"
+
+    def save(self, *args, **kwargs):
+        self.driver_code = self.driver_code.strip().upper()
+        self.external_hr_id = self.external_hr_id.strip() if self.external_hr_id else None
+        for field in (
+            "first_name",
+            "middle_name",
+            "last_name",
+            "contact_number",
+            "email",
+            "license_number",
+            "license_category",
+            "license_codes",
+        ):
+            setattr(self, field, getattr(self, field).strip())
+        super().save(*args, **kwargs)
+
+
+class DriverDocument(models.Model):
+    class DocumentType(models.TextChoices):
+        DRIVER_LICENSE = "DRIVER_LICENSE", "Driver license"
+        MEDICAL_CERTIFICATE = "MEDICAL_CERTIFICATE", "Medical certificate"
+        TRAINING_CERTIFICATE = "TRAINING_CERTIFICATE", "Training certificate"
+        OTHER = "OTHER", "Other"
+
+    driver = models.ForeignKey(Driver, on_delete=models.PROTECT, related_name="documents")
+    document_type = models.CharField(max_length=30, choices=DocumentType.choices)
+    title = models.CharField(max_length=160)
+    reference_number = models.CharField(max_length=100, blank=True, default="")
+    issuer_name = models.CharField(max_length=160, blank=True, default="")
+    issued_date = models.DateField(null=True, blank=True)
+    effective_date = models.DateField(null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    file = models.FileField(upload_to="driver_documents/%Y/%m/")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="driver_documents",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+
+    def __str__(self):
+        return f"{self.driver.driver_code} {self.title}"

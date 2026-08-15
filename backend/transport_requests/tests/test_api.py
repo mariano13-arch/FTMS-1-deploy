@@ -12,7 +12,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
-from fleet.models import Vehicle
+from fleet.models import Driver, Vehicle
 from transport_requests.models import (
     TransportRequest,
     TransportRequestEvent,
@@ -122,6 +122,26 @@ class TransportRequestApiTests(TestCase):
             format="json",
         )
         self.assertEqual(assigned.status_code, 200)
+        driver = Driver.objects.create(
+            driver_code="DRV-DISPATCH",
+            first_name="Juan",
+            last_name="Dela Cruz",
+            license_number="N01",
+            license_expiry_date=timezone.localdate() + timedelta(days=30),
+            medical_certificate_expiry_date=timezone.localdate() + timedelta(days=30),
+        )
+        confirmed = self.client.post(
+            "/api/v1/transport-requests/dispatch-board/confirm/",
+            {
+                "transport_request_id": request_id,
+                "vehicle_id": self.vehicle.pk,
+                "driver_id": driver.pk,
+                "selection_mode": "MANUAL",
+                "override_reason": "Operator selected a validated pair.",
+            },
+            format="json",
+        )
+        self.assertEqual(confirmed.status_code, 201)
         ready = self.client.post(
             f"/api/v1/transport-requests/{request_id}/prepare-dispatch/", {}, format="json"
         )

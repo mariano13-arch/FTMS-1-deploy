@@ -29,4 +29,4 @@ export const navigation: NavigationGroup[] = [
 ];
 
 export const plannedPaths = navigation.flatMap(group => group.items)
-  .filter(item => !["/transport-requests", "/vehicles"].includes(item.path));
+  .filter(item => !["/transport-requests", "/vehicles", "/drivers", "/dispatch-board"].includes(item.path));

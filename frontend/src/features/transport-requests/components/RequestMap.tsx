@@ -28,6 +28,8 @@ type MapProps = {
   request: TransportRequestBase | null;
   route?: TransportRoute | null;
   routeState?: "idle" | "loading" | "ready" | "error";
+  operationalLocation?: { latitude: number; longitude: number; label: string } | null;
+  numberedStops?: Array<{ sequence: number; latitude: string; longitude: string; label: string }>;
 };
 
 function styleUrl(style: MapStyle) {
@@ -54,7 +56,7 @@ function validCoordinate(latitude: unknown, longitude: unknown): [number, number
   return Number.isFinite(lat) && Number.isFinite(lng) ? [lng, lat] : null;
 }
 
-function markerElement(kind: "pickup" | "destination", label: string) {
+function markerElement(kind: "pickup" | "destination" | "vehicle", label: string) {
   const element = document.createElement("div");
   element.className = `request-map-marker request-map-marker--${kind}`;
   element.title = `${kind === "pickup" ? "Pickup" : "Destination"}: ${label}`;
@@ -63,7 +65,17 @@ function markerElement(kind: "pickup" | "destination", label: string) {
   return element;
 }
 
-export default function RequestMap({ request, route, routeState }: MapProps) {
+function numberedMarker(sequence: number, label: string) {
+  const element = document.createElement("div");
+  element.className = "request-map-marker request-map-marker--numbered";
+  element.textContent = String(sequence);
+  element.title = `Stop ${sequence}: ${label}`;
+  element.setAttribute("aria-label", element.title);
+  element.setAttribute("role", "img");
+  return element;
+}
+
+export default function RequestMap({ request, route, routeState, operationalLocation, numberedStops }: MapProps) {
   const tomTomKey = import.meta.env.VITE_TOMTOM_MAPS_KEY?.trim() ?? "";
   const containerRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -190,14 +202,23 @@ export default function RequestMap({ request, route, routeState }: MapProps) {
     const routeData = routeCoordinates.length >= 2 ? { type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: routeCoordinates } } : { type: "FeatureCollection" as const, features: [] };
     (map.getSource(routeSourceId) as GeoJSONSource).setData(routeData);
     if (!request || !pickup || !destination) { map.jumpTo({ center: fallbackCenter, zoom: fallbackZoom, bearing: 0, pitch: 0 }); return; }
-    markersRef.current = [
+    const stopCoordinates = (numberedStops ?? []).flatMap(stop => {
+      const coordinate = validCoordinate(stop.latitude, stop.longitude);
+      if (!coordinate) return [];
+      markersRef.current.push(new maplibregl.Marker({ element: numberedMarker(stop.sequence, stop.label), anchor: "center" }).setLngLat(coordinate).addTo(map));
+      return [coordinate];
+    });
+    if (stopCoordinates.length === 0) markersRef.current = [
       new maplibregl.Marker({ element: markerElement("pickup", request.pickup_name), anchor: "center" }).setLngLat(pickup).addTo(map),
       new maplibregl.Marker({ element: markerElement("destination", request.destination_name), anchor: "center" }).setLngLat(destination).addTo(map),
     ];
-    const cameraPoints = routeCoordinates.length >= 2 ? [...routeCoordinates, pickup, destination] : [pickup, destination];
+    const vehicleLocation = operationalLocation ? validCoordinate(operationalLocation.latitude, operationalLocation.longitude) : null;
+    if (vehicleLocation && operationalLocation) markersRef.current.push(new maplibregl.Marker({ element: markerElement("vehicle", operationalLocation.label), anchor: "center" }).setLngLat(vehicleLocation).addTo(map));
+    const cameraPoints = stopCoordinates.length > 0 ? stopCoordinates : routeCoordinates.length >= 2 ? [...routeCoordinates, pickup, destination] : [pickup, destination];
+    if (vehicleLocation) cameraPoints.push(vehicleLocation);
     const bounds = cameraPoints.reduce((result, coordinate) => result.extend(coordinate), new maplibregl.LngLatBounds(cameraPoints[0], cameraPoints[0]));
     map.fitBounds(bounds as LngLatBoundsLike, { padding: { top: 55, right: 320, bottom: 55, left: 55 }, maxZoom: 16, duration: 0 });
-  }, [mapLoaded, request, route?.geometry?.coordinates, styleRevision]);
+  }, [mapLoaded, numberedStops, operationalLocation, request, route?.geometry?.coordinates, styleRevision]);
 
   return <div className={`request-map tomtom-request-map maplibre-request-map ${request ? "" : "request-map--empty"}`}>
     <div ref={containerRef} className="request-map-canvas" data-testid="request-map" aria-label="Transport request map" />

@@ -8,6 +8,8 @@ import TransportRequestDetailPage from "./features/transport-requests/pages/Tran
 import TransportRequestFormPage from "./features/transport-requests/pages/TransportRequestFormPage";
 import TransportRequestsPage from "./features/transport-requests/pages/TransportRequestsPage";
 import VehicleRoutes from "./features/vehicles/VehicleRoutes";
+import DriversPage from "./features/drivers/DriversPage";
+import DispatchBoardPage from "./features/dispatch/DispatchBoardPage";
 import "./styles.css";
 
 export default function App() {
@@ -18,6 +20,8 @@ export default function App() {
     <Route path="/transport-requests" exact><TransportRequestsPage /></Route>
     <Route path="/active-trips" exact><Redirect to="/transport-requests" /></Route>
     <Route path="/vehicles"><VehicleRoutes /></Route>
+    <Route path="/drivers" exact><DriversPage /></Route>
+    <Route path="/dispatch-board" exact><DispatchBoardPage /></Route>
     {plannedPaths.map(item => <Route path={item.path} exact key={item.path}><PlannedModule title={item.label} /></Route>)}
     <Redirect to="/transport-requests" />
   </Switch></AppShell></ProtectedRoute></Route></Switch>;

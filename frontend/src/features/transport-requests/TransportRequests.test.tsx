@@ -483,11 +483,17 @@ describe("Sprint 4 Transport Requests corrections", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
     expect(screen.getByText("No recorded request activity is available yet.")).toBeInTheDocument();
   });
-  test("presents the temporary Add Request action and Refresh control", async () => {
+  test("opens temporary Add Request in the vehicle-sized right drawer", async () => {
     renderAt("/transport-requests");
     await screen.findAllByText(request.request_number);
-    expect(screen.getByRole("link", { name: /Add Request/i })).toHaveAttribute("href", "/transport-requests/new");
-    expect(screen.getByRole("link", { name: /Add Request/i })).toHaveAttribute("title", "Temporary development/testing intake");
+    const add = screen.getByRole("button", { name: /Add Request/i });
+    expect(add).toHaveAttribute("title", "Temporary development/testing intake");
+    fireEvent.click(add);
+    const drawer = screen.getByRole("dialog", { name: "Add Transport Request" });
+    expect(drawer).toHaveClass("request-create-drawer");
+    expect(within(drawer).getByRole("button", { name: "Create Request" })).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close Add Transport Request" }));
+    expect(screen.queryByRole("dialog", { name: "Add Transport Request" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument();
     const selectedSummary = document.querySelector(".selected-summary") as HTMLElement;
     expect(within(selectedSummary).getByText("Passengers").nextElementSibling).toHaveTextContent("2");

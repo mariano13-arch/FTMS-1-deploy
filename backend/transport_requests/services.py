@@ -92,6 +92,9 @@ def allocation_conflicts(request, vehicle):
         .exclude(pk=request.pk)
         .order_by("scheduled_pickup_at", "pk")
     )
+    plan_id = getattr(getattr(request, "dispatch_assignment", None), "plan_id", None)
+    if plan_id:
+        candidates = candidates.exclude(dispatch_assignment__plan_id=plan_id)
     return [item for item in candidates if planning_end(item) > requested_start]
 
 
@@ -193,6 +196,10 @@ def cancel(request, user, note=""):
 def assign_vehicle(request, vehicle, user, note=""):
     require_role(user, OPERATORS)
     current = TransportRequest.objects.select_for_update().get(pk=request.pk)
+    if hasattr(current, "dispatch_assignment"):
+        raise serializers.ValidationError(
+            {"vehicle": "Use Dispatch Board to change a confirmed Driver/Vehicle assignment."}
+        )
     if current.status != TransportRequest.Status.APPROVED:
         raise serializers.ValidationError(
             {"status": "Only approved requests can be assigned or reassigned."}
@@ -233,6 +240,26 @@ def prepare_dispatch(request, user, note=""):
         )
     if not current.assigned_vehicle_id:
         raise serializers.ValidationError({"assigned_vehicle": "Assign a vehicle first."})
+    from .dispatch import driver_conflicts, validate_driver
+    from .models import DispatchAssignment
+
+    assignment = (
+        DispatchAssignment.objects.select_for_update()
+        .select_related("driver", "vehicle")
+        .filter(transport_request=current)
+        .first()
+    )
+    if not assignment:
+        raise serializers.ValidationError(
+            {"dispatch_assignment": "Confirm a Driver and Vehicle in Dispatch Board first."}
+        )
+    if assignment.vehicle_id != current.assigned_vehicle_id:
+        raise serializers.ValidationError(
+            {"assigned_vehicle": "Confirmed assignment and request vehicle do not match."}
+        )
+    validate_driver(current, assignment.driver, exclude_assignment_id=assignment.pk)
+    if driver_conflicts(current, assignment.driver, exclude_assignment_id=assignment.pk):
+        raise serializers.ValidationError({"driver": "Driver has an overlapping assignment."})
     vehicle = lock_relevant_vehicles(current.assigned_vehicle_id)[current.assigned_vehicle_id]
     validate_vehicle(current, vehicle)
     current.assigned_vehicle = vehicle

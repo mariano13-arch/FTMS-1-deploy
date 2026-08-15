@@ -2,11 +2,17 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from fleet.models import Vehicle
+from fleet.models import Driver, Vehicle
 from fleet.serializers import StrictFieldsMixin
 
 from .domain import validate_request_semantics
-from .models import TransportRequest, TransportRequestEvent
+from .models import (
+    DispatchAssignment,
+    DispatchPlan,
+    DispatchPlanStop,
+    TransportRequest,
+    TransportRequestEvent,
+)
 from .services import planning_end, record_event
 
 BASE_FIELDS = [
@@ -83,6 +89,7 @@ class AssignedVehicleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Vehicle
         fields = [
+            "id",
             "device_id",
             "plate_number",
             "display_name",
@@ -249,3 +256,95 @@ class NoteSerializer(StrictFieldsMixin, serializers.Serializer):
 
 class VehicleAssignmentSerializer(NoteSerializer):
     vehicle_device_id = serializers.CharField(max_length=64)
+
+
+class DispatchDriverSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+    eligibility_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Driver
+        fields = ["id", "driver_code", "full_name", "eligibility_status"]
+
+    def get_full_name(self, driver):
+        return " ".join(filter(None, [driver.first_name, driver.middle_name, driver.last_name]))
+
+    def get_eligibility_status(self, driver):
+        from fleet.serializers import driver_eligibility
+
+        return driver_eligibility(driver)[0]
+
+
+class DispatchAssignmentSerializer(serializers.ModelSerializer):
+    transport_request_id = serializers.UUIDField(read_only=True)
+    request_number = serializers.CharField(
+        source="transport_request.request_number", read_only=True
+    )
+    vehicle = AssignedVehicleSerializer(read_only=True)
+    driver = DispatchDriverSerializer(read_only=True)
+    confirmed_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DispatchAssignment
+        fields = [
+            "id",
+            "plan_id",
+            "transport_request_id",
+            "request_number",
+            "vehicle",
+            "driver",
+            "selection_mode",
+            "override_reason",
+            "confirmed_by",
+            "confirmed_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_confirmed_by(self, assignment):
+        user = assignment.confirmed_by
+        return user.get_full_name().strip() or user.username
+
+
+class DispatchConfirmationSerializer(StrictFieldsMixin, serializers.Serializer):
+    transport_request_id = serializers.UUIDField()
+    vehicle_id = serializers.IntegerField(min_value=1)
+    driver_id = serializers.IntegerField(min_value=1)
+    selection_mode = serializers.ChoiceField(choices=DispatchAssignment.SelectionMode.choices)
+    override_reason = serializers.CharField(
+        required=False, allow_blank=True, max_length=1000, default=""
+    )
+    recommendation_token = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class DispatchPlanStopSerializer(serializers.ModelSerializer):
+    request_number = serializers.CharField(
+        source="transport_request.request_number", read_only=True
+    )
+    label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DispatchPlanStop
+        fields = ["sequence", "transport_request_id", "request_number", "stop_type", "label"]
+
+    def get_label(self, stop):
+        if stop.stop_type == DispatchPlanStop.StopType.PICKUP:
+            return stop.transport_request.pickup_name
+        return stop.transport_request.destination_name
+
+
+class DispatchPlanSerializer(serializers.ModelSerializer):
+    vehicle = AssignedVehicleSerializer(read_only=True)
+    driver = DispatchDriverSerializer(read_only=True)
+    stops = DispatchPlanStopSerializer(many=True, read_only=True)
+    confirmed_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DispatchPlan
+        fields = [
+            "id", "plan_type", "vehicle", "driver", "stops", "confirmed_by",
+            "confirmed_at", "created_at", "updated_at",
+        ]
+
+    def get_confirmed_by(self, plan):
+        return plan.confirmed_by.get_full_name().strip() or plan.confirmed_by.username

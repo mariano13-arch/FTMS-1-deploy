@@ -90,10 +90,12 @@ def eligible_vehicle_origins(vehicle_ids=None):
     return origins
 
 
-def eligible_request_destinations(request_ids=None):
+def eligible_request_destinations(request_ids=None, *, include_assigned=False):
     queryset = TransportRequest.objects.filter(
-        status=TransportRequest.Status.APPROVED, assigned_vehicle__isnull=True
+        status=TransportRequest.Status.APPROVED
     ).order_by("id")
+    if not include_assigned:
+        queryset = queryset.filter(assigned_vehicle__isnull=True)
     if request_ids is not None:
         queryset = queryset.filter(pk__in=request_ids)
     destinations = []
@@ -219,11 +221,13 @@ def _call_tomtom(origins, destinations):
     return _normalize(payload, origins, destinations)
 
 
-def build_dispatch_matrix(vehicle_ids=None, request_ids=None):
+def build_dispatch_matrix(vehicle_ids=None, request_ids=None, *, include_assigned=False):
     origins = eligible_vehicle_origins(vehicle_ids)
     if not origins:
         raise MatrixCandidateError("No eligible vehicles with current locations.")
-    destinations = eligible_request_destinations(request_ids)
+    destinations = eligible_request_destinations(
+        request_ids, include_assigned=include_assigned
+    )
     if not destinations:
         raise MatrixCandidateError("No dispatch-eligible requests with valid pickup locations.")
     cell_count = len(origins) * len(destinations)
@@ -248,5 +252,39 @@ def build_dispatch_matrix(vehicle_ids=None, request_ids=None):
     if cached is not None:
         return cached
     result = _call_tomtom(origins, destinations)
+    cache.set(cache_key, result, MATRIX_CACHE_TTL_SECONDS)
+    return result
+
+
+def build_point_matrix(points):
+    """Return a complete TomTom road matrix for an explicitly bounded node set."""
+    if not points:
+        raise MatrixCandidateError("No consolidation routing points were supplied.")
+    cell_count = len(points) * len(points)
+    if cell_count > MAX_CELLS:
+        raise MatrixLimitError(
+            f"Consolidation requires {cell_count} matrix cells; the current limit is {MAX_CELLS}."
+        )
+    normalized = [
+        {
+            "vehicle_id": str(item["id"]),
+            "request_id": str(item["id"]),
+            "latitude": _coordinate(item["latitude"], latitude=True),
+            "longitude": _coordinate(item["longitude"], latitude=False),
+        }
+        for item in points
+    ]
+    material = json.dumps(
+        {"points": normalized, "traffic": "live", "departAt": "now"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    cache_key = f"consolidation-matrix:v1:{hashlib.sha256(material.encode()).hexdigest()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    result = _call_tomtom(normalized, normalized)
+    result["node_ids"] = [item["request_id"] for item in normalized]
+    result["cell_count"] = cell_count
     cache.set(cache_key, result, MATRIX_CACHE_TTL_SECONDS)
     return result
