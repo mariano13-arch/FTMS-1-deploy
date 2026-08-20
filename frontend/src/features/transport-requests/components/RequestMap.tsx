@@ -113,60 +113,73 @@ export default function RequestMap({ request, route, routeState, operationalLoca
     if (!tomTomKey || !containerRef.current || mapRef.current) return;
     const initialMapStyle = initialMapStyleRef.current;
     appliedStyleRef.current = initialMapStyle;
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: styleUrl(initialMapStyle),
-      center: fallbackCenter,
-      zoom: fallbackZoom,
-      pitch: 0,
-      bearing: 0,
-      attributionControl: false,
-      transformRequest: url => {
-        try {
-          if (new URL(url).hostname === "api.tomtom.com") return { url, headers: { "TomTom-Api-Key": tomTomKey } };
-        } catch { /* relative internal URLs do not receive TomTom credentials */ }
-        return { url };
-      },
-    });
-    mapRef.current = map;
-    map.dragRotate.disable();
-    map.touchZoomRotate.disableRotation();
+    try {
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: styleUrl(initialMapStyle),
+        center: fallbackCenter,
+        zoom: fallbackZoom,
+        pitch: 0,
+        bearing: 0,
+        attributionControl: false,
+        transformRequest: url => {
+          try {
+            if (new URL(url).hostname === "api.tomtom.com") return { url, headers: { "TomTom-Api-Key": tomTomKey } };
+          } catch { /* relative internal URLs do not receive TomTom credentials */ }
+          return { url };
+        },
+      });
+      mapRef.current = map;
+      map.dragRotate?.disable?.();
+      map.touchZoomRotate?.disableRotation?.();
 
-    const reconcileOperationalLayers = () => {
-      if (!map.getSource(trafficSourceId)) map.addSource(trafficSourceId, { type: "raster", tiles: ["https://api.tomtom.com/maps/orbis/traffic/flow/raster/tile/{z}/{x}/{y}?apiVersion=2&style=light&tileSize=256"], tileSize: 256, maxzoom: 22, attribution: "© TomTom Traffic" });
-      if (!map.getLayer(trafficLayerId)) map.addLayer({ id: trafficLayerId, type: "raster", source: trafficSourceId, layout: { visibility: trafficEnabledRef.current ? "visible" : "none" }, paint: { "raster-opacity": 0.5 } });
-      if (!map.getSource(incidentsSourceId)) map.addSource(incidentsSourceId, { type: "raster", tiles: ["https://api.tomtom.com/maps/orbis/traffic/incidents/raster/tile/{z}/{x}/{y}?apiVersion=2&style=light&tileSize=256"], tileSize: 256, maxzoom: 22, attribution: "© TomTom Traffic" });
-      if (!map.getLayer(incidentsLayerId)) map.addLayer({ id: incidentsLayerId, type: "raster", source: incidentsSourceId, layout: { visibility: incidentsEnabledRef.current ? "visible" : "none" } });
-      if (!map.getSource(routeSourceId)) map.addSource(routeSourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-      if (!map.getLayer(routeCasingLayerId)) map.addLayer({ id: routeCasingLayerId, type: "line", source: routeSourceId, layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#fffdf9", "line-width": 10, "line-opacity": 0.72 } });
-      if (!map.getLayer(routeLayerId)) map.addLayer({ id: routeLayerId, type: "line", source: routeSourceId, layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#263d73", "line-width": 6, "line-opacity": 0.96 } });
-      mapLoadedRef.current = true;
-      setMapError(false);
-      setMapLoaded(true);
-      setStyleRevision(value => value + 1);
-    };
-    const onError = (event?: { error?: Error }) => {
-      const message = event?.error?.message.toLowerCase() ?? "";
-      if (mapLoadedRef.current && /sprite|glyph/.test(message)) return;
-      setMapError(true);
-    };
-    map.on("load", reconcileOperationalLayers);
-    map.on("style.load", reconcileOperationalLayers);
-    map.on("error", onError);
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => map.resize());
-    observer?.observe(containerRef.current);
+      const reconcileOperationalLayers = () => {
+        if (!map.getSource(trafficSourceId)) map.addSource(trafficSourceId, { type: "raster", tiles: ["https://api.tomtom.com/maps/orbis/traffic/flow/raster/tile/{z}/{x}/{y}?apiVersion=2&style=light&tileSize=256"], tileSize: 256, maxzoom: 22, attribution: "© TomTom Traffic" });
+        if (!map.getLayer(trafficLayerId)) map.addLayer({ id: trafficLayerId, type: "raster", source: trafficSourceId, layout: { visibility: trafficEnabledRef.current ? "visible" : "none" }, paint: { "raster-opacity": 0.5 } });
+        if (!map.getSource(incidentsSourceId)) map.addSource(incidentsSourceId, { type: "raster", tiles: ["https://api.tomtom.com/maps/orbis/traffic/incidents/raster/tile/{z}/{x}/{y}?apiVersion=2&style=light&tileSize=256"], tileSize: 256, maxzoom: 22, attribution: "© TomTom Traffic" });
+        if (!map.getLayer(incidentsLayerId)) map.addLayer({ id: incidentsLayerId, type: "raster", source: incidentsSourceId, layout: { visibility: incidentsEnabledRef.current ? "visible" : "none" } });
+        if (!map.getSource(routeSourceId)) map.addSource(routeSourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        if (!map.getLayer(routeCasingLayerId)) map.addLayer({ id: routeCasingLayerId, type: "line", source: routeSourceId, layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#fffdf9", "line-width": 10, "line-opacity": 0.72 } });
+        if (!map.getLayer(routeLayerId)) map.addLayer({ id: routeLayerId, type: "line", source: routeSourceId, layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#263d73", "line-width": 6, "line-opacity": 0.96 } });
+        mapLoadedRef.current = true;
+        setMapError(false);
+        setMapLoaded(true);
+        setStyleRevision(value => value + 1);
+      };
+      const onError = (event?: { error?: Error }) => {
+        const message = event?.error?.message?.toLowerCase() ?? "";
+        if (mapLoadedRef.current && /sprite|glyph/.test(message)) return;
+        setMapError(true);
+      };
+      map.on("load", reconcileOperationalLayers);
+      map.on("style.load", reconcileOperationalLayers);
+      map.on("error", onError);
+      const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => map.resize());
+      observer?.observe(containerRef.current);
 
-    return () => {
-      observer?.disconnect();
-      markersRef.current.forEach(marker => marker.remove());
-      markersRef.current = [];
-      map.off("load", reconcileOperationalLayers);
-      map.off("style.load", reconcileOperationalLayers);
-      map.off("error", onError);
-      map.remove();
+      return () => {
+        observer?.disconnect();
+        markersRef.current.forEach(marker => marker.remove());
+        markersRef.current = [];
+        map.off("load", reconcileOperationalLayers);
+        map.off("style.load", reconcileOperationalLayers);
+        map.off("error", onError);
+        map.remove();
+        mapRef.current = null;
+        mapLoadedRef.current = false;
+      };
+    } catch {
+      try { mapRef.current?.remove?.(); } catch { /* partially initialized maps may not support cleanup */ }
       mapRef.current = null;
       mapLoadedRef.current = false;
-    };
+      let active = true;
+      queueMicrotask(() => {
+        if (!active) return;
+        setMapLoaded(false);
+        setMapError(true);
+      });
+      return () => { active = false; };
+    }
   }, [tomTomKey]);
 
   useEffect(() => {

@@ -28,7 +28,7 @@ type MockMapInstance = {
   fitBounds: ReturnType<typeof vi.fn>; jumpTo: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>; setStyle: ReturnType<typeof vi.fn>;
 };
-const maplibre = vi.hoisted(() => ({ instances: [] as MockMapInstance[], markers: [] as MockMarker[], controls: [] as unknown[], autoLoad: true }));
+const maplibre = vi.hoisted(() => ({ instances: [] as MockMapInstance[], markers: [] as MockMarker[], controls: [] as unknown[], autoLoad: true, controlsAvailable: true, failConstruction: false }));
 const latestMap = () => {
   const map = maplibre.instances.at(-1);
   if (!map) throw new Error("Expected a MapLibre test instance.");
@@ -50,8 +50,9 @@ vi.mock("maplibre-gl", () => {
   class Map {
     sources = new MapStore(); layers: MockMapLayer[] = []; layout = new globalThis.Map<string, string>(); handlers = new globalThis.Map<string, (event?: MockMapEvent) => void>();
     fitBounds = vi.fn(); jumpTo = vi.fn(); resize = vi.fn(); remove = vi.fn();
-    dragRotate = { disable: vi.fn() }; touchZoomRotate = { disableRotation: vi.fn() };
-    constructor(public options: MockMapOptions) { maplibre.instances.push(this); }
+    dragRotate = maplibre.controlsAvailable ? { disable: vi.fn() } : undefined;
+    touchZoomRotate = maplibre.controlsAvailable ? { disableRotation: vi.fn() } : undefined;
+    constructor(public options: MockMapOptions) { if (maplibre.failConstruction) throw new Error("WebGL unavailable"); maplibre.instances.push(this); }
     on(event: string, callback: (event?: MockMapEvent) => void) { this.handlers.set(event, callback); if (event === "load" && maplibre.autoLoad) callback(); return this; }
     off(event: string) { this.handlers.delete(event); return this; }
     addControl(control: unknown) { maplibre.controls.push(control); return this; }
@@ -88,7 +89,7 @@ const errorJson = (body: unknown, status = 400) => Promise.resolve(new Response(
 const localDate = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
 beforeEach(() => {
-  maplibre.instances.length = 0; maplibre.markers.length = 0; maplibre.controls.length = 0; maplibre.autoLoad = true; localStorage.clear(); vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "");
+  maplibre.instances.length = 0; maplibre.markers.length = 0; maplibre.controls.length = 0; maplibre.autoLoad = true; maplibre.controlsAvailable = true; maplibre.failConstruction = false; localStorage.clear(); vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "");
   auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "FLEET_MANAGER" };
   vi.spyOn(globalThis, "fetch").mockImplementation(input => {
     const url = String(input);
@@ -185,6 +186,14 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(maplibre.instances[0].options.style).not.toContain("key=");
     expect(maplibre.instances[0].options.attributionControl).toBe(false);
     expect(maplibre.controls).toHaveLength(0);
+  });
+  test("keeps the map usable when optional rotation controls are unavailable", () => {
+    maplibre.controlsAvailable = false; vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test"); render(<RequestMap request={null} />);
+    expect(screen.getByTestId("request-map")).toBeInTheDocument(); expect(screen.queryByText("Unable to load TomTom map.")).not.toBeInTheDocument();
+  });
+  test("keeps the map shell mounted and reports an initialization failure", async () => {
+    maplibre.failConstruction = true; vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test"); render(<RequestMap request={null} />);
+    expect(screen.getByTestId("request-map")).toBeInTheDocument(); expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load TomTom map.");
   });
   test("opens the compact map settings menu, defaults to Street, and closes on Escape or outside click", () => {
     vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test"); render(<RequestMap request={null} />); const button = screen.getByRole("button", { name: "Map settings" });
