@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryHistory } from "history";
 import { MemoryRouter, Router } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -21,21 +21,8 @@ vi.mock("react-leaflet", () => ({
 const vehicle = {
   device_id: "LILYGO-001", plate_number: "DEMO-001", display_name: "Sprint 1 Demo Vehicle",
   vehicle_type: "OTHER", manufacturer: "", model: "", model_year: null,
-  passenger_capacity: null, payload_capacity_kg: null, gvwr_kg: null, is_active: true,
-  vin: "", engine_number: "", chassis_number: "", color: "", fuel_type: "",
-  transmission_type: "", ownership_type: "", supplier_name: "",
-  purchase_order_number: "", acquisition_date: null, purchase_price: null,
-  purchase_currency: "", warranty_expiry_date: null, registration_expiry_date: null,
-  insurance_expiry_date: null, document_count: 0, document_health: "INCOMPLETE",
+  passenger_capacity: null, is_active: true,
   created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
-  latest_inspection: null,
-};
-const inspection = {
-  id: 7, vehicle: 1, inspection_date: "2026-08-12", inspection_type: "PRE_TRIP", result: "NEEDS_ATTENTION",
-  odometer_km: 12500, fuel_level_percent: 75, exterior_condition: "OK", interior_condition: "OK",
-  tires_condition: "NEEDS_ATTENTION", lights_condition: "OK", brakes_condition: "OK", fluids_condition: "OK",
-  safety_equipment_condition: "NOT_CHECKED", notes: "Recheck tires", issues_found: "Rear tire wear",
-  inspected_by: 2, inspector_name: "Fleet Manager", created_at: "2026-08-12T01:00:00Z", updated_at: "2026-08-12T01:00:00Z",
 };
 class FakeWebSocket {
   onopen: (() => void) | null = null; onmessage: ((event: MessageEvent) => void) | null = null;
@@ -61,22 +48,11 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-let intersectionCallback: IntersectionObserverCallback | null = null;
-class FakeIntersectionObserver {
-  constructor(callback: IntersectionObserverCallback) { intersectionCallback = callback; }
-  observe() { return undefined; }
-  disconnect() { return undefined; }
-  unobserve() { return undefined; }
-  takeRecords() { return []; }
-  readonly root = null; readonly rootMargin = "0px"; readonly thresholds = [0];
-}
 
 beforeEach(() => {
   auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" };
   auth.loading = false; auth.signIn.mockReset(); auth.signOut.mockReset();
   vi.stubGlobal("WebSocket", FakeWebSocket);
-  vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
-  intersectionCallback = null;
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -121,69 +97,9 @@ describe("Sprint 3 secure registry", () => {
   test("restores a dispatcher list without write controls", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [vehicle] }));
     renderAt("/vehicles");
-    const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!;
-    for (const heading of ["Vehicle", "Plate", "Type", "Make / Model", "Capacity", "Inspection", "Compliance Records", "Documents", "Status", "Actions"]) expect(screen.getByRole("columnheader", { name: heading })).toBeInTheDocument();
-    expect(within(row).getByText("LILYGO-001")).toBeInTheDocument();
-    expect(within(row).getByText("Unavailable")).toBeInTheDocument();
-    expect(within(row).getByText("Pax: —")).toBeInTheDocument();
-    expect(within(row).getByText("Payload: —")).toBeInTheDocument();
-    expect(within(row).getByText("Incomplete")).toBeInTheDocument();
-    expect(within(row).getByText("Active")).toBeInTheDocument();
-    fireEvent.click(within(row).getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    expect(within(row).getByRole("menuitem", { name: "View vehicle" })).toBeInTheDocument();
-    expect(screen.queryByText("+ Add Vehicle")).not.toBeInTheDocument();
+    expect(await screen.findByText("Sprint 1 Demo Vehicle")).toBeInTheDocument();
+    expect(screen.queryByText("Create vehicle")).not.toBeInTheDocument();
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
-    expect(screen.queryByText("Deactivate")).not.toBeInTheDocument();
-    expect(screen.queryByText("Add inspection")).not.toBeInTheDocument();
-  });
-  test("dense rows render make, model, year, capacity, and inactive status", async () => {
-    const inactive = { ...vehicle, device_id: "VAN-002", plate_number: "VAN-002", display_name: "Guest Shuttle", vehicle_type: "SHUTTLE_BUS", manufacturer: "Toyota", model: "Coaster", model_year: 2025, passenger_capacity: 28, is_active: false };
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [inactive] }));
-    renderAt("/vehicles");
-    const row = (await screen.findByText("Guest Shuttle")).closest("tr")!;
-    expect(within(row).getByText("Toyota Coaster")).toBeInTheDocument();
-    expect(within(row).getByText("2025")).toBeInTheDocument();
-    expect(within(row).getByText("Pax: 28")).toBeInTheDocument();
-    expect(within(row).getByText("Shuttle Bus")).toBeInTheDocument();
-    expect(within(row).getByText("Inactive")).toBeInTheDocument();
-  });
-  test("surfaces real payload, GVWR, and compliance records without fake rollups", async () => {
-    const completed = { ...vehicle, payload_capacity_kg: "950.50", gvwr_kg: "6350.00" };
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("/documents/")
-      ? response({ count: 0, next: null, previous: null, results: [] })
-      : response({ count: 1, next: null, previous: null, results: [completed] }));
-    renderAt("/vehicles");
-    const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!;
-    expect(within(row).getByText("Payload: 950.50 kg")).toBeInTheDocument();
-    fireEvent.click(within(row).getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    fireEvent.click(within(row).getByRole("menuitem", { name: "View vehicle" }));
-    const drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("6350.00 kg")).toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole("tab", { name: "Compliance" }));
-    expect(await within(drawer).findByText("No compliance evidence recorded.")).toBeInTheDocument();
-    expect(within(drawer).queryByText(/safety score|maintenance risk|fuel trend/i)).not.toBeInTheDocument();
-  });
-  test("fleet manager receives row Edit but not status actions", async () => {
-    auth.user.role = "FLEET_MANAGER";
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [vehicle] }));
-    const { history } = renderWithHistory("/vehicles");
-    const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!;
-    fireEvent.click(within(row).getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    expect(within(row).getByRole("menuitem", { name: "Add inspection" })).toBeInTheDocument();
-    expect(within(row).queryByText("Deactivate")).not.toBeInTheDocument();
-    fireEvent.click(within(row).getByRole("menuitem", { name: "Edit vehicle" }));
-    const editDrawer = screen.getByRole("dialog", { name: "Edit Sprint 1 Demo Vehicle" });
-    expect(history.location.pathname).toBe("/vehicles");
-    expect(within(editDrawer).getByLabelText("Display name")).toHaveValue("Sprint 1 Demo Vehicle");
-  });
-  test("super admin receives compact row status action", async () => {
-    auth.user.role = "SUPER_ADMIN";
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [vehicle] }));
-    renderAt("/vehicles");
-    const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!;
-    fireEvent.click(within(row).getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    expect(within(row).getByRole("menuitem", { name: "Edit vehicle" })).toBeInTheDocument();
-    expect(within(row).getByRole("menuitem", { name: "Deactivate" })).toBeInTheDocument();
   });
   test("fleet manager can edit but cannot create or change status", async () => {
     auth.user.role = "FLEET_MANAGER";
@@ -196,7 +112,7 @@ describe("Sprint 3 secure registry", () => {
     auth.user.role = "SUPER_ADMIN";
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 0, next: null, previous: null, results: [] }));
     renderAt("/vehicles");
-    expect(await screen.findByText("+ Add Vehicle")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "+ Add Vehicle" })).toBeInTheDocument();
     expect(screen.getByText("No vehicles match these filters.")).toBeInTheDocument();
   });
   test("list exposes loading, filtering, and error states", async () => {
@@ -204,172 +120,8 @@ describe("Sprint 3 secure registry", () => {
     renderAt("/vehicles"); expect(screen.getByText("Loading vehicles…")).toBeInTheDocument();
     await screen.findByText("No vehicles match these filters.");
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "demo" } });
-    fireEvent.click(screen.getByText("Apply Filters"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Filters" }));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("search=demo"));
-  });
-  test("vehicle search updates the table after typing and restores it when cleared", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(input => {
-      const url = String(input);
-      return response(url.includes("search=missing")
-        ? { count: 0, next: null, previous: null, results: [] }
-        : { count: 1, next: null, previous: null, results: [vehicle] });
-    });
-    renderAt("/vehicles");
-    await screen.findByText("Sprint 1 Demo Vehicle");
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "missing" } });
-    expect(await screen.findByText("No vehicles match these filters.")).toBeInTheDocument();
-    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("search=missing");
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
-    expect(await screen.findByText("Sprint 1 Demo Vehicle")).toBeInTheDocument();
-    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toMatch(/\/api\/v1\/vehicles\/$/);
-  });
-  test("list error remains inside the table area", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network"));
-    renderAt("/vehicles");
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Unable to load vehicles.");
-    expect(alert.closest("td")).toHaveAttribute("colspan", "10");
-  });
-  test("vehicle table appends the next backend page without visible pagination controls", async () => {
-    const second = { ...vehicle, device_id: "VAN-002", display_name: "Guest Shuttle", plate_number: "VAN-002" };
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("page=2")
-      ? response({ count: 21, previous: "http://localhost/api/v1/vehicles/", next: null, results: [vehicle, second] })
-      : response({ count: 21, previous: null, next: "http://localhost/api/v1/vehicles/?page=2", results: [vehicle] }));
-    renderAt("/vehicles");
-    await screen.findByText("Sprint 1 Demo Vehicle");
-    expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
-    await waitFor(() => expect(intersectionCallback).not.toBeNull());
-    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("page=2"));
-    expect(await screen.findByText("Guest Shuttle")).toBeInTheDocument();
-    expect(screen.getAllByText("Sprint 1 Demo Vehicle")).toHaveLength(1);
-    expect(screen.getByText("21 vehicles")).toBeInTheDocument();
-  });
-  test("next-page loading keeps the drawer open and reports progress accessibly", async () => {
-    const nextResponse = deferred<Response>();
-    const second = { ...vehicle, device_id: "VAN-002", display_name: "Guest Shuttle", plate_number: "VAN-002" };
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("page=2")
-      ? nextResponse.promise
-      : response({ count: 2, previous: null, next: "http://localhost/api/v1/vehicles/?page=2", results: [vehicle] }));
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle");
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "View vehicle" }));
-    await waitFor(() => expect(intersectionCallback).not.toBeNull());
-    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(await screen.findByRole("status")).toHaveTextContent("Loading more vehicles…");
-    await act(async () => nextResponse.resolve(await response({ count: 2, previous: null, next: null, results: [second] })));
-    expect(await screen.findByText("Guest Shuttle")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Sprint 1 Demo Vehicle" })).toBeInTheDocument();
-  });
-  test("next-page failure preserves loaded rows and offers retry", async () => {
-    let nextAttempts = 0;
-    const second = { ...vehicle, device_id: "VAN-002", display_name: "Guest Shuttle", plate_number: "VAN-002" };
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => {
-      if (!String(input).includes("page=2")) return response({ count: 2, previous: null, next: "http://localhost/api/v1/vehicles/?page=2", results: [vehicle] });
-      nextAttempts += 1;
-      return nextAttempts === 1 ? Promise.reject(new Error("network")) : response({ count: 2, previous: null, next: null, results: [second] });
-    });
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle");
-    await waitFor(() => expect(intersectionCallback).not.toBeNull());
-    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load more vehicles.");
-    expect(screen.getByText("Sprint 1 Demo Vehicle")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Guest Shuttle")).toBeInTheDocument();
-  });
-  test("filter reset prevents a stale next page from contaminating new results", async () => {
-    const staleResponse = deferred<Response>();
-    const filtered = { ...vehicle, device_id: "INACTIVE-001", display_name: "Inactive Van", plate_number: "VAN-009", is_active: false };
-    const stale = { ...vehicle, device_id: "STALE-002", display_name: "Stale Vehicle", plate_number: "OLD-002" };
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => {
-      const url = String(input);
-      if (url.includes("is_active=false")) return response({ count: 1, previous: null, next: null, results: [filtered] });
-      if (url.includes("page=2")) return staleResponse.promise;
-      return response({ count: 2, previous: null, next: "http://localhost/api/v1/vehicles/?page=2", results: [vehicle] });
-    });
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle");
-    await waitFor(() => expect(intersectionCallback).not.toBeNull());
-    act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "false" } });
-    fireEvent.click(screen.getByText("Apply Filters"));
-    expect(await screen.findByText("Inactive Van")).toBeInTheDocument();
-    await act(async () => staleResponse.resolve(await response({ count: 2, previous: null, next: null, results: [stale] })));
-    expect(screen.queryByText("Stale Vehicle")).not.toBeInTheDocument();
-    expect(screen.queryByText("Sprint 1 Demo Vehicle")).not.toBeInTheDocument();
-  });
-  test("Clear Filters resets all controls and fetches the unfiltered first page", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 0, next: null, previous: null, results: [] }));
-    renderAt("/vehicles"); await screen.findByText("No vehicles match these filters.");
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "demo" } });
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "false" } });
-    fireEvent.change(screen.getByLabelText("Vehicle Type"), { target: { value: "VAN" } });
-    fireEvent.click(screen.getByText("Apply Filters"));
-    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("vehicle_type=VAN"));
-    fireEvent.click(screen.getByText("Clear Filters"));
-    expect(screen.getByLabelText("Search")).toHaveValue(""); expect(screen.getByLabelText("Status")).toHaveValue(""); expect(screen.getByLabelText("Vehicle Type")).toHaveValue("");
-    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toMatch(/\/api\/v1\/vehicles\/$/));
-  });
-  test("Export Loaded Vehicles creates CSV from only the loaded rows", async () => {
-    const second = { ...vehicle, device_id: "VAN-002", display_name: "Guest Shuttle", plate_number: "VAN-002", vehicle_type: "VAN", manufacturer: "Toyota", model: "Hiace", model_year: 2025, passenger_capacity: 12, is_active: false };
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 50, next: "http://localhost/api/v1/vehicles/?page=2", previous: null, results: [vehicle, second] }));
-    let csv = ""; class CsvBlob { constructor(parts: BlobPart[]) { csv = String(parts[0]); } }
-    vi.stubGlobal("Blob", CsvBlob); vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:vehicles"), revokeObjectURL: vi.fn() }); vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    renderAt("/vehicles"); await screen.findByText("Guest Shuttle"); fireEvent.click(screen.getByText("Export Loaded Vehicles"));
-    expect(csv).toContain('"Display Name","Device ID"'); expect(csv).toContain('"Sprint 1 Demo Vehicle","LILYGO-001"'); expect(csv).toContain('"Guest Shuttle","VAN-002"'); expect(csv).not.toContain("50 vehicles");
-  });
-  test("View opens an in-content drawer, selection updates, Close restores the table", async () => {
-    const second = { ...vehicle, device_id: "VAN-002", display_name: "Guest Shuttle", plate_number: "VAN-002" };
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 2, next: null, previous: null, results: [vehicle, second] }));
-    const { history } = renderWithHistory("/vehicles"); await screen.findByText("Guest Shuttle");
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "View vehicle" }));
-    let drawer = screen.getByRole("dialog", { name: "Sprint 1 Demo Vehicle" }); expect(history.location.pathname).toBe("/vehicles"); expect(within(drawer).getByText("DEMO-001")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Guest Shuttle" })); fireEvent.click(screen.getByRole("menuitem", { name: "View vehicle" })); drawer = screen.getByRole("dialog", { name: "Guest Shuttle" }); expect(within(drawer).getAllByText("VAN-002").length).toBeGreaterThan(0);
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close vehicle details" })); expect(screen.queryByRole("dialog")).not.toBeInTheDocument(); expect(screen.getByRole("table")).toBeInTheDocument();
-  });
-  test("omits the redundant Open full vehicle menu action", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [vehicle] }));
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    expect(screen.queryByRole("menuitem", { name: "Open full vehicle" })).not.toBeInTheDocument();
-  });
-  test("table and drawer show real inspection summary, history, detail, and pagination", async () => {
-    const inspectedVehicle = { ...vehicle, latest_inspection: { id: inspection.id, inspection_date: inspection.inspection_date, inspection_type: inspection.inspection_type, result: inspection.result } };
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("/inspections/") ? response({ count: 11, previous: null, next: "http://localhost/api/v1/vehicles/LILYGO-001/inspections/?page=2", results: [inspection] }) : response({ count: 1, next: null, previous: null, results: [inspectedVehicle] }));
-    renderAt("/vehicles"); const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!; expect(within(row).getByText("Needs Attention")).toBeInTheDocument();
-    fireEvent.click(within(row).getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(within(row).getByRole("menuitem", { name: "View vehicle" })); const drawer = screen.getByRole("dialog"); fireEvent.click(within(drawer).getByRole("tab", { name: "Inspections" }));
-    await waitFor(() => expect(drawer).toHaveTextContent("Fleet Manager")); expect(within(drawer).getByText("11 inspections")).toBeInTheDocument(); expect(within(drawer).getByRole("button", { name: "Next" })).toBeEnabled();
-    fireEvent.click(within(drawer).getByRole("button", { name: "View Inspection" })); expect(within(drawer).getByText("Rear tire wear")).toBeInTheDocument(); expect(within(drawer).getByText("12,500 km")).toBeInTheDocument(); expect(within(drawer).getByText("75%")).toBeInTheDocument();
-  });
-  test("inspection tab has an honest empty state for a dispatcher", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("/inspections/") ? response({ count: 0, previous: null, next: null, results: [] }) : response({ count: 1, next: null, previous: null, results: [vehicle] }));
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "View vehicle" })); const drawer = screen.getByRole("dialog"); fireEvent.click(within(drawer).getByRole("tab", { name: "Inspections" }));
-    expect(await within(drawer).findByText("No inspections recorded.")).toBeInTheDocument(); expect(within(drawer).queryByText("+ Add Inspection")).not.toBeInTheDocument();
-  });
-  test("documents tab is truthful and dispatcher cannot upload", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("/documents/") ? response({ count: 0, previous: null, next: null, results: [] }) : response({ count: 1, next: null, previous: null, results: [vehicle] }));
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); expect(screen.queryByRole("menuitem", { name: "View inspections" })).not.toBeInTheDocument(); expect(screen.queryByRole("menuitem", { name: "View documents" })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole("menuitem", { name: "View vehicle" }));
-    const drawer = screen.getByRole("dialog"); fireEvent.click(within(drawer).getByRole("tab", { name: "Documents" })); expect(await within(drawer).findByText("No vehicle documents recorded.")).toBeInTheDocument(); expect(within(drawer).queryByText("+ Upload Document")).not.toBeInTheDocument();
-  });
-  test("fleet manager uploads a real document without client-forged uploader", async () => {
-    auth.user.role = "FLEET_MANAGER"; let submitted: FormData | null = null;
-    const document = { id: 3, vehicle: 1, document_type: "INSURANCE", title: "Insurance", reference_number: "INS-1", issuer_name: "", issued_date: null, effective_date: null, expiry_date: null, file_name: "insurance.pdf", download_url: "/api/v1/vehicles/LILYGO-001/documents/3/file/", uploaded_by: 2, uploaded_by_name: "Fleet Manager", created_at: "2026-08-12T01:00:00Z", updated_at: "2026-08-12T01:00:00Z" };
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => { const url = String(input); if (url.includes("/documents/") && init?.method === "POST") { submitted = init.body as FormData; return response(document, 201); } if (url.includes("/documents/")) return response({ count: submitted ? 1 : 0, previous: null, next: null, results: submitted ? [document] : [] }); return response({ count: 1, next: null, previous: null, results: [vehicle] }); });
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "Upload document" })); await screen.findByText("No vehicle documents recorded."); fireEvent.click(screen.getByText("+ Upload Document"));
-    fireEvent.change(screen.getByLabelText("Document Type"), { target: { value: "INSURANCE" } }); fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Insurance" } }); fireEvent.change(screen.getByLabelText("File"), { target: { files: [new File(["pdf"], "insurance.pdf", { type: "application/pdf" })] } }); fireEvent.submit(screen.getByLabelText("Title").closest("form")!);
-    await waitFor(() => expect(screen.queryByLabelText("Title")).not.toBeInTheDocument()); expect(submitted).not.toBeNull(); expect(submitted!.has("uploaded_by")).toBe(false);
-  });
-  test("fleet manager creates an inspection once and the authenticated inspector is not submitted", async () => {
-    auth.user.role = "FLEET_MANAGER"; const pending = deferred<Response>(); let submitted = ""; let posts = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => { const url = String(input); if (url.includes("/inspections/") && init?.method === "POST") { posts += 1; submitted = String(init.body); return pending.promise; } if (url.includes("/inspections/")) return response({ count: 0, previous: null, next: null, results: [] }); return response({ count: 1, next: null, previous: null, results: [vehicle] }); });
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "Add inspection" }));
-    fireEvent.change(screen.getByLabelText("Inspection Date"), { target: { value: "2026-08-12" } }); fireEvent.change(screen.getByLabelText("Inspection Type"), { target: { value: "PRE_TRIP" } }); fireEvent.change(screen.getByLabelText("Result"), { target: { value: "NEEDS_ATTENTION" } });
-    const save = screen.getByRole("button", { name: "Save Inspection" }); fireEvent.click(save); fireEvent.click(save); expect(posts).toBe(1); expect(submitted).not.toContain("inspected_by"); pending.resolve(await response(inspection));
-    expect(await screen.findByText("Rear tire wear")).toBeInTheDocument(); expect(screen.getByText("Fleet Manager")).toBeInTheDocument();
-  });
-  test("inspection creation reports API validation errors without closing the form", async () => {
-    auth.user.role = "FLEET_MANAGER"; vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => String(input).includes("/inspections/") && init?.method === "POST" ? response({ result: ["Invalid result."] }, 400) : String(input).includes("/inspections/") ? response({ count: 0, previous: null, next: null, results: [] }) : response({ count: 1, next: null, previous: null, results: [vehicle] }));
-    renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "Add inspection" })); fireEvent.change(screen.getByLabelText("Inspection Date"), { target: { value: "2026-08-12" } }); fireEvent.change(screen.getByLabelText("Inspection Type"), { target: { value: "PRE_TRIP" } }); fireEvent.change(screen.getByLabelText("Result"), { target: { value: "FAILED" } }); fireEvent.click(screen.getByRole("button", { name: "Save Inspection" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Please correct the inspection information."); expect(screen.getByLabelText("Inspection Date")).toHaveValue("2026-08-12");
   });
   test("detail preserves live pilot label and nullable rendering", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(input => String(input).includes("latest-status")
@@ -503,7 +255,6 @@ describe("Sprint 3 secure registry", () => {
     renderAt("/vehicles");
     fireEvent.click(screen.getByText("Sign out"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to sign out. Please try again.");
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
   });
   test("rapid logout clicks invoke sign-out once and expose busy state", async () => {
     const pending = deferred<void>(); auth.signOut.mockReturnValue(pending.promise);

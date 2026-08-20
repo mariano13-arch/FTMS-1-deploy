@@ -15,7 +15,8 @@ export default function LoginPage() {
     catch { if (mounted.current) setError("Unable to sign in with those credentials."); }
     finally { inFlight.current = false; if (mounted.current) setBusy(false); }
   };
-  return <main className="login-page"><section className="auth-card"><div className="login-brand"><span className="brand__mark">FT<br />MS</span><div><strong>Fleet & Transport</strong><small>Management System</small></div></div><p className="eyebrow">Secure staff access</p><h1>Sign in to FTMS</h1>
+  return <main className="login-page"><section className="auth-card"><div className="login-brand"><span className="brand__mark">FT<br />MS</span><div><strong>Fleet & Transport</strong><small>Management System</small></div></div>
+    <h1>Sign in to FTMS</h1>
     <form onSubmit={submit}><label>Username<input name="username" required autoComplete="username" /></label><label>Password<input name="password" type="password" required autoComplete="current-password" /></label>{error && <p className="message message--error" role="alert">{error}</p>}<button disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button></form>
   </section></main>;
 }

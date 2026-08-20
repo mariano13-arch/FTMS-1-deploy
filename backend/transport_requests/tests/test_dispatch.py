@@ -94,6 +94,10 @@ class DispatchBoardTests(TestCase):
         self.assertEqual(assignment.driver, self.driver)
         self.assertEqual(assignment.vehicle, self.vehicle)
         self.assertEqual(assignment.confirmed_by, self.user)
+        self.assertEqual(
+            assignment.execution_status, DispatchAssignment.ExecutionStatus.ASSIGNED
+        )
+        self.assertIsNone(assignment.execution_started_at)
         self.assertEqual(self.request.assigned_vehicle, self.vehicle)
         event = DispatchAssignmentEvent.objects.get(assignment=assignment)
         with self.assertRaises(ValueError):
@@ -121,6 +125,20 @@ class DispatchBoardTests(TestCase):
         self.assertEqual(
             self.confirmation(vehicle_id=other.pk, override_reason="").status_code, 400
         )
+
+    def test_assignment_cannot_be_changed_after_driver_execution_starts(self):
+        self.assertEqual(self.confirmation().status_code, 201)
+        assignment = DispatchAssignment.objects.get(transport_request=self.request)
+        assignment.execution_status = DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP
+        assignment.execution_started_at = timezone.now()
+        assignment.save(
+            update_fields=["execution_status", "execution_started_at", "updated_at"]
+        )
+
+        response = self.confirmation(override_reason="Late reassignment")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("execution_status", response.json())
 
     def test_signed_recommendation_and_explicit_prepare_dispatch(self):
         token = dispatch.recommendation_token(

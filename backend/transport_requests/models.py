@@ -212,6 +212,14 @@ class DispatchAssignment(models.Model):
         OPTIMIZED = "OPTIMIZED", "Optimized"
         MANUAL = "MANUAL", "Manual"
 
+    class ExecutionStatus(models.TextChoices):
+        ASSIGNED = "ASSIGNED", "Assigned"
+        EN_ROUTE_TO_PICKUP = "EN_ROUTE_TO_PICKUP", "En route to pickup"
+        AT_PICKUP = "AT_PICKUP", "At pickup"
+        IN_TRANSIT = "IN_TRANSIT", "In transit"
+        AT_DESTINATION = "AT_DESTINATION", "At destination"
+        COMPLETED = "COMPLETED", "Completed"
+
     transport_request = models.OneToOneField(
         TransportRequest,
         on_delete=models.PROTECT,
@@ -245,6 +253,16 @@ class DispatchAssignment(models.Model):
         on_delete=models.PROTECT,
         related_name="updated_dispatch_assignments",
     )
+    execution_status = models.CharField(
+        max_length=24,
+        choices=ExecutionStatus.choices,
+        default=ExecutionStatus.ASSIGNED,
+    )
+    execution_started_at = models.DateTimeField(null=True, blank=True)
+    pickup_arrived_at = models.DateTimeField(null=True, blank=True)
+    pickup_departed_at = models.DateTimeField(null=True, blank=True)
+    destination_arrived_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -313,6 +331,59 @@ class DispatchAssignmentEvent(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Dispatch assignment events are immutable.")
+
+
+class DispatchExecutionEvent(models.Model):
+    class Action(models.TextChoices):
+        START_TOWARD_PICKUP = "START_TOWARD_PICKUP", "Start toward pickup"
+        ARRIVE_AT_PICKUP = "ARRIVE_AT_PICKUP", "Arrive at pickup"
+        DEPART_PICKUP = "DEPART_PICKUP", "Depart pickup"
+        ARRIVE_AT_DESTINATION = "ARRIVE_AT_DESTINATION", "Arrive at destination"
+        COMPLETE = "COMPLETE", "Complete"
+
+    class ActorType(models.TextChoices):
+        DRIVER = "DRIVER", "Driver"
+        STAFF = "STAFF", "Staff"
+
+    assignment = models.ForeignKey(
+        DispatchAssignment,
+        on_delete=models.PROTECT,
+        related_name="execution_events",
+    )
+    previous_status = models.CharField(
+        max_length=24,
+        choices=DispatchAssignment.ExecutionStatus.choices,
+    )
+    new_status = models.CharField(
+        max_length=24,
+        choices=DispatchAssignment.ExecutionStatus.choices,
+    )
+    action = models.CharField(max_length=24, choices=Action.choices)
+    performed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="dispatch_execution_events",
+    )
+    actor_type = models.CharField(
+        max_length=12,
+        choices=ActorType.choices,
+        default=ActorType.DRIVER,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "pk")
+
+    def __str__(self):
+        return f"{self.assignment}: {self.previous_status} -> {self.new_status}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("Dispatch execution events are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("Dispatch execution events are immutable.")
 
 
 class DispatchPlan(models.Model):

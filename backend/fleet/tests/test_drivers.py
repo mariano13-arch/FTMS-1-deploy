@@ -70,7 +70,6 @@ class DriverApiTests(TestCase):
         )
         self.assertEqual(self.client.post(url, {}, format="multipart").status_code, 403)
         self.client.logout()
-        linked = self.user(StaffProfile.Role.DISPATCHER)
         self.authenticate(self.user(superuser=True))
         response = self.client.post(
             url,
@@ -80,13 +79,14 @@ class DriverApiTests(TestCase):
                 "last_name": "Santos",
                 "employment_status": "ACTIVE",
                 "external_hr_id": "HR-002",
-                "linked_user": linked.pk,
             },
             format="multipart",
         )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["external_hr_id"], "HR-002")
-        self.assertEqual(response.json()["linked_user"], linked.pk)
+        created = Driver.objects.get(driver_code="DRV-002")
+        self.assertEqual(response.json()["linked_user"], created.linked_user_id)
+        self.assertEqual(created.linked_user.username, "DRV-002")
 
     def test_exact_eligibility_contract_and_honest_safety_contract(self):
         today = timezone.localdate()

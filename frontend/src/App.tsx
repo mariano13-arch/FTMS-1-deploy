@@ -10,10 +10,11 @@ import TransportRequestsPage from "./features/transport-requests/pages/Transport
 import VehicleRoutes from "./features/vehicles/VehicleRoutes";
 import DriversPage from "./features/drivers/DriversPage";
 import DispatchBoardPage from "./features/dispatch/DispatchBoardPage";
+import SetupPasswordPage from "./features/driver-account/SetupPasswordPage";
 import "./styles.css";
 
 export default function App() {
-  return <Switch><Route path="/login" exact><LoginPage /></Route><Route path="/"><ProtectedRoute><AppShell><Switch>
+  return <Switch><Route path="/setup-password" exact><SetupPasswordPage /></Route><Route path="/login" exact><LoginPage /></Route><Route path="/"><ProtectedRoute><AppShell><Switch>
     <Route path="/transport-requests/new" exact><TransportRequestFormPage /></Route>
     <Route path="/transport-requests/:requestId/edit" exact><TransportRequestFormPage editing /></Route>
     <Route path="/transport-requests/:requestId" exact><TransportRequestDetailPage /></Route>

@@ -104,6 +104,13 @@ def confirm_assignment(
     )
     if existing and request.status == TransportRequest.Status.READY_FOR_DISPATCH:
         raise serializers.ValidationError({"status": "Ready assignments cannot be modified."})
+    if (
+        existing
+        and existing.execution_status != DispatchAssignment.ExecutionStatus.ASSIGNED
+    ):
+        raise serializers.ValidationError(
+            {"execution_status": "An assignment cannot be changed after execution starts."}
+        )
     normalized_reason = override_reason.strip()
     if existing and not normalized_reason:
         raise serializers.ValidationError({"override_reason": "A change reason is required."})

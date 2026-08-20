@@ -10,9 +10,30 @@ export class ApiError extends Error {
   }
 }
 
+async function refreshCsrfToken() {
+  const response = await fetch(`${apiBaseUrl}/api/v1/auth/csrf/`, {
+    credentials: "include",
+  });
+  const body = await response.json().catch(() => null) as { csrf_token?: unknown } | null;
+  if (!response.ok || typeof body?.csrf_token !== "string") {
+    throw new ApiError(response.status, body);
+  }
+  setCsrfToken(body.csrf_token);
+}
+
+function isCsrfFailure(status: number, body: unknown) {
+  return status === 403 &&
+    typeof body === "object" &&
+    body !== null &&
+    "detail" in body &&
+    typeof body.detail === "string" &&
+    body.detail.startsWith("CSRF Failed:");
+}
+
 export async function api<T>(
   path: string,
   init: RequestInit = {},
+  retryCsrf = true,
 ): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
@@ -25,6 +46,14 @@ export async function api<T>(
   });
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
+    if (retryCsrf && !["GET", "HEAD", "OPTIONS"].includes(method) && isCsrfFailure(response.status, body)) {
+      try {
+        await refreshCsrfToken();
+        return api<T>(path, init, false);
+      } catch (refreshError) {
+        if (refreshError instanceof ApiError) throw refreshError;
+      }
+    }
     if (response.status === 401) window.dispatchEvent(new Event("ftms:session-expired"));
     throw new ApiError(response.status, body);
   }

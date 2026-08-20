@@ -17,6 +17,11 @@ from accounts.permissions import (
 )
 from accounts.roles import can_create, can_edit
 
+from .driver_onboarding import (
+    DriverUsernameConflict,
+    create_driver_with_account,
+    send_driver_setup_email,
+)
 from .models import Driver, DriverDocument, Vehicle, VehicleDocument, VehicleInspection
 from .serializers import (
     DriverDocumentSerializer,
@@ -330,10 +335,30 @@ class DriverListView(APIView):
     def post(self, request):
         if not can_create(request.user):
             self.permission_denied(request)
+        if request.data.get("linked_user") not in (None, ""):
+            raise serializers.ValidationError(
+                {"linked_user": "A Driver Mobile account is provisioned automatically."}
+            )
         serializer = DriverSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        try:
+            driver = create_driver_with_account(serializer)
+        except DriverUsernameConflict:
+            return Response(
+                {"driver_code": ["This driver code is already used by an account."]},
+                status=status.HTTP_409_CONFLICT,
+            )
+        email_status = send_driver_setup_email(driver)
+        return Response(
+            {
+                **serializer.data,
+                "onboarding": {
+                    "account_provisioned": True,
+                    "email_status": email_status,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DriverDetailView(APIView):
