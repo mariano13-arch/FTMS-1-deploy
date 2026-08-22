@@ -7,8 +7,6 @@ function NavIcon({ name }: { name: NavigationIcon }) {
     requests: <><path d="M9 5h6M9 3h6v4H9zM6 5H4v16h16V5h-2M8 12h8M8 16h6" /></>,
     dispatch: <path d="M5 21V4M5 5h12l-2 4 2 4H5" />,
     map: <path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2zM9 4v14M15 6v14" />,
-    geofence: <><circle cx="12" cy="12" r="8" strokeDasharray="3 3" /><circle cx="12" cy="12" r="2" /></>,
-    history: <path d="M4 12a8 8 0 1 0 2-5.3L4 9M4 4v5h5M12 7v5l3 2" />,
     drivers: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     vehicles: <><path d="M3 16V8h12l4 4h2v4M15 8v4h4" /><circle cx="7" cy="17" r="2" /><circle cx="17" cy="17" r="2" /></>,
     alerts: <path d="M12 3L2.8 20h18.4zM12 9v5M12 17h.01" />,

@@ -71,7 +71,7 @@ test("changing approved selection optimizes only the new request and ignores a s
  const secondRecommendation={...recommendation,recommendations:[{...recommendation.recommendations[0],transport_request_id:"request-2",request_number:"TR-002"}],candidate_comparison:{"request-2":recommendation.candidate_comparison["request-1"]},excluded_candidates:{"request-2":[]}};
  const twoRequestBoard={...board,requests:[request,secondRequest],summary:{...board.summary,approved_requests:2,awaiting_assignment:2,optimizer_eligible:2},assignment_audit:{"request-1":[],"request-2":[]}};
  const calls:string[][]=[];vi.spyOn(globalThis,"fetch").mockImplementation((input,init)=>{if(!isOptimization(input))return json(twoRequestBoard);const ids=requestIds(init)??[];calls.push(ids);return ids[0]==="request-1"?firstPending:json(secondRecommendation)});
- render(<DispatchBoardPage/>);await screen.findByText("TR-001");fireEvent.click(screen.getByRole("button",{name:/TR-002 Guest Transfer/}));expect(await screen.findByRole("heading",{level:2,name:"TR-002"})).toBeInTheDocument();
+ render(<DispatchBoardPage/>);await screen.findByText("TR-001");await waitFor(()=>expect(calls).toEqual([["request-1"]]));fireEvent.click(screen.getByRole("button",{name:/TR-002 Guest Transfer/}));expect(await screen.findByRole("heading",{level:2,name:"TR-002"})).toBeInTheDocument();
  resolveFirst(await json(recommendation));await waitFor(()=>expect(screen.getByRole("heading",{level:2,name:"TR-002"})).toBeInTheDocument());expect(calls).toEqual([["request-1"],["request-2"]]);
 });
 

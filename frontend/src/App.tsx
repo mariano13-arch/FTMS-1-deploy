@@ -11,6 +11,7 @@ import VehicleRoutes from "./features/vehicles/VehicleRoutes";
 import DriversPage from "./features/drivers/DriversPage";
 import DispatchBoardPage from "./features/dispatch/DispatchBoardPage";
 import SetupPasswordPage from "./features/driver-account/SetupPasswordPage";
+import LiveFleetOperationsPage from "./features/live-fleet/LiveFleetOperationsPage";
 import "./styles.css";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
     <Route path="/vehicles"><VehicleRoutes /></Route>
     <Route path="/drivers" exact><DriversPage /></Route>
     <Route path="/dispatch-board" exact><DispatchBoardPage /></Route>
+    <Route path="/live-map" exact><LiveFleetOperationsPage /></Route>
     {plannedPaths.map(item => <Route path={item.path} exact key={item.path}><PlannedModule title={item.label} /></Route>)}
     <Redirect to="/transport-requests" />
   </Switch></AppShell></ProtectedRoute></Route></Switch>;

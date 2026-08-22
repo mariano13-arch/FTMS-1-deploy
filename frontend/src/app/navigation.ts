@@ -1,4 +1,4 @@
-export type NavigationIcon = "dashboard" | "requests" | "dispatch" | "map" | "geofence" | "history" | "drivers" | "vehicles" | "alerts" | "fuel" | "maintenance" | "reports" | "devices" | "users" | "settings";
+export type NavigationIcon = "dashboard" | "requests" | "dispatch" | "map" | "drivers" | "vehicles" | "alerts" | "fuel" | "maintenance" | "reports" | "devices" | "users" | "settings";
 export type NavigationItem = { label: string; path: string; icon: NavigationIcon };
 export type NavigationGroup = { label?: string; items: NavigationItem[] };
 
@@ -8,8 +8,6 @@ export const navigation: NavigationGroup[] = [
     { label: "Transport Requests", path: "/transport-requests", icon: "requests" },
     { label: "Dispatch Board", path: "/dispatch-board", icon: "dispatch" },
     { label: "Live Map", path: "/live-map", icon: "map" },
-    { label: "Geofences", path: "/geofences", icon: "geofence" },
-    { label: "Route History & Replay", path: "/route-history", icon: "history" },
   ] },
   { label: "Fleet & Safety", items: [
     { label: "Drivers & Safety Scores", path: "/drivers", icon: "drivers" },
@@ -29,4 +27,4 @@ export const navigation: NavigationGroup[] = [
 ];
 
 export const plannedPaths = navigation.flatMap(group => group.items)
-  .filter(item => !["/transport-requests", "/vehicles", "/drivers", "/dispatch-board"].includes(item.path));
+  .filter(item => !["/transport-requests", "/vehicles", "/drivers", "/dispatch-board", "/live-map"].includes(item.path));

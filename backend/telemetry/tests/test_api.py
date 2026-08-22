@@ -1,11 +1,12 @@
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
 from django.db import IntegrityError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
@@ -192,6 +193,53 @@ class TelemetryApiTests(TestCase):
         payload = deepcopy(self.payload)
         payload["recorded_at"] = "2026-07-29T01:18:20"
         self.assertEqual(self.post(payload).status_code, 400)
+
+    @override_settings(FTMS_TELEMETRY_CLOCK_SKEW_SECONDS=300)
+    def test_accepts_current_recorded_at(self):
+        now = datetime(2026, 7, 29, 1, 18, 20, tzinfo=UTC)
+        payload = deepcopy(self.payload)
+        payload["recorded_at"] = now.isoformat()
+
+        with patch("telemetry.serializers.timezone.now", return_value=now):
+            response = self.post(payload)
+
+        self.assertEqual(response.status_code, 201)
+
+    @override_settings(FTMS_TELEMETRY_CLOCK_SKEW_SECONDS=300)
+    def test_accepts_recorded_at_within_clock_skew(self):
+        now = datetime(2026, 7, 29, 1, 18, 20, tzinfo=UTC)
+        payload = deepcopy(self.payload)
+        payload["recorded_at"] = (now + timedelta(seconds=299)).isoformat()
+
+        with patch("telemetry.serializers.timezone.now", return_value=now):
+            response = self.post(payload)
+
+        self.assertEqual(response.status_code, 201)
+
+    @override_settings(FTMS_TELEMETRY_CLOCK_SKEW_SECONDS=300)
+    def test_rejects_recorded_at_beyond_clock_skew(self):
+        now = datetime(2026, 7, 29, 1, 18, 20, tzinfo=UTC)
+        payload = deepcopy(self.payload)
+        payload["recorded_at"] = (now + timedelta(seconds=301)).isoformat()
+
+        with patch("telemetry.serializers.timezone.now", return_value=now):
+            response = self.post(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["recorded_at"],
+            ["Timestamp cannot be more than 300 seconds in the future."],
+        )
+        self.assertFalse(TelemetryEvent.objects.exists())
+
+    def test_missing_recorded_at_remains_required(self):
+        payload = deepcopy(self.payload)
+        payload.pop("recorded_at")
+
+        response = self.post(payload)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["recorded_at"], ["This field is required."])
 
     def test_rejects_coordinate_out_of_range(self):
         payload = deepcopy(self.payload)

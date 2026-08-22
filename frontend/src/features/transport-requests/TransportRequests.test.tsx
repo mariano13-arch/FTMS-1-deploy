@@ -14,7 +14,7 @@ const auth = vi.hoisted(() => ({
   loading: false, signIn: vi.fn(), signOut: vi.fn(), expire: vi.fn(),
 }));
 vi.mock("../../AuthContext", () => ({ useAuth: () => auth }));
-type MockMapEvent = { error?: Error };
+type MockMapEvent = { error?: Error; point?: { x: number; y: number }; lngLat?: { lng: number; lat: number } };
 type MockMapLayer = { id: string; source?: string; paint?: Record<string, unknown>; layout?: Record<string, string> };
 type MockMapSource = Record<string, unknown> & { tiles: string[]; setData: ReturnType<typeof vi.fn> };
 type MockMapOptions = Record<string, unknown> & {
@@ -22,13 +22,14 @@ type MockMapOptions = Record<string, unknown> & {
   transformRequest: (url: string) => { url: string; headers?: Record<string, string> };
 };
 type MockMarker = { position?: [number, number]; removed: boolean; options: { element: HTMLElement }; remove: () => void };
+type MockPopup = { position?: [number, number]; content?: HTMLElement; removed: boolean; remove: () => void };
 type MockMapInstance = {
   options: MockMapOptions; sources: Map<string, MockMapSource>; layers: MockMapLayer[];
   layout: Map<string, string>; handlers: Map<string, (event?: MockMapEvent) => void>;
   fitBounds: ReturnType<typeof vi.fn>; jumpTo: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn>;
   remove: ReturnType<typeof vi.fn>; setStyle: ReturnType<typeof vi.fn>;
 };
-const maplibre = vi.hoisted(() => ({ instances: [] as MockMapInstance[], markers: [] as MockMarker[], controls: [] as unknown[], autoLoad: true, controlsAvailable: true, failConstruction: false }));
+const maplibre = vi.hoisted(() => ({ instances: [] as MockMapInstance[], markers: [] as MockMarker[], popups: [] as MockPopup[], controls: [] as unknown[], autoLoad: true, controlsAvailable: true, failConstruction: false }));
 const latestMap = () => {
   const map = maplibre.instances.at(-1);
   if (!map) throw new Error("Expected a MapLibre test instance.");
@@ -44,6 +45,14 @@ vi.mock("maplibre-gl", () => {
     position?: [number, number]; removed = false;
     constructor(public options: { element: HTMLElement }) { maplibre.markers.push(this); }
     setLngLat(position: [number, number]) { this.position = position; return this; }
+    addTo() { return this; }
+    remove() { this.removed = true; }
+  }
+  class Popup {
+    position?: [number, number]; content?: HTMLElement; removed = false;
+    constructor(public options: Record<string, unknown>) { maplibre.popups.push(this); }
+    setLngLat(position: [number, number]) { this.position = position; return this; }
+    setDOMContent(content: HTMLElement) { this.content = content; return this; }
     addTo() { return this; }
     remove() { this.removed = true; }
   }
@@ -65,7 +74,7 @@ vi.mock("maplibre-gl", () => {
   }
   class MapStore extends globalThis.Map<string, MockMapSource> {}
   class NavigationControl { constructor(public options: unknown) {} }
-  const api = { Map, Marker, LngLatBounds: Bounds, NavigationControl };
+  const api = { Map, Marker, Popup, LngLatBounds: Bounds, NavigationControl };
   return { default: api, ...api };
 });
 
@@ -89,7 +98,7 @@ const errorJson = (body: unknown, status = 400) => Promise.resolve(new Response(
 const localDate = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 
 beforeEach(() => {
-  maplibre.instances.length = 0; maplibre.markers.length = 0; maplibre.controls.length = 0; maplibre.autoLoad = true; maplibre.controlsAvailable = true; maplibre.failConstruction = false; localStorage.clear(); vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "");
+  maplibre.instances.length = 0; maplibre.markers.length = 0; maplibre.popups.length = 0; maplibre.controls.length = 0; maplibre.autoLoad = true; maplibre.controlsAvailable = true; maplibre.failConstruction = false; localStorage.clear(); vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "");
   auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "FLEET_MANAGER" };
   vi.spyOn(globalThis, "fetch").mockImplementation(input => {
     const url = String(input);
@@ -236,6 +245,131 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(maplibre.markers.map(marker => marker.position)).toEqual([[121.0198, 14.5086], [121.0286, 14.5652]]);
     expect(maplibre.markers.map(marker => marker.options.element.title)).toEqual(["Pickup: NAIA Terminal 3", "Destination: Oxford Suites Makati"]);
     expect(map.fitBounds).toHaveBeenCalled();
+  });
+  test("renders real fleet trail and safety layers with selectable stateful markers", () => {
+    const onVehicleSelect = vi.fn(); const onSafetyEventSelect = vi.fn();
+    vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
+    render(<RequestMap request={request as TransportRequestBase} fleetLocations={[
+      { deviceId: "LIVE-001", latitude: 14.56, longitude: 121.02, label: "Hotel Shuttle", telemetryState: "live", selected: true },
+      { deviceId: "OFF-001", latitude: 14.55, longitude: 121.03, label: "Inactive Sedan", telemetryState: "offline" },
+      { deviceId: "STALE-002", latitude: 14.54, longitude: 121.04, label: "Stale Van", telemetryState: "stale" },
+    ]} fleetTrail={[
+      { event_id: "trail-1", latitude: 14.55, longitude: 121.01, recorded_at: "2026-08-21T07:59:30Z" },
+      { event_id: "trail-2", latitude: 14.56, longitude: 121.02, recorded_at: "2026-08-21T07:59:50Z" },
+    ]} safetyEvents={[
+      { event_id: "brake-1", event_type: "HARSH_BRAKING", latitude: 14.56, longitude: 121.02, vehicle_name: "Hotel Shuttle" },
+    ]} onVehicleSelect={onVehicleSelect} onSafetyEventSelect={onSafetyEventSelect} />);
+    const map = latestMap();
+    expect(map.layers.filter(layer => layer.source === "fleet-trail-source").map(layer => layer.id)).toEqual(["fleet-trail-line", "fleet-trail-points"]);
+    expect(map.sources.get("fleet-trail-source")!.setData).toHaveBeenCalledWith(expect.objectContaining({ geometry: { type: "LineString", coordinates: [[121.01, 14.55], [121.02, 14.56]] } }));
+    expect(maplibre.markers.map(marker => marker.options.element.title)).toEqual(["Hotel Shuttle — Live telemetry", "Inactive Sedan — Offline telemetry", "Stale Van — Stale telemetry", "Harsh braking: Hotel Shuttle", "Pickup: NAIA Terminal 3", "Destination: Oxford Suites Makati"]);
+    expect((map.fitBounds.mock.calls[0][0] as { points: [number, number][] }).points).toEqual(expect.arrayContaining([[121.02, 14.56], [121.03, 14.55], [121.04, 14.54]]));
+    expect(screen.getByLabelText("Fleet map legend")).toHaveTextContent("LiveStaleOfflineNo telemetrySelected vehicleActive dispatch routeRecent breadcrumb trailSafety event");
+    fireEvent.click(maplibre.markers[0].options.element); fireEvent.click(maplibre.markers[3].options.element);
+    expect(onVehicleSelect).toHaveBeenCalledWith("LIVE-001"); expect(onSafetyEventSelect).toHaveBeenCalledWith("brake-1");
+  });
+  test("anchors a professional vehicle card to the selected marker without Street View", () => {
+    const onClose = vi.fn();
+    vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
+    render(<RequestMap request={null} fleetLocations={[
+      { deviceId: "LIVE-001", latitude: 14.56, longitude: 121.02, label: "Hotel Shuttle", telemetryState: "live", selected: true },
+    ]} fleetTrail={[
+      { event_id: "trail-1", latitude: 14.55, longitude: 121.01, recorded_at: "2026-08-21T07:59:30Z" },
+      { event_id: "trail-2", latitude: 14.56, longitude: 121.02, recorded_at: "2026-08-21T07:59:50Z" },
+    ]} fleetPopup={{ deviceId: "LIVE-001", label: "Hotel Shuttle", plateNumber: "ABC-123", telemetryState: "live", latitude: 14.56, longitude: 121.02, speedKph: 32, recordedAt: "2026-08-21T07:59:50Z", ageSeconds: 10, driverName: "Ana Santos", assignmentStatus: "In Transit", telemetrySource: "demo" }} onVehiclePopupClose={onClose} />);
+    expect(maplibre.popups).toHaveLength(1);
+    const popup = maplibre.popups[0];
+    expect(popup.position).toEqual([121.02, 14.56]);
+    expect(popup.content).toHaveTextContent("ABC-123Hotel Shuttle");
+    expect(popup.content).toHaveTextContent("10sSpeed: 32 km/h");
+    expect(popup.content).toHaveTextContent("Demo snapshot");
+    expect(popup.content).toHaveTextContent("Driver Ana Santos");
+    expect(popup.content).not.toHaveTextContent(/Street View/i);
+    fireEvent.click(within(popup.content!).getByRole("button", { name: "Zoom to" }));
+    expect(latestMap().jumpTo).toHaveBeenLastCalledWith({ center: [121.02, 14.56], zoom: 17, bearing: 0, pitch: 0 });
+    fireEvent.click(within(popup.content!).getByRole("button", { name: "Replay" }));
+    expect(latestMap().fitBounds).toHaveBeenLastCalledWith(expect.anything(), { padding: 80, maxZoom: 17, duration: 500 });
+    fireEvent.click(within(popup.content!).getByRole("button", { name: "Close vehicle map details" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+  test("preserves the operator camera when refreshed fleet markers arrive", () => {
+    vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
+    const initialLocations = [
+      { deviceId: "LIVE-001", latitude: 14.56, longitude: 121.02, label: "Hotel Shuttle", telemetryState: "live" as const },
+      { deviceId: "OFF-001", latitude: 14.55, longitude: 121.03, label: "Inactive Sedan", telemetryState: "offline" as const },
+    ];
+    const { rerender } = render(<RequestMap request={null} fleetLocations={initialLocations} />);
+    const map = latestMap();
+    expect(map.fitBounds).toHaveBeenCalledTimes(1);
+    map.jumpTo({ center: [121.021, 14.561], zoom: 18 });
+    rerender(<RequestMap request={null} fleetLocations={initialLocations.map(location => ({ ...location }))} />);
+    expect(map.fitBounds).toHaveBeenCalledTimes(1);
+    expect(map.jumpTo).toHaveBeenCalledTimes(1);
+    expect(maplibre.markers.filter(marker => !marker.removed)).toHaveLength(2);
+  });
+  test("opens fleet-only map actions for nearest asset, zoom, and an honest geofence draft", () => {
+    const onVehicleSelect = vi.fn(); const onPopupClose = vi.fn();
+    vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
+    render(<RequestMap request={null} fleetLocations={[
+      { deviceId: "NEAR-001", latitude: 14.56, longitude: 121.02, label: "Near Van", telemetryState: "live" },
+      { deviceId: "FAR-001", latitude: 15.2, longitude: 122.1, label: "Far Van", telemetryState: "offline" },
+    ]} onVehicleSelect={onVehicleSelect} onVehiclePopupClose={onPopupClose} />);
+    const map = latestMap();
+    const clickMap = () => act(() => map.handlers.get("click")?.({ point: { x: 120, y: 90 }, lngLat: { lng: 121.021, lat: 14.561 } }));
+    clickMap();
+    expect(screen.getByRole("menu", { name: "Map actions" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Street View/i })).not.toBeInTheDocument();
+    expect(onPopupClose).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Nearest fleet asset" }));
+    expect(onVehicleSelect).toHaveBeenCalledWith("NEAR-001");
+    expect(map.jumpTo).toHaveBeenLastCalledWith({ center: [121.02, 14.56], zoom: 16, bearing: 0, pitch: 0 });
+    clickMap();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Zoom to" }));
+    expect(map.jumpTo).toHaveBeenLastCalledWith({ center: [121.021, 14.561], zoom: 17, bearing: 0, pitch: 0 });
+    clickMap();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create geofence" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Geofence center selected14.56100, 121.02100Not saved. Geofence persistence is not configured yet.");
+  });
+  test("renders persistent geofence boundaries and routes map creation to the editor", () => {
+    const onGeofenceSelect = vi.fn(); const onGeofenceCreateAt = vi.fn();
+    vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
+    render(<RequestMap request={null} fleetLocations={[]} geofences={[{
+      id: "geo-1", name: "Oxford Zone", color: "#008F8C", showOnMap: true, selected: true,
+      center: { latitude: 14.56, longitude: 121.02 },
+      vertices: [{ latitude: 14.55, longitude: 121.01 }, { latitude: 14.55, longitude: 121.03 }, { latitude: 14.57, longitude: 121.02 }],
+    }]} geofenceDraft={{ color: "#CF4B4B", vertices: [{ latitude: 14.56, longitude: 121.02 }, { latitude: 14.56, longitude: 121.03 }, { latitude: 14.57, longitude: 121.02 }] }} onGeofenceSelect={onGeofenceSelect} onGeofenceCreateAt={onGeofenceCreateAt} />);
+    const map = latestMap();
+    expect(map.sources.get("fleet-geofences-source")!.setData).toHaveBeenCalledWith(expect.objectContaining({ features: [expect.objectContaining({ properties: expect.objectContaining({ id: "geo-1", selected: true }) })] }));
+    expect(map.sources.get("fleet-geofence-draft-source")!.setData).toHaveBeenCalled();
+    const label = maplibre.markers.find(marker => marker.options.element.title === "Open geofence: Oxford Zone")!;
+    fireEvent.click(label.options.element); expect(onGeofenceSelect).toHaveBeenCalledWith("geo-1");
+    act(() => map.handlers.get("click")?.({ point: { x: 120, y: 90 }, lngLat: { lng: 121.021, lat: 14.561 } }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create geofence" }));
+    expect(onGeofenceCreateAt).toHaveBeenCalledWith({ latitude: 14.561, longitude: 121.021 });
+    expect(screen.queryByText("Not saved. Geofence persistence is not configured yet.")).not.toBeInTheDocument();
+  });
+  test("searches backend places from the fleet map and focuses the selected result", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation(input => String(input).includes("places/suggest/")
+      ? json({ results: [{ id: "oxford", type: "poi", title: "Oxford Suites Makati", subtitles: ["Poblacion, Makati"] }] })
+      : json({ id: "oxford", type: "poi", title: "Oxford Suites Makati", subtitles: ["Poblacion, Makati"], display_address: "Poblacion, Makati, Philippines", latitude: 14.5652, longitude: 121.0286 }));
+    render(<RequestMap request={null} fleetLocations={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Search map places" }));
+    const input = screen.getByRole("combobox", { name: "Search map places" });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: "Ox" } });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "Oxford" } });
+    await act(async () => { vi.advanceTimersByTime(300); await Promise.resolve(); await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("option", { name: /Oxford Suites Makati/ }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(input).toHaveValue("Poblacion, Makati, Philippines");
+    expect(latestMap().jumpTo).toHaveBeenLastCalledWith({ center: [121.0286, 14.5652], zoom: 17, bearing: 0, pitch: 0 });
+    expect(maplibre.markers.at(-1)?.options.element.title).toBe("Search result: Oxford Suites Makati");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("api.tomtom.com"))).toBe(false);
   });
   test("toggles traffic without remounting the base map", () => {
     vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test"); render(<RequestMap request={null} />);
