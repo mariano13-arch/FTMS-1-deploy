@@ -48,7 +48,7 @@ describe("application sidebar shell", () => {
     expect(
       screen.queryByRole("link", { name: "Route History & Replay" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Vehicles" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Vehicles & Inspections" })).toHaveAttribute(
       "href",
       "/vehicles",
     );
@@ -64,11 +64,8 @@ describe("application sidebar shell", () => {
       screen.getByRole("button", { name: "Expand sidebar" }),
     ).toHaveAttribute("aria-expanded", "false");
     const link = screen.getByRole("link", { name: "Transport Requests" });
-    expect(link.querySelector(".nav-icon")).not.toBeNull();
-    expect(link.querySelector(".sidebar-link-label")).toHaveAttribute(
-      "aria-hidden",
-      "true",
-    );
+    expect(link.querySelector(".sidebar-icon")).not.toBeNull();
+    expect(link.querySelector(".sidebar-label")).toBeNull();
     expect(window.localStorage.getItem("ftms.sidebar.collapsed")).toBe("true");
     expect(screen.getByText("Route content")).toBeInTheDocument();
   });

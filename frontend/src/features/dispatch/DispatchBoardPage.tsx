@@ -632,11 +632,19 @@ export default function DispatchBoardPage() {
                   )}
                 </div>
               )}
+              {tab === "recommendation" && selected && (assignment || recommendation?.schedule_context) && (
+                <div className="dispatch-review-scroll">
+                  {assignment && <Confirmed assignment={assignment} />}
+                  {recommendation?.schedule_context && (
+                    <Schedule context={recommendation.schedule_context} />
+                  )}
+                  <Audit events={data.assignment_audit?.[selected.id] ?? []} />
+                </div>
+              )}
             </div>
             {selected && (
               <div className="dispatch-actions-bar">
-                {tab === "review" &&
-                  !assignment &&
+                {!assignment &&
                   recommendation &&
                   !manual && (
                     <button

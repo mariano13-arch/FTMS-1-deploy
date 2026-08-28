@@ -3,6 +3,30 @@ import { beforeEach, expect, test, vi } from "vitest";
 import DispatchBoardPage from "./DispatchBoardPage";
 import { plannedPaths } from "../../utils/navigation";
 
+vi.mock("maplibre-gl", () => {
+  class MockMap {
+    sources = new Map();
+    layers: unknown[] = [];
+    handlers = new Map();
+    fitBounds = vi.fn();
+    jumpTo = vi.fn();
+    resize = vi.fn();
+    remove = vi.fn();
+    setStyle = vi.fn();
+    dragRotate = { disable: vi.fn() };
+    touchZoomRotate = { disableRotation: vi.fn() };
+    addSource(id: string, source: Record<string, unknown>) { this.sources.set(id, { ...source, setData: vi.fn() }); }
+    getSource(id: string) { return this.sources.get(id); }
+    addLayer(layer: unknown) { this.layers.push(layer); }
+    getLayer(id: string) { return this.layers.find((l: any) => l.id === id); }
+    setLayoutProperty() {}
+    on(event: string, cb: (e?: unknown) => void) { this.handlers.set(event, cb); if (event === "load") cb(); return this; }
+    off(event: string) { this.handlers.delete(event); return this; }
+    addControl() { return this; }
+  }
+  return { Map: MockMap, Marker: vi.fn(() => ({ setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis(), remove: vi.fn() })), Popup: vi.fn(() => ({ setLngLat: vi.fn().mockReturnThis(), setDOMContent: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis(), remove: vi.fn() })), NavigationControl: vi.fn(), LngLatBounds: vi.fn(() => ({ extend: vi.fn().mockReturnThis() })) };
+});
+
 const request = {
   id: "request-1",
   request_number: "TR-001",
@@ -355,7 +379,7 @@ test("shows automatic optimization loading without any automatic confirmation", 
     );
   render(<DispatchBoardPage />);
   await screen.findByText("TR-001");
-  expect(await screen.findByRole("status", { name: "" })).toHaveTextContent(
+  expect(await screen.findByRole("status", { name: "Loading" })).toHaveTextContent(
     "Optimizing assignment…",
   );
   expect(

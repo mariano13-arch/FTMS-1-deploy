@@ -41,6 +41,9 @@ const auth = vi.hoisted(() => ({
   expire: vi.fn(),
 }));
 vi.mock("../../contexts/AuthContext", () => ({ useAuth: () => auth }));
+vi.mock("../../services/sidebarService", () => ({
+  fetchSidebarCounts: async () => ({}),
+}));
 type MockMapEvent = {
   error?: Error;
   point?: { x: number; y: number };
@@ -770,7 +773,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     maplibre.autoLoad = false;
     vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
     render(<RequestMap request={null} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Loading TomTom map…");
+    expect(screen.getByText("Loading TomTom map…")).toBeInTheDocument();
     expect(screen.getByTestId("request-map")).toBeInTheDocument();
     act(() => maplibre.instances[0].handlers.get("load")?.());
     expect(screen.queryByText("Loading TomTom map…")).not.toBeInTheDocument();

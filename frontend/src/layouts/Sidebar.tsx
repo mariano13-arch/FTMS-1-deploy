@@ -16,6 +16,8 @@ import {
   Settings,
   Search,
   RefreshCw,
+  PanelLeftOpen,
+  PanelLeftClose,
   LucideIcon,
 } from "lucide-react";
 import {
@@ -116,6 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   open,
   collapsed,
   close,
+  toggleCollapsed,
 }) => {
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
@@ -267,6 +270,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           ))}
       </nav>
+
+      <div className="px-2 py-2">
+        <button
+          type="button"
+          className="btn btn-sm w-100 d-flex align-items-center justify-content-center gap-1 border-0 bg-transparent text-white-50"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          {!collapsed && <span style={{ fontSize: "0.75rem" }}>Collapse</span>}
+        </button>
+      </div>
     </aside>
   );
 };
