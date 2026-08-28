@@ -116,7 +116,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   open,
   collapsed,
   close,
-  toggleCollapsed,
 }) => {
   const location = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
@@ -139,9 +138,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, []);
 
   useEffect(() => {
-    refreshCounts();
+    let cancelled = false;
+    async function initialFetch() {
+      setCountsLoading(true);
+      setCountsError(null);
+      try {
+        const counts = await fetchSidebarCounts();
+        if (!cancelled) setLiveCounts(counts);
+      } catch {
+        if (!cancelled) setCountsError("Unable to refresh sidebar notifications.");
+      } finally {
+        if (!cancelled) setCountsLoading(false);
+      }
+    }
+    initialFetch();
     pollRef.current = setInterval(refreshCounts, COUNTS_POLL_INTERVAL_MS);
     return () => {
+      cancelled = true;
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [refreshCounts]);
