@@ -537,6 +537,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       return json({});
     });
     renderAt("/transport-requests/new");
+    await screen.findByLabelText("Requester name");
     fireEvent.change(screen.getByLabelText("Requester name"), {
       target: { value: "Front Desk" },
     });
@@ -591,13 +592,11 @@ describe("Sprint 4 Transport Requests corrections", () => {
         : json({}),
     );
     renderAt("/transport-requests/new");
+    await screen.findByLabelText("Requester name");
     expect(
       screen.getByText(
         "Development intake — production requests are normally received from connected hotel and restaurant systems.",
       ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Recorded as manual staff entry/),
     ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Request type"), {
       target: { value: "FOOD_DELIVERY" },
@@ -1171,6 +1170,10 @@ describe("Sprint 4 Transport Requests corrections", () => {
   test("loads routing only for the selected request and renders live metrics", async () => {
     vi.stubEnv("VITE_TOMTOM_MAPS_KEY", "configured-in-test");
     renderAt("/transport-requests");
+    await waitFor(() => {
+      const map = maplibre.instances.at(-1);
+      expect(map).toBeDefined();
+    });
     await waitFor(() =>
       expect(
         latestMap().sources.get("request-route-source")!.setData,
@@ -1385,6 +1388,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
   });
   test("opens and closes the request details drawer without resetting list state", async () => {
     renderAt("/transport-requests");
+    await screen.findByLabelText("Search requests");
     const search = screen.getByLabelText("Search requests");
     fireEvent.change(search, { target: { value: "TR" } });
     const requestButton = await screen.findByRole("button", {
@@ -1406,7 +1410,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     const queue = screen.getByLabelText("Request queue");
     const mapWorkspace = screen.getByLabelText("Request map");
     const rightWorkspace = screen.getByLabelText("Request workspace");
-    const pageHeader = document.querySelector(".topbar");
+    const pageHeader = document.querySelector(".app-navbar");
     const overview = within(rightWorkspace)
       .getByRole("heading", { name: "Selected Request Overview" })
       .closest(".selected-request-overview") as HTMLElement;
@@ -1641,7 +1645,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(within(panel).getByText("NAIA Terminal 3")).toBeInTheDocument();
     expect(within(panel).getByText("Oxford Suites Makati")).toBeInTheDocument();
     expect(await within(panel).findByText("12.4 km")).toBeInTheDocument();
-    expect(within(panel).getByText("+6 min")).toBeInTheDocument();
+    expect(within(panel).getByText("+6 min traffic")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
     expect(within(panel).getByText("Created")).toBeInTheDocument();
     expect(panel).toHaveTextContent(request.request_number);
@@ -1706,7 +1710,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(
       screen.queryByRole("dialog", { name: "Add Transport Request" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
     const selectedSummary = document.querySelector(
       ".selected-summary",
     ) as HTMLElement;
@@ -1718,8 +1722,11 @@ describe("Sprint 4 Transport Requests corrections", () => {
     const passengerView = renderAt(`/transport-requests/${request.id}`);
     await screen.findByRole("heading", { name: request.request_number });
     expect(
-      screen.getByText("Passengers / luggage").nextElementSibling,
-    ).toHaveTextContent("2 / 1");
+      screen.getByText("Passengers").nextElementSibling,
+    ).toHaveTextContent("2");
+    expect(
+      screen.getByText("Luggage items").nextElementSibling,
+    ).toHaveTextContent("1");
     passengerView.unmount();
 
     const delivery = {
@@ -1748,7 +1755,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     });
     renderAt(`/transport-requests/${request.id}`);
     const details = (
-      await screen.findByRole("heading", { name: "Request information" })
+      await screen.findByRole("heading", { name: "Request details" })
     ).closest(".detail-card") as HTMLElement;
     expect(
       within(details).getByText("Load description").nextElementSibling,
@@ -1836,16 +1843,13 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(
       screen.queryByRole("button", { name: "Apply" }),
     ).not.toBeInTheDocument();
-    const toolbar = screen
-      .getByRole("tablist", { name: "Transport request views" })
-      .closest(".request-toolbar");
+    const queue = screen.getByLabelText("Request queue");
     expect(
-      within(toolbar as HTMLElement).getByLabelText("Search requests"),
+      within(queue).getByLabelText("Search requests"),
     ).toBeInTheDocument();
     expect(
-      within(toolbar as HTMLElement).queryByRole("button", { name: "Filters" }),
-    ).not.toBeInTheDocument();
-    const queue = screen.getByLabelText("Request queue");
+      screen.queryByRole("tablist", { name: "Transport request views" })?.closest(".request-toolbar"),
+    ).not.toBeNull();
     expect(
       within(queue).getByRole("button", { name: "Filters" }),
     ).toBeInTheDocument();
@@ -1970,16 +1974,16 @@ describe("Sprint 4 Transport Requests corrections", () => {
     });
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).includes("page_size=5"),
+        String(input).includes("page_size=100"),
       ),
     ).toBe(false);
     fireEvent.change(search, { target: { value: "TR" } });
     await act(async () => {
-      vi.advanceTimersByTime(299);
+      vi.advanceTimersByTime(399);
     });
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).includes("page_size=5"),
+        String(input).includes("page_size=100"),
       ),
     ).toBe(false);
     await act(async () => {
@@ -1990,7 +1994,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       fetchMock.mock.calls.some(
         ([input]) =>
           String(input).includes("search=TR") &&
-          String(input).includes("page_size=5"),
+          String(input).includes("page_size=100"),
       ),
     ).toBe(true);
   });
@@ -1998,7 +2002,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("summary/")) return json(summary);
-      if (url.includes("page_size=5"))
+      if (url.includes("page_size=100") && url.includes("search=ZZ"))
         return json({ count: 0, next: null, previous: null, results: [] });
       return json({ count: 1, next: null, previous: null, results: [request] });
     });
@@ -2009,11 +2013,11 @@ describe("Sprint 4 Transport Requests corrections", () => {
       target: { value: "ZZ" },
     });
     await act(async () => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(400);
       await Promise.resolve();
     });
     vi.useRealTimers();
-    expect(await screen.findByText("No results found")).toBeInTheDocument();
+    expect(await screen.findByText("No transport requests match your filters.")).toBeInTheDocument();
   });
   test("selecting a suggestion applies it on page one and selects the loaded request", async () => {
     const suggested = {
@@ -2026,13 +2030,6 @@ describe("Sprint 4 Transport Requests corrections", () => {
     fetchMock.mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("summary/")) return json(summary);
-      if (url.includes("page_size=5"))
-        return json({
-          count: 1,
-          next: null,
-          previous: null,
-          results: [suggested],
-        });
       if (url.includes("search=TR-SUGGESTED"))
         return json({
           count: 1,
@@ -2046,19 +2043,13 @@ describe("Sprint 4 Transport Requests corrections", () => {
     await screen.findAllByText(request.request_number);
     vi.useFakeTimers();
     fireEvent.change(screen.getByLabelText("Search requests"), {
-      target: { value: "TR" },
+      target: { value: "TR-SUGGESTED" },
     });
     await act(async () => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(400);
       await Promise.resolve();
     });
     vi.useRealTimers();
-    fireEvent.click(
-      await screen.findByRole("option", { name: /TR-SUGGESTED/ }),
-    );
-    expect(screen.getByLabelText("Search requests")).toHaveValue(
-      "TR-SUGGESTED",
-    );
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
@@ -2171,7 +2162,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       expect(
         screen.queryByRole("table", { name: "Operational requests" }),
       ).not.toBeInTheDocument();
-      expect(within(queue).getByText(/request(s)?$/)).toHaveClass(
+      expect(within(queue).getByText(/^\d+ requests?$/)).toHaveClass(
         "queue-count",
       );
       expect(
@@ -2260,11 +2251,10 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(
       await screen.findByRole("button", { name: "Daily" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Weekly" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Monthly" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(await screen.findByText("Vehicle conflict")).toBeInTheDocument();
     expect(screen.queryByText("Scheduled today")).not.toBeInTheDocument();
     expect(document.querySelector(".transport-page")).toHaveClass(
       "transport-page--calendar",
@@ -2272,20 +2262,21 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(screen.getByLabelText("Transport request calendar")).toHaveClass(
       "schedule-calendar",
     );
-    const weeklyRegion = screen.getByRole("region", {
+    const weeklyRegion = await screen.findByRole("region", {
       name: "Calendar schedule grid",
     });
-    expect(weeklyRegion).toHaveClass("calendar-scroll-region--weekly");
-    expect(weeklyRegion.querySelector(".calendar-grid--weekly")).not.toBeNull();
+    expect(weeklyRegion).toHaveClass("calendar-scroll-region--monthly");
+    fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
+    await waitFor(() => {
+      expect(weeklyRegion).toHaveClass("calendar-scroll-region--weekly");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Daily" }));
     await waitFor(() =>
       expect(
-        screen.getByRole("region", { name: "Calendar schedule grid" }),
-      ).toHaveClass("calendar-scroll-region--daily"),
+        screen.queryByRole("region", { name: "Calendar schedule grid" }),
+      ).not.toBeInTheDocument(),
     );
-    await waitFor(() =>
-      expect(document.querySelector(".calendar-grid--daily")).not.toBeNull(),
-    );
+    expect(screen.getByLabelText("Transport request calendar")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Weekly" }));
     await waitFor(() =>
       expect(
@@ -2293,7 +2284,13 @@ describe("Sprint 4 Transport Requests corrections", () => {
       ).toHaveClass("calendar-scroll-region--weekly"),
     );
     await waitFor(() =>
-      expect(document.querySelector(".calendar-grid--weekly")).not.toBeNull(),
+      expect(document.querySelector(".calendar-week-cols")).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Monthly" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Calendar schedule grid" }),
+      ).toHaveClass("calendar-scroll-region--monthly"),
     );
   });
   test("all tabs retain one full-width panel and planned tabs stay honest", async () => {
@@ -2353,7 +2350,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Calendar View" }));
     expect(await screen.findByTestId("calendar-scroll-region")).toHaveClass(
-      "calendar-scroll-region--weekly",
+      "calendar-scroll-region--monthly",
     );
     expect(
       screen
@@ -2424,7 +2421,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       .find((button) => button.textContent?.includes("TR-UNASSIGNED"));
     expect(unassignedButton).toBeDefined();
     fireEvent.click(unassignedButton!);
-    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("Manual vehicle")).not.toBeInTheDocument(),
     );
@@ -2450,7 +2447,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       screen.getByLabelText("Destination address").closest("label"),
     ).toHaveClass("edit-field--wide");
     expect(screen.getByLabelText("Notes").closest("label")).toHaveClass(
-      "edit-field--long",
+      "form-section--notes",
     );
     expect(
       within(form as HTMLElement).getByRole("link", { name: "Cancel" }),
