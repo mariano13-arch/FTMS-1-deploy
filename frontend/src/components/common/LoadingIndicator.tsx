@@ -25,7 +25,6 @@ function DotsRing({
 
   return (
     <span
-      role="status"
       aria-label="Loading"
       className={`ld-dots-ring ${className}`.trim()}
       style={style}

@@ -51,7 +51,7 @@ export default function LoginPage() {
         className="text-center fw-semibold mb-2"
         style={{ color: "var(--color-maroon)", fontSize: "1.25rem" }}
       >
-        Fleet and Transport Management
+        Sign in to FTMS
       </h1>
       <p
         className="text-center small mb-4"
@@ -63,6 +63,7 @@ export default function LoginPage() {
       <form onSubmit={submit} className="d-flex flex-column gap-3" noValidate>
         <div>
           <label
+            htmlFor="login-username"
             className="form-label fw-medium mb-1"
             style={{ color: "var(--color-charcoal)", fontSize: "0.875rem" }}
           >
@@ -76,6 +77,7 @@ export default function LoginPage() {
               style={{ left: "14px", color: "var(--color-taupe)" }}
             />
             <input
+              id="login-username"
               type="text"
               name="username"
               required
@@ -89,6 +91,7 @@ export default function LoginPage() {
 
         <div>
           <label
+            htmlFor="login-password"
             className="form-label fw-medium mb-1"
             style={{ color: "var(--color-charcoal)", fontSize: "0.875rem" }}
           >
@@ -102,6 +105,7 @@ export default function LoginPage() {
               style={{ left: "14px", color: "var(--color-taupe)" }}
             />
             <input
+              id="login-password"
               type={showPassword ? "text" : "password"}
               name="password"
               required

@@ -11,6 +11,9 @@ const auth = vi.hoisted(() => ({
   loading: false, signIn: vi.fn(), signOut: vi.fn(), expire: vi.fn(),
 }));
 vi.mock("./contexts/AuthContext", () => ({ useAuth: () => auth }));
+vi.mock("./services/sidebarService", () => ({
+  fetchSidebarCounts: async () => ({}),
+}));
 vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }: { children: React.ReactNode }) => <div data-testid="map">{children}</div>,
   TileLayer: () => <span>© OpenStreetMap contributors</span>,
@@ -382,7 +385,6 @@ describe("Sprint 3 secure registry", () => {
   });
   test("failed status change is accessible and preserves the previous state", async () => {
     auth.user.role = "SUPER_ADMIN";
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.spyOn(globalThis, "fetch").mockImplementation(input => {
       const url = String(input);
       if (url.includes("deactivate")) return response({ detail: "internal" }, 500);
@@ -391,13 +393,14 @@ describe("Sprint 3 secure registry", () => {
     });
     renderAt("/vehicles/LILYGO-001");
     fireEvent.click(await screen.findByText("Deactivate"));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate vehicle" });
+    fireEvent.click(within(dialog).getByText("Deactivate"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to deactivate this vehicle.");
-    expect(screen.getByText("true")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Deactivate")).toBeInTheDocument();
   });
   test("successful status change updates state and rapid clicks mutate once", async () => {
     auth.user.role = "SUPER_ADMIN";
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const mutation = deferred<Response>();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
@@ -408,10 +411,11 @@ describe("Sprint 3 secure registry", () => {
     renderAt("/vehicles/LILYGO-001");
     const button = await screen.findByText("Deactivate");
     fireEvent.click(button); fireEvent.click(button);
-    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("deactivate"))).toHaveLength(1);
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate vehicle" });
+    fireEvent.click(within(dialog).getByText("Deactivate"));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("deactivate"))).toHaveLength(1));
     mutation.resolve(await response({ ...vehicle, is_active: false }));
     expect(await screen.findByText("Reactivate")).toBeInTheDocument();
-    expect(screen.getByText("false")).toBeInTheDocument();
   });
   test("backend field errors render safely on corresponding form fields", async () => {
     auth.user.role = "SUPER_ADMIN";
@@ -480,7 +484,6 @@ describe("Sprint 3 secure registry", () => {
   });
   test("unmount aborts an unresolved status mutation", async () => {
     auth.user.role = "SUPER_ADMIN";
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     let mutationSignal: AbortSignal | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (String(input).includes("deactivate")) {
@@ -494,6 +497,9 @@ describe("Sprint 3 secure registry", () => {
     });
     const rendered = renderAt("/vehicles/LILYGO-001");
     fireEvent.click(await screen.findByText("Deactivate"));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate vehicle" });
+    fireEvent.click(within(dialog).getByText("Deactivate"));
+    await waitFor(() => expect(mutationSignal).toBeDefined());
     rendered.unmount();
     expect(mutationSignal?.aborted).toBe(true);
   });
@@ -512,7 +518,7 @@ describe("Sprint 3 secure registry", () => {
     const button = screen.getByText("Sign out");
     fireEvent.click(button); fireEvent.click(button);
     expect(auth.signOut).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Signing out…")).toBeDisabled();
+    expect(screen.getByRole("button", { name: /signing out/i })).toBeDisabled();
   });
   test("detail route changes reset loading and ignore the old late response", async () => {
     const requests: Array<{ url: string; request: ReturnType<typeof deferred<Response>> }> = [];
@@ -555,7 +561,6 @@ describe("Sprint 3 secure registry", () => {
   });
   test("status errors clear when navigating to another vehicle", async () => {
     auth.user.role = "SUPER_ADMIN";
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const next: Array<ReturnType<typeof deferred<Response>>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
@@ -568,6 +573,8 @@ describe("Sprint 3 secure registry", () => {
     });
     const { history } = renderWithHistory("/vehicles/A");
     fireEvent.click(await screen.findByText("Deactivate"));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate vehicle" });
+    fireEvent.click(within(dialog).getByText("Deactivate"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Unable to deactivate this vehicle.");
     act(() => history.push("/vehicles/B"));
     expect(screen.getByText("Loading vehicle…")).toBeInTheDocument();

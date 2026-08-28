@@ -97,8 +97,7 @@ export default function TopBar({ sidebarOpen, toggleSidebar }: { sidebarOpen: bo
               {initials}
             </button>
 
-            {isDropdownOpen && (
-              <div className="nav-dropdown-menu position-absolute end-0 mt-2">
+            <div className={`nav-dropdown-menu position-absolute end-0 mt-2${isDropdownOpen ? "" : " d-none"}`}>
                 <div className="nav-dropdown-header">
                   <div className="d-flex align-items-center gap-2 mb-1">
                     <User size={14} className="text-muted" />
@@ -121,11 +120,10 @@ export default function TopBar({ sidebarOpen, toggleSidebar }: { sidebarOpen: bo
                     disabled={busy}
                   >
                     <LogOut size={14} />
-                    <span>{busy ? "Signing out…" : "Log out"}</span>
+                    <span>{busy ? "Signing out…" : "Sign out"}</span>
                   </button>
                 </div>
               </div>
-            )}
           </div>
         </div>
       </header>
