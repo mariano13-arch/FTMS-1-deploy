@@ -9,7 +9,7 @@ import {
   type LatestStatusResponse,
 } from "../services/telemetry";
 
-export type RealtimeState =
+type RealtimeState =
   | "connecting"
   | "live"
   | "reconnecting"
@@ -17,7 +17,7 @@ export type RealtimeState =
 
 const maximumReconnectDelay = 30_000;
 
-export function reconnectDelay(attempt: number): number {
+function reconnectDelay(attempt: number): number {
   return Math.min(1_000 * 2 ** attempt, maximumReconnectDelay);
 }
 

@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from django.db import IntegrityError, transaction
 
+from telemetry.geofences import evaluate_geofence_transitions
 from telemetry.models import TelemetryEvent
 from telemetry.presentation import semantic_values
 from telemetry.realtime import broadcast_vehicle_status
@@ -83,6 +84,7 @@ def ingest_telemetry(payload):
     try:
         with transaction.atomic():
             event = TelemetryEvent.objects.create(**serializer.create_model_values())
+            evaluate_geofence_transitions(event)
             transaction.on_commit(lambda: _broadcast_if_latest(event.event_id))
     except IntegrityError:
         event = TelemetryEvent.objects.select_related("vehicle").get(event_id=event_id)

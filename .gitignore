@@ -16,3 +16,7 @@ htmlcov/
 .vscode/
 *.swp
 .DS_Store
+.env.local
+.env.*.local
+tmp/
+*.tsbuildinfo

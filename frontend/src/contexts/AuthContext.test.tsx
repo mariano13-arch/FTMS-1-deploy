@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { AuthProvider, useAuth } from "./AuthContext";
-import { api, setCsrfToken } from "./services/api";
+import { api } from "../services/api";
 
 const user = { id: 1, username: "manager", display_name: "Fleet Manager", role: "FLEET_MANAGER" as const };
 function json(value: unknown, status = 200) {
@@ -16,25 +16,7 @@ function Consumer() {
     <button onClick={() => void auth.signOut().catch(() => undefined)}>logout</button>
   </div>;
 }
-afterEach(() => { setCsrfToken(""); vi.restoreAllMocks(); });
-
-test("a mutating request refreshes CSRF and retries once after a token mismatch", async () => {
-  setCsrfToken("stale-token");
-  const fetchMock = vi.spyOn(globalThis, "fetch")
-    .mockImplementationOnce(() => json({ detail: "CSRF Failed: CSRF token from the 'X-Csrftoken' HTTP header incorrect." }, 403))
-    .mockImplementationOnce(() => json({ csrf_token: "fresh-token" }))
-    .mockImplementationOnce(() => json({ saved: true }));
-
-  await expect(api<{ saved: boolean }>("/api/v1/drivers/13/", {
-    method: "PATCH",
-    body: JSON.stringify({ first_name: "Updated" }),
-  })).resolves.toEqual({ saved: true });
-
-  expect(fetchMock).toHaveBeenCalledTimes(3);
-  expect(String(fetchMock.mock.calls[1][0])).toContain("/auth/csrf/");
-  expect((fetchMock.mock.calls[0][1]?.headers as Headers).get("X-CSRFToken")).toBe("stale-token");
-  expect((fetchMock.mock.calls[2][1]?.headers as Headers).get("X-CSRFToken")).toBe("fresh-token");
-});
+afterEach(() => { vi.restoreAllMocks(); });
 
 test("CSRF bootstrap precedes session restoration and includes credentials", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")

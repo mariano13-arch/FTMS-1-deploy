@@ -1,0 +1,158 @@
+/* ==========================================================================
+   LOADING INDICATOR  (.ld-indicator)
+   Dots-ring — exact loading-ui/dots-ring behavior with plain CSS.
+   ========================================================================== */
+
+/* ---- Keyframes ---- */
+
+@keyframes ld-dot-pulse {
+  0%, 100% {
+    opacity: .25;
+    transform: scale(.65);
+  }
+
+  12.5% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  25% {
+    opacity: .75;
+    transform: scale(.85);
+  }
+
+  50% {
+    opacity: .35;
+    transform: scale(.7);
+  }
+}
+
+@keyframes ld-fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ---- Dots ring (standalone) ---- */
+
+.ld-dots-ring {
+  --ld-size: 1em;
+  --ld-q: calc(var(--ld-size) / 100);
+
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ld-size);
+  height: var(--ld-size);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.ld-dots-ring__track {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ld-dots-ring__dot-wrapper {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+}
+
+.ld-dots-ring__dot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #3f3f46;
+  animation: ld-dot-pulse var(--ld-duration, 1s) linear infinite;
+}
+
+/* ---- LoadingIndicator wrapper ---- */
+
+.ld-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: .75rem;
+}
+
+.ld-indicator__text {
+  font-size: .82rem;
+  font-weight: 500;
+  letter-spacing: .01em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--color-secondary-text, #81746b);
+}
+
+/* ---- Sizes via font-size on the ring ---- */
+
+.ld-indicator--sm .ld-dots-ring {
+  font-size: 24px;
+}
+
+.ld-indicator--sm .ld-indicator__text {
+  font-size: .72rem;
+}
+
+.ld-indicator--md .ld-dots-ring {
+  font-size: 40px;
+}
+
+.ld-indicator--lg .ld-dots-ring {
+  font-size: 56px;
+}
+
+.ld-indicator--lg .ld-indicator__text {
+  font-size: .92rem;
+}
+
+/* ---- Variant: inline ---- */
+
+.ld-indicator--inline {
+  display: inline-flex;
+}
+
+/* ---- Variant: card ---- */
+
+.ld-indicator--card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2.5rem 1rem;
+  min-height: 140px;
+}
+
+.ld-indicator--card .ld-indicator__text {
+  font-size: .88rem;
+}
+
+/* ---- Variant: fullpage ---- */
+
+.ld-indicator--fullpage {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  background: rgba(244, 240, 232, .85);
+  backdrop-filter: blur(6px);
+  animation: ld-fadein .3s ease-out;
+}
+
+.ld-indicator--fullpage .ld-dots-ring {
+  font-size: 72px;
+}
+
+.ld-indicator--fullpage .ld-indicator__text {
+  font-size: .95rem;
+  color: var(--color-charcoal, #2b2521);
+  font-weight: 500;
+}

@@ -1,0 +1,122 @@
+env: load .env
+env: export EXPO_PUBLIC_API_BASE_URL
+Starting project at D:\Capstone Project 1.2\FTMS-1\mobile
+Starting Metro Bundler
+
+Waiting on http://localhost:8081
+
+An update for expo is available: 57.0.13 → ~57.0.16
+5 other packages may need updating. Run npx expo install --check for details.
+Logs for your project will appear below.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+ WARN  The package D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui contains an invalid package.json configuration. Consider raising this issue with the package maintainer(s).
+Reason: The resolution for "D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\jetpack-compose\modifiers" defined in "exports" is D:\Capstone Project 1.2\FTMS-1\mobile\node_modules\@expo\ui\src\jetpack-compose\modifiers\index.ts, however this file does not exist. Falling back to file-based resolution.
+Android Bundling failed 5949ms node_modules\expo-router\entry.js (1309 modules)
+Unable to resolve "../src/jetpack-compose" from "node_modules\@expo\ui\jetpack-compose\index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mexport[39m [33m*[39m [36mfrom[39m [32m'../src/jetpack-compose'[39m[33m;[39m
+ [90m   |[39m                [31m[1m^[22m[39m
+ [90m 2 |[39m[0m
+
+Import stack:
+
+ node_modules\@expo\ui\jetpack-compose\index.js
+ | import "../src/jetpack-compose"
+
+ node_modules\expo-router\build\layouts\stack-utils\toolbar\StackToolbarButton\native.android.js
+ | import "@expo/ui/jetpack-compose"
+
+ node_modules\expo-router\build\layouts\stack-utils\toolbar\StackToolbarButton\index.js
+ | import "./native"
+
+ node_modules\expo-router\build\layouts\stack-utils\toolbar\StackToolbar.js
+ | import "./StackToolbarButton"
+
+ node_modules\expo-router\build\layouts\Stack.js
+ | import "./stack-utils/toolbar/StackToolbar"
+
+ node_modules\expo-router\build\stack\index.js
+ | import "../layouts/Stack"
+
+ node_modules\expo-router\build\index.js
+ | import "./stack"
+
+ app\+not-found.tsx
+ | import "expo-router"
+
+ app (require.context)
+
+Android Bundling failed 3979ms node_modules\expo-router\entry.js (1308 modules)
+Unable to resolve "../src/jetpack-compose" from "node_modules\@expo\ui\jetpack-compose\index.js"
+[0m[31m[1m>[22m[39m[90m 1 |[39m [36mexport[39m [33m*[39m [36mfrom[39m [32m'../src/jetpack-compose'[39m[33m;[39m
+ [90m   |[39m                [31m[1m^[22m[39m
+ [90m 2 |[39m[0m
+
+Import stack:
+
+ node_modules\@expo\ui\jetpack-compose\index.js
+ | import "../src/jetpack-compose"
+
+ node_modules\expo-router\build\layouts\stack-utils\toolbar\StackToolbarButton\native.android.js
+ | import "@expo/ui/jetpack-compose"
+
+ node_modules\expo-router\build\layouts\stack-utils\toolbar\StackToolbarButton\index.js
+ | import "./native"
+
+ node_modules\expo-router\build\layouts\stack-utils\toolbar\StackToolbar.js
+ | import "./StackToolbarButton"
+
+ node_modules\expo-router\build\layouts\Stack.js
+ | import "./stack-utils/toolbar/StackToolbar"
+
+ node_modules\expo-router\build\stack\index.js
+ | import "../layouts/Stack"
+
+ node_modules\expo-router\build\index.js
+ | import "./stack"
+
+ app\+not-found.tsx
+ | import "expo-router"
+
+ app (require.context)
+

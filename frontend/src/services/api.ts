@@ -2,10 +2,15 @@ export const apiBaseUrl =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 let csrfToken = "";
-export const setCsrfToken = (token: string) => { csrfToken = token; };
+export const setCsrfToken = (token: string) => {
+  csrfToken = token;
+};
 
 export class ApiError extends Error {
-  constructor(public status: number, public body: unknown) {
+  constructor(
+    public status: number,
+    public body: unknown,
+  ) {
     super(`API request failed (${status})`);
   }
 }
@@ -14,7 +19,9 @@ async function refreshCsrfToken() {
   const response = await fetch(`${apiBaseUrl}/api/v1/auth/csrf/`, {
     credentials: "include",
   });
-  const body = await response.json().catch(() => null) as { csrf_token?: unknown } | null;
+  const body = (await response.json().catch(() => null)) as {
+    csrf_token?: unknown;
+  } | null;
   if (!response.ok || typeof body?.csrf_token !== "string") {
     throw new ApiError(response.status, body);
   }
@@ -22,12 +29,14 @@ async function refreshCsrfToken() {
 }
 
 function isCsrfFailure(status: number, body: unknown) {
-  return status === 403 &&
+  return (
+    status === 403 &&
     typeof body === "object" &&
     body !== null &&
     "detail" in body &&
     typeof body.detail === "string" &&
-    body.detail.startsWith("CSRF Failed:");
+    body.detail.startsWith("CSRF Failed:")
+  );
 }
 
 export async function api<T>(
@@ -37,16 +46,25 @@ export async function api<T>(
 ): Promise<T> {
   const method = init.method?.toUpperCase() ?? "GET";
   const headers = new Headers(init.headers);
-  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData))
+    headers.set("Content-Type", "application/json");
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) {
     headers.set("X-CSRFToken", csrfToken);
   }
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init, method, headers, credentials: "include",
+    ...init,
+    method,
+    headers,
+    credentials: "include",
   });
-  const body = response.status === 204 ? null : await response.json().catch(() => null);
+  const body =
+    response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
-    if (retryCsrf && !["GET", "HEAD", "OPTIONS"].includes(method) && isCsrfFailure(response.status, body)) {
+    if (
+      retryCsrf &&
+      !["GET", "HEAD", "OPTIONS"].includes(method) &&
+      isCsrfFailure(response.status, body)
+    ) {
       try {
         await refreshCsrfToken();
         return api<T>(path, init, false);
@@ -54,7 +72,8 @@ export async function api<T>(
         if (refreshError instanceof ApiError) throw refreshError;
       }
     }
-    if (response.status === 401) window.dispatchEvent(new Event("ftms:session-expired"));
+    if (response.status === 401)
+      window.dispatchEvent(new Event("ftms:session-expired"));
     throw new ApiError(response.status, body);
   }
   return body as T;

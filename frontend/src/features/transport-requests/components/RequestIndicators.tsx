@@ -1,6 +1,7 @@
 import type { RequestStatus } from "../types";
+import { StatusBadge, workflowStatusTone } from "../../../components/common/StatusBadge";
+import { humanize as words } from "../../../utils/text";
 
-const words = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, character => character.toUpperCase());
 const statusLabel: Record<RequestStatus, string> = {
   FOR_APPROVAL: "Awaiting Decision",
   NEEDS_MORE_DETAILS: "Needs More Details",
@@ -11,9 +12,18 @@ const statusLabel: Record<RequestStatus, string> = {
 };
 
 export function PriorityChip({ value }: { value: string }) {
-  return <span className={`priority-chip priority-chip--${value.toLowerCase()}`} data-indicator="priority">{words(value)}</span>;
+  return <span className={`badge priority-chip priority-chip--${value.toLowerCase()}`} data-indicator="priority">{words(value)}</span>;
 }
 
 export function WorkflowStatusBadge({ value }: { value: RequestStatus }) {
-  return <span className={`workflow-badge workflow-badge--${value.toLowerCase()}`} data-indicator="workflow-status">{statusLabel[value]}</span>;
+  const key = value.toLowerCase() as keyof typeof workflowStatusTone;
+  return (
+    <span data-indicator="workflow-status">
+      <StatusBadge
+        status={value.toLowerCase()}
+        label={statusLabel[value]}
+        tone={workflowStatusTone[key] ?? "neutral"}
+      />
+    </span>
+  );
 }

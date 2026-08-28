@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError } from "./services/api";
-import * as auth from "./services/auth";
-import type { StaffUser } from "./services/auth";
+import { ApiError } from "../services/api";
+import * as auth from "../services/auth";
+import type { StaffUser } from "../services/auth";
 
 type AuthState = {
   user: StaffUser | null; loading: boolean;

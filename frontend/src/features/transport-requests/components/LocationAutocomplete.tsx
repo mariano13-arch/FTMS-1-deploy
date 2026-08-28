@@ -2,6 +2,7 @@ import { KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "../../../services/api";
 import { getPlaceDetails, suggestPlaces } from "../api";
 import type { PlaceDetails, PlaceSuggestion } from "../types";
+import LoadingIndicator from "../../../components/common/LoadingIndicator";
 
 let fallbackSession = 0;
 const newSessionId = () => {
@@ -47,8 +48,75 @@ export default function LocationAutocomplete({ kind, initialName = "", initialAd
     else if (event.key === "Enter" && active >= 0) { event.preventDefault(); void select(suggestions[active]); }
   };
   const fieldError = (field: string) => errors[field] && <small className="field-error" role="alert">{errors[field]}</small>;
-  return <fieldset><legend>{title}</legend><label>{title} name<input name={`${kind}_name`} required value={name} onChange={event => setName(event.target.value)} />{fieldError(`${kind}_name`)}</label><div ref={rootRef} className="location-autocomplete"><label className="edit-field--wide">{title} address<input name={`${kind}_address`} required value={address} onChange={event => changeAddress(event.target.value)} onKeyDown={keyDown} onFocus={() => { if (address.trim().length >= 3 && selectedRef.current !== address) setOpen(true); }} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={listId} aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined} /></label>{fieldError(`${kind}_address`)}
-    <input type="hidden" name={`${kind}_latitude`} value={latitude} /><input type="hidden" name={`${kind}_longitude`} value={longitude} />{fieldError(`${kind}_latitude`)}{fieldError(`${kind}_longitude`)}
-    {open && <div id={listId} className="location-suggestions" role="listbox" aria-label={`${title} location suggestions`}>{status === "loading" ? <div className="location-suggestion-state" role="status">Searching locations…</div> : status === "empty" ? <div className="location-suggestion-state">No matching locations found.</div> : status === "error" ? <div className="location-suggestion-state" role="alert">Unable to search locations.</div> : status === "unavailable" ? <div className="location-suggestion-state" role="alert">Location search temporarily unavailable.</div> : status === "select-error" ? <div className="location-suggestion-state" role="alert">Unable to select this location.</div> : suggestions.map((suggestion, index) => <button type="button" role="option" id={`${listId}-${index}`} aria-selected={active === index} className={active === index ? "active" : ""} key={`${suggestion.type}:${suggestion.id}`} onMouseEnter={() => setActive(index)} onClick={() => void select(suggestion)}><strong>{suggestion.title}</strong>{suggestion.subtitles.map(value => <small key={value}>{value}</small>)}</button>)}</div>}
-  </div></fieldset>;
+  return (
+    <fieldset className="form-section">
+      <legend>{title}</legend>
+      <label>
+        {title} name
+        <input
+          name={`${kind}_name`}
+          required
+          value={name}
+          onChange={event => setName(event.target.value)}
+        />
+        {fieldError(`${kind}_name`)}
+      </label>
+      <div ref={rootRef} className="location-autocomplete-field">
+        <label className="edit-field--wide">
+          {title} address
+          <input
+            name={`${kind}_address`}
+            required
+            value={address}
+            onChange={event => changeAddress(event.target.value)}
+            onKeyDown={keyDown}
+            onFocus={() => {
+              if (address.trim().length >= 3 && selectedRef.current !== address) setOpen(true);
+            }}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={open}
+            aria-controls={listId}
+            aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
+          />
+        </label>
+        {fieldError(`${kind}_address`)}
+        <input type="hidden" name={`${kind}_latitude`} value={latitude} />
+        <input type="hidden" name={`${kind}_longitude`} value={longitude} />
+        {fieldError(`${kind}_latitude`)}
+        {fieldError(`${kind}_longitude`)}
+        {open && (
+          <div id={listId} className="location-suggestions" role="listbox" aria-label={`${title} location suggestions`}>
+            {status === "loading" ? (
+              <div className="location-suggestion-state" role="status"><LoadingIndicator size="sm" message="Searching locations…" /></div>
+            ) : status === "empty" ? (
+              <div className="location-suggestion-state">No matching locations found.</div>
+            ) : status === "error" ? (
+              <div className="location-suggestion-state" role="alert">Unable to search locations.</div>
+            ) : status === "unavailable" ? (
+              <div className="location-suggestion-state" role="alert">Location search temporarily unavailable.</div>
+            ) : status === "select-error" ? (
+              <div className="location-suggestion-state" role="alert">Unable to select this location.</div>
+            ) : suggestions.map((suggestion, index) => (
+              <button
+                type="button"
+                role="option"
+                id={`${listId}-${index}`}
+                aria-selected={active === index}
+                className={active === index ? "active" : ""}
+                key={`${suggestion.type}:${suggestion.id}`}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => void select(suggestion)}
+              >
+                <strong>{suggestion.title}</strong>
+                {suggestion.subtitles.map(value => (
+                  <small key={value}>{value}</small>
+                ))}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </fieldset>
+  );
 }

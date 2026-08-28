@@ -1,5 +1,6 @@
-from datetime import UTC
+from datetime import UTC, timedelta
 
+from django.conf import settings
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -66,6 +67,14 @@ class TelemetryEventInputSerializer(serializers.Serializer):
     def validate_schema_version(self, value):
         if value != "1.0":
             raise serializers.ValidationError("Only schema_version 1.0 is supported.")
+        return value
+
+    def validate_recorded_at(self, value):
+        clock_skew_seconds = settings.FTMS_TELEMETRY_CLOCK_SKEW_SECONDS
+        if value > timezone.now() + timedelta(seconds=clock_skew_seconds):
+            raise serializers.ValidationError(
+                f"Timestamp cannot be more than {clock_skew_seconds} seconds in the future."
+            )
         return value
 
     def validate_device_id(self, value):

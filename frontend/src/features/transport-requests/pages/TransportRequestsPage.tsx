@@ -1,114 +1,856 @@
-import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CalendarView from "../components/CalendarView";
 import RequestMap from "../components/RequestMap";
 import RequestDetailsDrawer from "../components/RequestDetailsDrawer";
-import { PriorityChip, WorkflowStatusBadge } from "../components/RequestIndicators";
+import LoadingIndicator from "../../../components/common/LoadingIndicator";
+import {
+  PriorityChip,
+  WorkflowStatusBadge,
+} from "../components/RequestIndicators";
 import SelectedRequestOverview from "../components/SelectedRequestOverview";
 import TransportRequestFormPage from "./TransportRequestFormPage";
-import { getRequestRoute, getRequests, getRequestSuggestions, getSummary } from "../api";
-import { requestTypes, type RequestPage, type Summary, type TransportRequestListItem, type TransportRoute } from "../types";
+import { humanize as label } from "../../../utils/text";
+import { getRequestRoute, getRequests, getSummary } from "../api";
+import {
+  requestTypes,
+  type RequestPage,
+  type Summary,
+  type TransportRequestListItem,
+  type TransportRoute,
+} from "../types";
+import { distanceLabel, durationLabel, delayLabel } from "../routeFormat";
 
-type Tab = "Requests" | "For Approval" | "Dispatch Queue" | "Active Trips" | "Completed" | "Calendar View";
-type AdvancedFilters = { priority: string; source_system: string; request_type: string; assignment: string; scheduled_date: string };
-const emptyFilters: AdvancedFilters = { priority: "", source_system: "", request_type: "", assignment: "all", scheduled_date: "" };
-const tabs: Tab[] = ["Requests", "For Approval", "Dispatch Queue", "Active Trips", "Completed", "Calendar View"];
-const tabStatus: Partial<Record<Tab, string>> = { "For Approval": "FOR_APPROVAL,NEEDS_MORE_DETAILS", "Dispatch Queue": "APPROVED" };
-const tabCount = (tab: Tab, summary: Summary | null) => tab === "Requests" ? summary?.total : tab === "For Approval" ? summary?.approval_queue : tab === "Dispatch Queue" ? summary?.dispatch_queue : undefined;
-const label = (value: string) => value.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, character => character.toUpperCase());
-type RouteEntry = { state: "loading" | "ready" | "error"; data: TransportRoute | null };
-const distanceLabel = (route: TransportRoute) => `${(route.distance_meters / 1000).toFixed(1)} km`;
-const durationLabel = (route: TransportRoute) => `${Math.round(route.duration_seconds / 60)} min`;
-const delayLabel = (route: TransportRoute) => `+${Math.round(route.traffic_delay_seconds / 60)} min traffic`;
-const kpiTone = (name: string) => ["Needs details", "High priority"].includes(name) ? "attention" : ["Dispatch queue", "Vehicle assigned", "Ready for dispatch"].includes(name) ? "dispatch" : ["Awaiting decision", "Unassigned"].includes(name) ? "review" : "schedule";
-const isTransportRoute = (value: TransportRoute) => value?.geometry?.type === "LineString" && Array.isArray(value.geometry.coordinates) && Number.isFinite(value.distance_meters) && Number.isFinite(value.duration_seconds) && Number.isFinite(value.traffic_delay_seconds);
+type Tab =
+  | "Requests"
+  | "For Approval"
+  | "Dispatch Queue"
+  | "Active Trips"
+  | "Completed"
+  | "Calendar View";
+type AdvancedFilters = {
+  priority: string;
+  source_system: string;
+  request_type: string;
+  assignment: string;
+  scheduled_date: string;
+};
+const emptyFilters: AdvancedFilters = {
+  priority: "",
+  source_system: "",
+  request_type: "",
+  assignment: "all",
+  scheduled_date: "",
+};
+const tabs: Tab[] = [
+  "Requests",
+  "For Approval",
+  "Dispatch Queue",
+  "Active Trips",
+  "Completed",
+  "Calendar View",
+];
+const tabStatus: Partial<Record<Tab, string>> = {
+  "For Approval": "FOR_APPROVAL,NEEDS_MORE_DETAILS",
+  "Dispatch Queue": "APPROVED",
+};
+const tabCount = (tab: Tab, summary: Summary | null) =>
+  tab === "Requests"
+    ? summary?.total
+    : tab === "For Approval"
+      ? summary?.approval_queue
+      : tab === "Dispatch Queue"
+        ? summary?.dispatch_queue
+        : undefined;
+type RouteEntry = {
+  state: "loading" | "ready" | "error";
+  data: TransportRoute | null;
+};
+const kpiTone = (name: string) =>
+  ["Needs details", "High priority"].includes(name)
+    ? "attention"
+    : ["Dispatch queue", "Vehicle assigned", "Ready for dispatch"].includes(
+          name,
+        )
+      ? "dispatch"
+      : ["Awaiting decision", "Unassigned"].includes(name)
+        ? "review"
+        : "schedule";
+const isTransportRoute = (value: TransportRoute) =>
+  value?.geometry?.type === "LineString" &&
+  Array.isArray(value.geometry.coordinates) &&
+  Number.isFinite(value.distance_meters) &&
+  Number.isFinite(value.duration_seconds) &&
+  Number.isFinite(value.traffic_delay_seconds);
 
 export default function TransportRequestsPage() {
-  const [tab, setTab] = useState<Tab>("Requests"); const [query, setQuery] = useState("");
-  const [page, setPage] = useState<RequestPage | null>(null); const [summary, setSummary] = useState<Summary | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null); const selectedIdRef = useRef<string | null>(null);
-  const searchGroupRef = useRef<HTMLDivElement>(null); const filterPanelRef = useRef<HTMLDivElement>(null); const suppressSuggestionsRef = useRef(false); const skipSearchApplyRef = useRef(true);
-  const [searchValue, setSearchValue] = useState(""); const [suggestions, setSuggestions] = useState<TransportRequestListItem[]>([]); const [suggestionsOpen, setSuggestionsOpen] = useState(false); const [suggestionsLoading, setSuggestionsLoading] = useState(false); const [activeSuggestion, setActiveSuggestion] = useState(-1);
-  const [filters, setFilters] = useState<AdvancedFilters>(emptyFilters); const [filterPanelOpen, setFilterPanelOpen] = useState(false);
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading"); const [calendarVersion, setCalendarVersion] = useState(0);
-  const [routes, setRoutes] = useState<Record<string, RouteEntry>>({}); const routeControllers = useRef(new Map<string, AbortController>());
+  const [tab, setTab] = useState<Tab>("Requests");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState<RequestPage | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
+  const [searchValue, setSearchValue] = useState("");
+  const [filters, setFilters] = useState<AdvancedFilters>(emptyFilters);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [routes, setRoutes] = useState<Record<string, RouteEntry>>({});
+  const routeControllers = useRef(new Map<string, AbortController>());
   const [summaryVisible, setSummaryVisible] = useState(true);
-  const [drawerRequestId, setDrawerRequestId] = useState<string | null>(null); const [queueMenuId, setQueueMenuId] = useState<string | null>(null); const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  const [drawerRequestId, setDrawerRequestId] = useState<string | null>(null);
+  const [queueMenuId, setQueueMenuId] = useState<string | null>(null);
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [creatingRequest, setCreatingRequest] = useState(false);
-  useEffect(() => { if (!creatingRequest) return; const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setCreatingRequest(false); }; document.addEventListener("keydown", closeOnEscape); return () => document.removeEventListener("keydown", closeOnEscape); }, [creatingRequest]);
-  const load = useCallback((signal?: AbortSignal) => {
-    const values = new URLSearchParams(query); const requestedStatus = tabStatus[tab];
-    values.set("page_size", "100");
-    if (requestedStatus) values.set("status", requestedStatus); else values.delete("status");
-    const listRequired = !["Active Trips", "Completed", "Calendar View"].includes(tab);
-    return Promise.all([listRequired ? getRequests(values.toString(), signal) : Promise.resolve(null), getSummary(signal)]).then(([requests, counts]) => {
-      setSummary(counts);
-      if (requests) { const previousId = selectedIdRef.current; const selected = requests.results.find(item => item.id === previousId) ?? requests.results[0] ?? null; if (selected?.id && selected.id !== previousId) setSummaryVisible(true); selectedIdRef.current = selected?.id ?? null; setPage(requests); setSelectedId(selectedIdRef.current); } else { selectedIdRef.current = null; setPage(null); setSelectedId(null); }
-      setState("ready");
-    }).catch((error: unknown) => { if (!(error instanceof DOMException && error.name === "AbortError")) setState("error"); });
-  }, [query, tab]);
-  useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, [load]);
   useEffect(() => {
-    const term = searchValue.trim();
-    if (suppressSuggestionsRef.current) { suppressSuggestionsRef.current = false; return; }
-    if (term.length < 2) return;
+    if (!creatingRequest) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setCreatingRequest(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [creatingRequest]);
+  const load = useCallback(
+    (signal?: AbortSignal) => {
+      const values = new URLSearchParams(query);
+      const requestedStatus = tabStatus[tab];
+      values.set("page_size", "100");
+      if (requestedStatus) values.set("status", requestedStatus);
+      else values.delete("status");
+      const listRequired = ![
+        "Active Trips",
+        "Completed",
+        "Calendar View",
+      ].includes(tab);
+      return Promise.all([
+        listRequired
+          ? getRequests(values.toString(), signal)
+          : Promise.resolve(null),
+        getSummary(signal),
+      ])
+        .then(([requests, counts]) => {
+          setSummary(counts);
+          if (requests) {
+            const previousId = selectedIdRef.current;
+            const selected =
+              requests.results.find((item) => item.id === previousId) ??
+              requests.results[0] ??
+              null;
+            if (selected?.id && selected.id !== previousId)
+              setSummaryVisible(true);
+            selectedIdRef.current = selected?.id ?? null;
+            setPage(requests);
+            setSelectedId(selectedIdRef.current);
+          } else {
+            selectedIdRef.current = null;
+            setPage(null);
+            setSelectedId(null);
+          }
+          setState("ready");
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === "AbortError"))
+            setState("error");
+        });
+    },
+    [query, tab],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+  const buildQuery = useCallback(
+    (search: string, advanced: AdvancedFilters) => {
+      const values = new URLSearchParams();
+      if (search.trim()) values.set("search", search.trim());
+      for (const [key, value] of Object.entries(advanced))
+        if (value && !(key === "assignment" && value === "all"))
+          values.set(key, value);
+      values.set("ordering", "scheduled_pickup_at");
+      return values.toString();
+    },
+    [],
+  );
+  const updateQuery = useCallback(
+    (search: string, advanced: AdvancedFilters) => {
+      const nextQuery = buildQuery(search, advanced);
+      setState("loading");
+      setQuery((current) => (current === nextQuery ? current : nextQuery));
+    },
+    [buildQuery],
+  );
+  useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void getRequestSuggestions(term, tabStatus[tab] ?? "", controller.signal).then(result => { setSuggestions(result.results.slice(0, 5)); setSuggestionsLoading(false); }).catch(error => { if (!(error instanceof DOMException && error.name === "AbortError")) { setSuggestions([]); setSuggestionsLoading(false); } });
-    }, 300);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [searchValue, tab]);
-  const buildQuery = useCallback((search: string, advanced: AdvancedFilters) => { const values = new URLSearchParams(); if (search.trim()) values.set("search", search.trim()); for (const [key, value] of Object.entries(advanced)) if (value && !(key === "assignment" && value === "all")) values.set(key, value); values.set("ordering", "scheduled_pickup_at"); return values.toString(); }, []);
-  const updateQuery = useCallback((search: string, advanced: AdvancedFilters) => { const nextQuery = buildQuery(search, advanced); setState("loading"); setQuery(current => current === nextQuery ? current : nextQuery); }, [buildQuery]);
-  useEffect(() => {
-    if (skipSearchApplyRef.current) { skipSearchApplyRef.current = false; return; }
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => { if (!controller.signal.aborted) updateQuery(searchValue, filters); }, 400);
-    return () => { window.clearTimeout(timer); controller.abort(); };
+      updateQuery(searchValue, filters);
+    }, 400);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [searchValue, filters, updateQuery]);
   useEffect(() => {
-    const closeOnOutsideClick = (event: PointerEvent) => { const target = event.target as Node; if (!searchGroupRef.current?.contains(target)) { setSuggestionsOpen(false); setActiveSuggestion(-1); } if (!filterPanelRef.current?.contains(target)) setFilterPanelOpen(false); if (!(target instanceof Element) || !target.closest(".request-queue-actions")) setQueueMenuId(null); };
-    document.addEventListener("pointerdown", closeOnOutsideClick); return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!filterPanelRef.current?.contains(target)) setFilterPanelOpen(false);
+      if (
+        !(target instanceof Element) ||
+        !target.closest(".request-queue-actions")
+      )
+        setQueueMenuId(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () =>
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
   }, []);
-  const refresh = () => { if (state === "loading") return; setState("loading"); setCalendarVersion(value => value + 1); void load(); };
-  const updateSearch = (value: string) => { setSearchValue(value); setActiveSuggestion(-1); if (value.trim().length < 2) { setSuggestions([]); setSuggestionsOpen(false); setSuggestionsLoading(false); } else { setSuggestionsOpen(true); setSuggestionsLoading(true); } };
-  const selectSuggestion = (item: TransportRequestListItem) => { suppressSuggestionsRef.current = true; skipSearchApplyRef.current = true; setSearchValue(item.request_number); setSuggestionsOpen(false); if (item.id !== selectedIdRef.current) setSummaryVisible(true); selectedIdRef.current = item.id; setSelectedId(item.id); updateQuery(item.request_number, filters); };
-  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => { if (event.key === "Escape") { setSuggestionsOpen(false); setActiveSuggestion(-1); return; } if (!suggestionsOpen || suggestionsLoading || suggestions.length === 0) return; if (event.key === "ArrowDown") { event.preventDefault(); setActiveSuggestion(value => Math.min(value + 1, suggestions.length - 1)); } else if (event.key === "ArrowUp") { event.preventDefault(); setActiveSuggestion(value => Math.max(value - 1, 0)); } else if (event.key === "Enter" && activeSuggestion >= 0) { event.preventDefault(); selectSuggestion(suggestions[activeSuggestion]); } };
-  const changeFilter = (key: keyof AdvancedFilters, value: string) => { const next = { ...filters, [key]: value }; skipSearchApplyRef.current = true; setFilters(next); updateQuery(searchValue, next); };
-  const resetFilters = () => { suppressSuggestionsRef.current = true; skipSearchApplyRef.current = true; setSearchValue(""); setFilters(emptyFilters); setSuggestions([]); setSuggestionsOpen(false); setFilterPanelOpen(false); setActiveSuggestion(-1); selectedIdRef.current = null; setSelectedId(null); setState("loading"); updateQuery("", emptyFilters); };
-  const selected = page?.results.find(item => item.id === selectedId) ?? null;
+
+  const updateSearch = (value: string) => {
+    setSearchValue(value);
+  };
+  const changeFilter = (key: keyof AdvancedFilters, value: string) => {
+    const next = { ...filters, [key]: value };
+    setFilters(next);
+    updateQuery(searchValue, next);
+  };
+  const resetFilters = () => {
+    setSearchValue("");
+    setFilters(emptyFilters);
+    setFilterPanelOpen(false);
+    selectedIdRef.current = null;
+    setSelectedId(null);
+    setState("loading");
+    updateQuery("", emptyFilters);
+  };
+  const selected = page?.results.find((item) => item.id === selectedId) ?? null;
   const selectedRoute = selected ? routes[selected.id] : undefined;
   useEffect(() => {
-    if (!selectedId || routes[selectedId] || routeControllers.current.has(selectedId)) return;
-    const controller = new AbortController(); routeControllers.current.set(selectedId, controller);
-    setRoutes(current => ({ ...current, [selectedId]: { state: "loading", data: null } }));
-    void getRequestRoute(selectedId, controller.signal).then(data => setRoutes(current => ({ ...current, [selectedId]: isTransportRoute(data) ? { state: "ready", data } : { state: "error", data: null } }))).catch(error => {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setRoutes(current => ({ ...current, [selectedId]: { state: "error", data: null } }));
-    }).finally(() => routeControllers.current.delete(selectedId));
+    if (
+      !selectedId ||
+      routes[selectedId] ||
+      routeControllers.current.has(selectedId)
+    )
+      return;
+    const controller = new AbortController();
+    routeControllers.current.set(selectedId, controller);
+    setRoutes((current) => ({
+      ...current,
+      [selectedId]: { state: "loading", data: null },
+    }));
+    void getRequestRoute(selectedId, controller.signal)
+      .then((data) =>
+        setRoutes((current) => ({
+          ...current,
+          [selectedId]: isTransportRoute(data)
+            ? { state: "ready", data }
+            : { state: "error", data: null },
+        })),
+      )
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError"))
+          setRoutes((current) => ({
+            ...current,
+            [selectedId]: { state: "error", data: null },
+          }));
+      })
+      .finally(() => routeControllers.current.delete(selectedId));
   }, [routes, selectedId]);
-  useEffect(() => () => { routeControllers.current.forEach(controller => controller.abort()); routeControllers.current.clear(); }, []);
-  const closeDrawer = useCallback(() => { setDrawerRequestId(null); requestAnimationFrame(() => drawerTriggerRef.current?.focus()); }, []);
-  const choose = (item: TransportRequestListItem) => { if (item.id !== selectedIdRef.current) setSummaryVisible(true); selectedIdRef.current = item.id; setSelectedId(item.id); };
-  const viewDetails = (item: TransportRequestListItem, trigger: HTMLElement) => { choose(item); drawerTriggerRef.current = trigger; setQueueMenuId(null); setDrawerRequestId(item.id); };
-  const cards = useMemo(() => summary ? [
-    ["Awaiting decision", summary.for_approval, "For approval"], ["Needs details", summary.needs_more_details, "Corrections requested"],
-    ["Dispatch queue", summary.dispatch_queue, "Approved requests"], ["Unassigned", summary.approved_unassigned, "Approved without vehicle"],
-    ["Vehicle assigned", summary.approved_assigned, "Ready to prepare"], ["Ready for dispatch", summary.ready_for_dispatch, "Future trip handoff"],
-    ["Scheduled today", summary.scheduled_today, "Real pickup date"], ["High priority", summary.high_priority, "High and urgent"],
-  ] : [], [summary]);
+  useEffect(
+    () => () => {
+      routeControllers.current.forEach((controller) => controller.abort());
+      routeControllers.current.clear();
+    },
+    [],
+  );
+  const closeDrawer = useCallback(() => {
+    setDrawerRequestId(null);
+    requestAnimationFrame(() => drawerTriggerRef.current?.focus());
+  }, []);
+  const choose = (item: TransportRequestListItem) => {
+    if (item.id !== selectedIdRef.current) setSummaryVisible(true);
+    selectedIdRef.current = item.id;
+    setSelectedId(item.id);
+  };
+  const viewDetails = (
+    item: TransportRequestListItem,
+    trigger: HTMLElement,
+  ) => {
+    choose(item);
+    drawerTriggerRef.current = trigger;
+    setQueueMenuId(null);
+    setDrawerRequestId(item.id);
+  };
+  const cards = useMemo(
+    () =>
+      summary
+        ? [
+            ["Awaiting decision", summary.for_approval, "For approval"],
+            [
+              "Needs details",
+              summary.needs_more_details,
+              "Corrections requested",
+            ],
+            ["Dispatch queue", summary.dispatch_queue, "Approved requests"],
+            [
+              "Unassigned",
+              summary.approved_unassigned,
+              "Approved without vehicle",
+            ],
+            ["Vehicle assigned", summary.approved_assigned, "Ready to prepare"],
+            [
+              "Ready for dispatch",
+              summary.ready_for_dispatch,
+              "Future trip handoff",
+            ],
+            ["Scheduled today", summary.scheduled_today, "Real pickup date"],
+            ["High priority", summary.high_priority, "High and urgent"],
+          ]
+        : [],
+    [summary],
+  );
   const selectedAssignedVehicle = selected?.assigned_vehicle ?? null;
   const planned = tab === "Active Trips" || tab === "Completed";
-  const activeFilterCount = Object.entries(filters).filter(([key, value]) => value && !(key === "assignment" && value === "all")).length;
-  const queueFilter = <div ref={filterPanelRef} className="advanced-filter-root queue-filter-root" onKeyDown={event => { if (event.key === "Escape") { setFilterPanelOpen(false); (event.currentTarget.querySelector("button") as HTMLButtonElement | null)?.focus(); } }}><button type="button" className="button--secondary filter-toggle" aria-expanded={filterPanelOpen} aria-controls="transport-advanced-filters" onClick={() => setFilterPanelOpen(value => !value)}>Filters{activeFilterCount > 0 && <span className="active-filter-count" aria-label={`${activeFilterCount} active filters`}>{activeFilterCount}</span>}</button>{filterPanelOpen && <div id="transport-advanced-filters" className="advanced-filter-panel"><label>Priority<select value={filters.priority} onChange={event => changeFilter("priority", event.target.value)}><option value="">All priorities</option><option>LOW</option><option>NORMAL</option><option>HIGH</option><option>URGENT</option></select></label><label>Source<select value={filters.source_system} onChange={event => changeFilter("source_system", event.target.value)}><option value="">All sources</option><option>HOTEL_MANAGEMENT_SYSTEM</option><option>RESTAURANT_MANAGEMENT_SYSTEM</option><option>MANUAL_STAFF_ENTRY</option><option>OTHER_SUBSYSTEM</option></select></label><label>Type<select value={filters.request_type} onChange={event => changeFilter("request_type", event.target.value)}><option value="">All types</option>{requestTypes.map(value => <option key={value}>{value}</option>)}</select></label><label>Assignment<select value={filters.assignment} onChange={event => changeFilter("assignment", event.target.value)}><option value="all">All assignments</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></label><label>Scheduled date<input value={filters.scheduled_date} onChange={event => changeFilter("scheduled_date", event.target.value)} type="date" /></label><button type="button" className="button--secondary reset-filter-button" onClick={resetFilters}>Reset Filters</button></div>}</div>;
-  const kpiStrip = <div className="kpi-grid kpi-grid--wide kpi-grid--workspace" aria-label="Transport request status summary">{cards.map(([name, value]) => <article className={`kpi-card kpi-card--${kpiTone(String(name))}`} key={String(name)}><strong>{String(value)}</strong><span>{String(name)}</span></article>)}</div>;
-  return <section className={`transport-page transport-page--workspace${tab === "Calendar View" ? " transport-page--calendar" : !planned ? " transport-page--operational" : " transport-page--planned"}`}><div className="transport-header"><div><p className="breadcrumb">Operations / Transport Requests</p><h1>Transport Requests</h1></div><div className="header-actions"><time>{new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</time><button className="button--secondary" disabled={state === "loading"} onClick={refresh}>{state === "loading" ? "Refreshing…" : "↻ Refresh"}</button><button type="button" title="Temporary development/testing intake" onClick={() => setCreatingRequest(true)}>＋ Add Request</button></div></div>
-    <div className="request-toolbar"><div className="request-tabs" role="tablist" aria-label="Transport request views">{tabs.map(item => { const count = tabCount(item, summary); return <button role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} key={item} onClick={() => { setTab(item); setPage(null); setState("loading"); }}>{item}{typeof count === "number" && <span className="tab-count">{count}</span>}</button>; })}</div>{!planned && tab !== "Calendar View" && <div className="request-toolbar-controls"><div ref={searchGroupRef} className="filter-search-group"><label className="sr-only" htmlFor="transport-request-search">Search requests</label><input id="transport-request-search" name="search" placeholder="Search requests" value={searchValue} onChange={event => updateSearch(event.target.value)} onKeyDown={handleSearchKeyDown} onFocus={() => { if (searchValue.trim().length >= 2) setSuggestionsOpen(true); }} role="combobox" aria-autocomplete="list" aria-expanded={suggestionsOpen} aria-controls="request-search-suggestions" aria-activedescendant={activeSuggestion >= 0 ? `request-suggestion-${activeSuggestion}` : undefined} />{suggestionsOpen && searchValue.trim().length >= 2 && <div id="request-search-suggestions" className="request-search-suggestions" role="listbox">{suggestionsLoading ? <div className="request-suggestion-state">Searching…</div> : suggestions.length === 0 ? <div className="request-suggestion-state">No results found</div> : suggestions.map((item, index) => <button id={`request-suggestion-${index}`} type="button" role="option" aria-selected={activeSuggestion === index} className={activeSuggestion === index ? "active" : ""} key={item.id} onMouseEnter={() => setActiveSuggestion(index)} onClick={() => selectSuggestion(item)}><strong>{item.request_number}</strong><span>{label(item.request_type)}</span><small>{item.pickup_name} → {item.destination_name}</small></button>)}</div>}</div></div>}</div>
-    {planned && kpiStrip}
-    <div className={`transport-tab-panel transport-tab-panel--${tab.toLowerCase().replaceAll(" ", "-")}`} role="tabpanel">
-    {planned ? <section className="planned-module"><span>Planned capability</span><strong>{tab === "Active Trips" ? "Active trip execution is not available yet" : "Completed trip history is not available yet"}</strong><p>{tab === "Active Trips" ? "Active trip execution will appear here once driver assignment and trip lifecycle functionality are available." : "Completed lifecycle records will appear here once real trip completion functionality is available. No completed trips are fabricated."}</p></section> : tab === "Calendar View" ? <CalendarView refreshVersion={calendarVersion} /> : <>
-      {state === "loading" && !page && <div className="state-card">Loading transport requests…</div>}{state === "error" && <div role="alert" className="state-card state-card--error">Unable to load transport requests. Try refreshing.</div>}
-      {tab === "Dispatch Queue" && <p className="dispatch-handoff-note">Approved requests ready for dispatch planning. Assignment and optimization are handled in Dispatch Board.</p>}
-      {page && <div className={`request-workspace request-workspace--fixed${drawerRequestId ? " request-workspace--drawer-open" : ""}`}><div className="request-picker request-picker--scroll" aria-label="Request queue"><div className="panel-title"><strong>{tab === "For Approval" ? "Approval queue" : tab === "Dispatch Queue" ? "Approved dispatch queue" : "Request queue"}</strong><div className="queue-header-controls"><span className="queue-count">{page.count} request{page.count === 1 ? "" : "s"}</span>{queueFilter}</div></div>{page.results.length === 0 ? <div className="request-picker-empty"><span>No transport requests match your filters.</span><button type="button" className="button--secondary" onClick={resetFilters}>Reset Filters</button></div> : page.results.map(item => <div key={item.id} className={`request-queue-row${selected?.id === item.id ? " selected" : ""}`}><button type="button" className={`request-queue-select${selected?.id === item.id ? " selected" : ""}`} onClick={() => choose(item)}><span className="request-queue-primary"><strong id={`request-reference-${item.id}`}>{item.request_number}</strong><span>{label(item.request_type)}</span><span className="request-queue-indicators"><WorkflowStatusBadge value={item.status} /></span></span><span className="request-queue-secondary"><span>{item.requester_name} · {label(item.source_system)}</span><span>{item.pickup_name} → {item.destination_name}</span><time>{new Date(item.scheduled_pickup_at).toLocaleString()}</time>{tab === "Dispatch Queue" && <span className="dispatch-awaiting">Awaiting dispatch planning</span>}</span></button><div className="request-queue-actions"><button type="button" className="request-queue-menu-toggle" aria-label="More options" aria-describedby={`request-reference-${item.id}`} aria-haspopup="menu" aria-expanded={queueMenuId === item.id} onClick={() => setQueueMenuId(current => current === item.id ? null : item.id)} onKeyDown={event => { if (event.key === "Escape") setQueueMenuId(null); }}>⋮</button>{queueMenuId === item.id && <div className="request-queue-menu" role="menu"><button type="button" role="menuitem" onClick={event => { const trigger = event.currentTarget.closest(".request-queue-actions")?.querySelector(".request-queue-menu-toggle"); if (trigger instanceof HTMLElement) viewDetails(item, trigger); }}>View details</button></div>}</div></div>)}</div><div className="request-right-workspace" aria-label="Request workspace">{kpiStrip}<div className="map-side" aria-label="Request map"><RequestMap request={selected} route={selectedRoute?.data} routeState={selectedRoute?.state ?? "idle"} />{selected && !summaryVisible && <button type="button" className="selected-summary-restore" onClick={() => setSummaryVisible(true)}>Request info</button>}{selected && summaryVisible && <article className="selected-summary"><button type="button" className="selected-summary-close" aria-label="Close request information" onClick={() => setSummaryVisible(false)}>×</button><header><div><strong>{selected.requester_name}</strong><small>{selected.request_number}</small></div><PriorityChip value={selected.priority} /></header><dl><div><dt>Schedule</dt><dd>{new Date(selected.scheduled_pickup_at).toLocaleString()}</dd></div><div><dt>{selected.request_category === "DELIVERY_LOGISTICS" ? "Load" : "Passengers"}</dt><dd>{selected.request_category === "DELIVERY_LOGISTICS" ? selected.load_description : selected.passenger_count}</dd></div><div><dt>Status</dt><dd><WorkflowStatusBadge value={selected.status} /></dd></div><div><dt>Vehicle</dt><dd>{selectedAssignedVehicle?.display_name ?? "Unassigned"}</dd></div><div><dt>Distance / ETA</dt><dd>{selectedRoute?.state === "ready" && selectedRoute.data ? distanceLabel(selectedRoute.data) + " · " + durationLabel(selectedRoute.data) : selectedRoute?.state === "loading" ? "Calculating route…" : selectedRoute?.state === "error" ? "Route unavailable" : "—"}</dd></div><div><dt>Traffic delay</dt><dd>{selectedRoute?.state === "ready" && selectedRoute.data ? <>{selectedRoute.data.traffic_delay_seconds > 0 && <span>{delayLabel(selectedRoute.data)}</span>}<small className="live-traffic-context">Live traffic</small></> : "—"}</dd></div></dl></article>}</div><SelectedRequestOverview request={selected} route={selectedRoute?.data} routeState={selectedRoute?.state ?? "idle"} onViewDetails={trigger => { if (selected) viewDetails(selected, trigger); }} />{drawerRequestId && <RequestDetailsDrawer requestId={drawerRequestId} route={drawerRequestId === selected?.id ? selectedRoute?.data : null} allowReviewActions={tab === "For Approval"} onRequestChanged={() => { void load(); }} onClose={closeDrawer} />}</div></div>}
-    </>}
-    </div>{creatingRequest && <div className="request-create-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setCreatingRequest(false); }}><aside className="request-create-drawer" role="dialog" aria-modal="true" aria-label="Add Transport Request"><header><div><small>Temporary development intake</small><h2>Add Transport Request</h2></div><button type="button" aria-label="Close Add Transport Request" onClick={() => setCreatingRequest(false)}>×</button></header><div className="request-create-drawer-body"><TransportRequestFormPage embedded onClose={() => setCreatingRequest(false)} onSaved={() => { setCreatingRequest(false); void load(); }} /></div></aside></div>}
-  </section>;
+  const activeFilterCount = Object.entries(filters).filter(
+    ([key, value]) => value && !(key === "assignment" && value === "all"),
+  ).length;
+  const queueFilter = (
+    <div
+      ref={filterPanelRef}
+      className="advanced-filter-root queue-filter-root"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setFilterPanelOpen(false);
+          (
+            event.currentTarget.querySelector(
+              "button",
+            ) as HTMLButtonElement | null
+          )?.focus();
+        }
+      }}
+    >
+      <button
+        type="button"
+        className="filter-toggle btn-filter"
+        aria-expanded={filterPanelOpen}
+        aria-controls="transport-advanced-filters"
+        onClick={() => setFilterPanelOpen((value) => !value)}
+      >
+        Filters
+        {activeFilterCount > 0 && (
+          <span
+            className="active-filter-count"
+            aria-label={`${activeFilterCount} active filters`}
+          >
+            {activeFilterCount}
+          </span>
+        )}
+      </button>
+      {filterPanelOpen && (
+        <div id="transport-advanced-filters" className="advanced-filter-panel">
+          <label>
+            Priority
+            <select
+              value={filters.priority}
+              onChange={(event) => changeFilter("priority", event.target.value)}
+            >
+              <option value="">All priorities</option>
+              <option>LOW</option>
+              <option>NORMAL</option>
+              <option>HIGH</option>
+              <option>URGENT</option>
+            </select>
+          </label>
+          <label>
+            Source
+            <select
+              value={filters.source_system}
+              onChange={(event) =>
+                changeFilter("source_system", event.target.value)
+              }
+            >
+              <option value="">All sources</option>
+              <option>HOTEL_MANAGEMENT_SYSTEM</option>
+              <option>RESTAURANT_MANAGEMENT_SYSTEM</option>
+              <option>MANUAL_STAFF_ENTRY</option>
+              <option>OTHER_SUBSYSTEM</option>
+            </select>
+          </label>
+          <label>
+            Type
+            <select
+              value={filters.request_type}
+              onChange={(event) =>
+                changeFilter("request_type", event.target.value)
+              }
+            >
+              <option value="">All types</option>
+              {requestTypes.map((value) => (
+                <option key={value}>{value}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Assignment
+            <select
+              value={filters.assignment}
+              onChange={(event) =>
+                changeFilter("assignment", event.target.value)
+              }
+            >
+              <option value="all">All assignments</option>
+              <option value="unassigned">Unassigned</option>
+              <option value="assigned">Assigned</option>
+            </select>
+          </label>
+          <label>
+            Scheduled date
+            <input
+              value={filters.scheduled_date}
+              onChange={(event) =>
+                changeFilter("scheduled_date", event.target.value)
+              }
+              type="date"
+            />
+          </label>
+          <button
+            type="button"
+            className="reset-filter-button btn-filter"
+            onClick={resetFilters}
+          >
+            Reset Filters
+          </button>
+        </div>
+      )}
+    </div>
+  );
+  const kpiStrip = (
+    <div
+      className="kpi-grid kpi-grid--wide kpi-grid--workspace"
+      aria-label="Transport request status summary"
+    >
+      {cards.map(([name, value]) => (
+        <article
+          className={`kpi-card kpi-card--${kpiTone(String(name))}`}
+          key={String(name)}
+        >
+          <strong>{String(value)}</strong>
+          <span>{String(name)}</span>
+        </article>
+      ))}
+    </div>
+  );
+  return (
+    <section
+      className={`transport-page transport-page--workspace${tab === "Calendar View" ? " transport-page--calendar" : !planned ? " transport-page--operational" : " transport-page--planned"}`}
+    >
+      <div className="transport-header d-flex align-items-start justify-content-between gap-3">
+        <div>
+          <p className="breadcrumb text-secondary small mb-1">
+            Operations / Transport Requests
+          </p>
+          <h1 className="mb-1">Transport Requests</h1>
+        </div>
+      </div>
+      <div className="request-toolbar d-flex align-items-end justify-content-between">
+        <div
+          className="nav nav-pills transport-tabs"
+          role="tablist"
+          aria-label="Transport request views"
+        >
+          {tabs.map((item) => {
+            const count = tabCount(item, summary);
+            return (
+              <button
+                role="tab"
+                aria-selected={tab === item}
+                className={`nav-link${tab === item ? " active" : ""}`}
+                key={item}
+                onClick={() => {
+                  setTab(item);
+                  setPage(null);
+                  setState("loading");
+                }}
+              >
+                {item}
+                {typeof count === "number" && (
+                  <span className="tab-count">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="header-actions d-flex align-items-center gap-2 mb-2">
+          <button
+            type="button"
+            className="btn-action--filled btn-sm"
+            title="Temporary development/testing intake"
+            onClick={() => setCreatingRequest(true)}
+          >
+            ＋ Add Request
+          </button>
+        </div>
+      </div>
+      <div
+        className={`transport-tab-panel d-flex flex-column w-100 transport-tab-panel--${tab.toLowerCase().replaceAll(" ", "-")}`}
+        role="tabpanel"
+      >
+        {planned ? (
+          <section className="planned-module d-grid text-center">
+            <span>Planned capability</span>
+            <strong>
+              {tab === "Active Trips"
+                ? "Active trip execution is not available yet"
+                : "Completed trip history is not available yet"}
+            </strong>
+            <p>
+              {tab === "Active Trips"
+                ? "Active trip execution will appear here once driver assignment and trip lifecycle functionality are available."
+                : "Completed lifecycle records will appear here once real trip completion functionality is available. No completed trips are fabricated."}
+            </p>
+          </section>
+        ) : tab === "Calendar View" ? (
+          <CalendarView />
+        ) : (
+          <>
+            {state === "loading" && !page && (
+              <div className="state-card card text-center border-0">
+                <LoadingIndicator
+                  variant="card"
+                  message="Loading transport requests…"
+                />
+              </div>
+            )}
+            {state === "error" && (
+              <div
+                role="alert"
+                className="state-card card text-center border-0 text-danger"
+              >
+                Unable to load transport requests. Try refreshing.
+              </div>
+            )}
+            {tab === "Dispatch Queue" && (
+              <p className="dispatch-handoff-note">
+                Approved requests ready for dispatch planning. Assignment and
+                optimization are handled in Dispatch Board.
+              </p>
+            )}
+            {page && (
+              <div
+                className={`request-workspace request-workspace--fixed${drawerRequestId ? " request-workspace--drawer-open" : ""}`}
+              >
+                <div
+                  className="request-picker request-picker--scroll"
+                  aria-label="Request queue"
+                >
+                  <div className="panel-title">
+                    <strong>
+                      {tab === "For Approval"
+                        ? "Approval queue"
+                        : tab === "Dispatch Queue"
+                          ? "Approved dispatch queue"
+                          : "Request queue"}
+                    </strong>
+                    <div className="queue-header-controls d-flex align-items-center gap-2">
+                      <span className="queue-count">
+                        {page.count} request{page.count === 1 ? "" : "s"}
+                      </span>
+                      {queueFilter}
+                    </div>
+                  </div>
+                  <div className="filter-search-group">
+                    <label
+                      className="visually-hidden"
+                      htmlFor="transport-request-search"
+                    >
+                      Search requests
+                    </label>
+                    <input
+                      id="transport-request-search"
+                      name="search"
+                      placeholder="Search requests"
+                      value={searchValue}
+                      onChange={(event) => updateSearch(event.target.value)}
+                    />
+                  </div>
+                  {page.results.length === 0 ? (
+                    <div className="request-picker-empty">
+                      <span>No transport requests match your filters.</span>
+                      <button
+                        type="button"
+                        className="btn-filter"
+                        onClick={resetFilters}
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  ) : (
+                    page.results.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`request-queue-row${selected?.id === item.id ? " selected" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className={`request-queue-select${selected?.id === item.id ? " selected" : ""}`}
+                          onClick={() => choose(item)}
+                        >
+                          <span className="request-queue-primary">
+                            <strong id={`request-reference-${item.id}`}>
+                              {item.request_number}
+                            </strong>
+                            <span>{label(item.request_type)}</span>
+                            <span className="request-queue-indicators">
+                              <WorkflowStatusBadge value={item.status} />
+                            </span>
+                          </span>
+                          <span className="request-queue-secondary">
+                            <span>
+                              {item.requester_name} ·{" "}
+                              {label(item.source_system)}
+                            </span>
+                            <span>
+                              {item.pickup_name} → {item.destination_name}
+                            </span>
+                            <time>
+                              {new Date(
+                                item.scheduled_pickup_at,
+                              ).toLocaleString()}
+                            </time>
+                            {tab === "Dispatch Queue" && (
+                              <span className="dispatch-awaiting">
+                                Awaiting dispatch planning
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                        <div className="request-queue-actions">
+                          <button
+                            type="button"
+                            className="request-queue-menu-toggle"
+                            aria-label="More options"
+                            aria-describedby={`request-reference-${item.id}`}
+                            aria-haspopup="menu"
+                            aria-expanded={queueMenuId === item.id}
+                            onClick={() =>
+                              setQueueMenuId((current) =>
+                                current === item.id ? null : item.id,
+                              )
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") setQueueMenuId(null);
+                            }}
+                          >
+                            ⋮
+                          </button>
+                          {queueMenuId === item.id && (
+                            <div
+                              className="request-queue-menu dropdown-menu show"
+                              role="menu"
+                            >
+                              <button
+                                type="button"
+                                className="dropdown-item"
+                                role="menuitem"
+                                onClick={(event) => {
+                                  const trigger = event.currentTarget
+                                    .closest(".request-queue-actions")
+                                    ?.querySelector(
+                                      ".request-queue-menu-toggle",
+                                    );
+                                  if (trigger instanceof HTMLElement)
+                                    viewDetails(item, trigger);
+                                }}
+                              >
+                                View details
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div
+                  className="request-right-workspace"
+                  aria-label="Request workspace"
+                >
+                  {kpiStrip}
+                  <div className="map-side" aria-label="Request map">
+                    <RequestMap
+                      request={selected}
+                      route={selectedRoute?.data}
+                      routeState={selectedRoute?.state ?? "idle"}
+                    />
+                    {selected && !summaryVisible && (
+                      <button
+                        type="button"
+                        className="selected-summary-restore btn btn-sm"
+                        onClick={() => setSummaryVisible(true)}
+                      >
+                        Request info
+                      </button>
+                    )}
+                    {selected && summaryVisible && (
+                      <article className="selected-summary">
+                        <button
+                          type="button"
+                          className="selected-summary-close btn-close"
+                          aria-label="Close request information"
+                          onClick={() => setSummaryVisible(false)}
+                        >
+                          ×
+                        </button>
+                        <header>
+                          <div>
+                            <strong>{selected.requester_name}</strong>
+                            <small>{selected.request_number}</small>
+                          </div>
+                          <PriorityChip value={selected.priority} />
+                        </header>
+                        <dl>
+                          <div>
+                            <dt>Schedule</dt>
+                            <dd>
+                              {new Date(
+                                selected.scheduled_pickup_at,
+                              ).toLocaleString()}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>
+                              {selected.request_category ===
+                              "DELIVERY_LOGISTICS"
+                                ? "Load"
+                                : "Passengers"}
+                            </dt>
+                            <dd>
+                              {selected.request_category ===
+                              "DELIVERY_LOGISTICS"
+                                ? selected.load_description
+                                : selected.passenger_count}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Status</dt>
+                            <dd>
+                              <WorkflowStatusBadge value={selected.status} />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Vehicle</dt>
+                            <dd>
+                              {selectedAssignedVehicle?.display_name ??
+                                "Unassigned"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Distance / ETA</dt>
+                            <dd>
+                              {selectedRoute?.state === "ready" &&
+                              selectedRoute.data
+                                ? distanceLabel(selectedRoute.data) +
+                                  " · " +
+                                  durationLabel(selectedRoute.data)
+                                : selectedRoute?.state === "loading"
+                                  ? "Calculating route…"
+                                  : selectedRoute?.state === "error"
+                                    ? "Route unavailable"
+                                    : "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Traffic delay</dt>
+                            <dd>
+                              {selectedRoute?.state === "ready" &&
+                              selectedRoute.data ? (
+                                <>
+                                  {selectedRoute.data.traffic_delay_seconds >
+                                    0 && (
+                                    <span>
+                                      {delayLabel(selectedRoute.data)}
+                                    </span>
+                                  )}
+                                  <small className="live-traffic-context">
+                                    Live traffic
+                                  </small>
+                                </>
+                              ) : (
+                                "—"
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      </article>
+                    )}
+                  </div>
+                  <SelectedRequestOverview
+                    request={selected}
+                    route={selectedRoute?.data}
+                    routeState={selectedRoute?.state ?? "idle"}
+                    onViewDetails={(trigger) => {
+                      if (selected) viewDetails(selected, trigger);
+                    }}
+                  />
+                  {drawerRequestId && (
+                    <RequestDetailsDrawer
+                      requestId={drawerRequestId}
+                      route={
+                        drawerRequestId === selected?.id
+                          ? selectedRoute?.data
+                          : null
+                      }
+                      allowReviewActions={tab === "For Approval"}
+                      onRequestChanged={() => {
+                        void load();
+                      }}
+                      onClose={closeDrawer}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      {creatingRequest && (
+        <div
+          className="request-create-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setCreatingRequest(false);
+          }}
+        >
+          <aside
+            className="request-create-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add Transport Request"
+          >
+            <header>
+              <div>
+                <small>Temporary development intake</small>
+                <h2>Add Transport Request</h2>
+              </div>
+              <button
+                type="button"
+                className="btn-cancel"
+                aria-label="Close Add Transport Request"
+                onClick={() => setCreatingRequest(false)}
+              >
+                ×
+              </button>
+            </header>
+            <div className="request-create-drawer-body">
+              <TransportRequestFormPage
+                embedded
+                onClose={() => setCreatingRequest(false)}
+                onSaved={() => {
+                  setCreatingRequest(false);
+                  void load();
+                }}
+              />
+            </div>
+          </aside>
+        </div>
+      )}
+    </section>
+  );
 }
