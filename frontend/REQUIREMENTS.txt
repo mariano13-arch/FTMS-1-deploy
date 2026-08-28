@@ -1,0 +1,56 @@
+# FTMS Frontend - Setup Requirements
+# ===================================
+# Install the following to run the frontend locally.
+
+# Required
+# --------
+# Node.js 18+  (https://nodejs.org)
+# npm 9+       (comes with Node.js)
+
+# Environment Variables
+# ---------------------
+# Create a .env file in the repo root (D:\Capstone Project 1.2\FTMS-1\.env)
+# Copy from .env.example and fill in:
+#   VITE_API_BASE_URL=http://localhost:8000
+#   VITE_WS_BASE_URL=ws://localhost:8000
+#   VITE_TOMTOM_MAPS_KEY=<your TomTom API key>
+
+# Install & Run
+# -------------
+# From this directory (frontend/):
+#   npm install          # install dependencies
+#   npm run dev          # start dev server at http://localhost:5173
+#   npm run build        # production build
+#   npm run lint         # ESLint
+#   npm run lint:css     # Stylelint
+#   npm run typecheck    # TypeScript check
+#   npm run test         # Vitest
+
+# Core Dependencies (auto-installed via npm install)
+# --------------------------------------------------
+# react                  19.0.0
+# react-dom              19.0.0
+# react-router-dom       5.3.4
+# bootstrap              5.3.8
+# leaflet                1.9.4
+# react-leaflet          5.0.0
+# maplibre-gl            6.2.0
+# lucide-react           1.31.0
+
+# Dev Dependencies (auto-installed via npm install)
+# -------------------------------------------------
+# vite                   6.4.3
+# typescript             5.9.3
+# vitest                 3.2.7
+# eslint                 10.8.0
+# stylelint              17.14.1
+# @vitejs/plugin-react   4.7.0
+# jsdom                  26.0.0
+# @testing-library/react 16.2.0
+# @testing-library/jest-dom 6.6.3
+
+# Notes
+# -----
+# - Node.js 18 or newer is required.
+# - A running Django backend (localhost:8000) is needed for API calls.
+# - A TomTom API key is required for maps; set VITE_TOMTOM_MAPS_KEY.

@@ -1,4 +1,5 @@
 import type { LatestStatusResponse, TelemetryEvent } from "./telemetry";
+import { apiBaseUrl } from "./api";
 
 export type VehicleStatusMessage = {
   type: "vehicle.status.snapshot" | "vehicle.status.updated";
@@ -107,8 +108,6 @@ export function isNewerEvent(
   }
   return candidate.event_id > current.event_id;
 }
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export function vehicleStatusWebSocketUrl(deviceId: string): string {
   const configured = import.meta.env.VITE_WS_BASE_URL as string | undefined;

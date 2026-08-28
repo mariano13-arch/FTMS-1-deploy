@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "tsBuildInfoFile": "/tmp/ftms-tsconfig.app.tsbuildinfo",
+    "tsBuildInfoFile": "./tmp/ftms-tsconfig.app.tsbuildinfo",
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
