@@ -18,7 +18,7 @@ vi.mock("maplibre-gl", () => {
     addSource(id: string, source: Record<string, unknown>) { this.sources.set(id, { ...source, setData: vi.fn() }); }
     getSource(id: string) { return this.sources.get(id); }
     addLayer(layer: unknown) { this.layers.push(layer); }
-    getLayer(id: string) { return this.layers.find((l: any) => l.id === id); }
+    getLayer(id: string) { return this.layers.find((l: { id?: string }) => l.id === id); }
     setLayoutProperty() {}
     on(event: string, cb: (e?: unknown) => void) { this.handlers.set(event, cb); if (event === "load") cb(); return this; }
     off(event: string) { this.handlers.delete(event); return this; }
