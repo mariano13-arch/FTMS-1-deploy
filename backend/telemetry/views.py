@@ -1,10 +1,11 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -12,8 +13,13 @@ from rest_framework.views import APIView
 from accounts.permissions import StaffAccess
 from fleet.models import Vehicle
 from telemetry import demo
-from telemetry.geofences import GeofenceWriteSerializer, geofence_payload, rebuild_geofence_activity
-from telemetry.models import Geofence, TelemetryEvent
+from telemetry.geofences import (
+    GeofenceWriteSerializer,
+    event_payload,
+    geofence_payload,
+    rebuild_geofence_activity,
+)
+from telemetry.models import Geofence, GeofenceEvent, TelemetryEvent
 from telemetry.presentation import event_data, latest_status_data
 from telemetry.services import IngestionStatus, TelemetryValidationError, ingest_telemetry
 from transport_requests.models import DispatchAssignment, TransportRequest
@@ -263,6 +269,82 @@ class FleetLiveSafetyEventListView(APIView):
                 ]
             }
         )
+
+
+class GeofenceEventFilterSerializer(serializers.Serializer):
+    geofence = serializers.UUIDField(required=False)
+    vehicle = serializers.IntegerField(required=False, min_value=1)
+    event_type = serializers.ChoiceField(
+        choices=GeofenceEvent.EventType.values,
+        required=False,
+    )
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1, max_value=100)
+
+    def validate(self, attrs):
+        if attrs.get("date_from") and attrs.get("date_to"):
+            if attrs["date_from"] > attrs["date_to"]:
+                raise serializers.ValidationError(
+                    {"date_to": "Must be on or after date_from."}
+                )
+        return attrs
+
+
+class GeofenceEventPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class GeofenceEventListView(APIView):
+    http_method_names = ["get", "options"]
+    permission_classes = [StaffAccess]
+
+    def get(self, request):
+        allowed = {
+            "geofence",
+            "vehicle",
+            "event_type",
+            "date_from",
+            "date_to",
+            "page",
+            "page_size",
+        }
+        unknown = set(request.query_params) - allowed
+        if unknown:
+            raise serializers.ValidationError(
+                {key: "Unknown filter." for key in unknown}
+            )
+        filters = GeofenceEventFilterSerializer(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        values = filters.validated_data
+        queryset = GeofenceEvent.objects.select_related("geofence", "vehicle").order_by(
+            "-occurred_at", "-pk"
+        )
+        if "geofence" in values:
+            queryset = queryset.filter(geofence_id=values["geofence"])
+        if "vehicle" in values:
+            queryset = queryset.filter(vehicle_id=values["vehicle"])
+        if "event_type" in values:
+            queryset = queryset.filter(event_type=values["event_type"])
+        current_timezone = timezone.get_current_timezone()
+        if "date_from" in values:
+            start = timezone.make_aware(
+                datetime.combine(values["date_from"], time.min),
+                current_timezone,
+            )
+            queryset = queryset.filter(occurred_at__gte=start)
+        if "date_to" in values:
+            end = timezone.make_aware(
+                datetime.combine(values["date_to"] + timedelta(days=1), time.min),
+                current_timezone,
+            )
+            queryset = queryset.filter(occurred_at__lt=end)
+        paginator = GeofenceEventPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        return paginator.get_paginated_response([event_payload(event) for event in page])
 
 
 class GeofenceListCreateView(APIView):

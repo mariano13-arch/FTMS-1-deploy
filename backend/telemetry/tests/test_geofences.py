@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.contrib.gis.geos import Point
+from django.contrib.gis.geos import Point, Polygon
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -109,11 +109,15 @@ class GeofenceApiTests(TestCase):
         inside = self.telemetry_payload(
             "live-inside", 2, 14.56, 121.02, now + timedelta(seconds=10)
         )
-        exited = self.telemetry_payload("live-exit", 3, 14.56, 121.05, now + timedelta(seconds=20))
+        still_inside = self.telemetry_payload(
+            "live-still-inside", 3, 14.561, 121.021, now + timedelta(seconds=15)
+        )
+        exited = self.telemetry_payload("live-exit", 4, 14.56, 121.05, now + timedelta(seconds=20))
 
         self.client.post("/api/v1/telemetry/", outside, format="json")
         self.client.post("/api/v1/telemetry/", inside, format="json")
         self.client.post("/api/v1/telemetry/", inside, format="json")
+        self.client.post("/api/v1/telemetry/", still_inside, format="json")
         self.client.post("/api/v1/telemetry/", exited, format="json")
 
         self.assertEqual(GeofenceEvent.objects.count(), 2)
@@ -140,3 +144,146 @@ class GeofenceApiTests(TestCase):
     def test_geofences_require_staff_access(self):
         self.client.force_authenticate(user=None)
         self.assertIn(self.client.get(self.url).status_code, (401, 403))
+
+    def test_activity_endpoint_returns_persisted_events_and_filters_them(self):
+        geofence = Geofence.objects.create(
+            name="Restricted Yard",
+            category=Geofence.Category.RESTRICTED,
+            shape_type=Geofence.ShapeType.POLYGON,
+            boundary=self._polygon(121.00, 14.54),
+            center=Point(121.01, 14.55, srid=4326),
+            created_by=self.user,
+        )
+        other_geofence = Geofence.objects.create(
+            name="Other Yard",
+            shape_type=Geofence.ShapeType.POLYGON,
+            boundary=self._polygon(121.10, 14.64),
+            center=Point(121.11, 14.65, srid=4326),
+            created_by=self.user,
+        )
+        other_vehicle = Vehicle.objects.create(
+            device_id="GEO-002", plate_number="GEO-002", display_name="Other Van"
+        )
+        now = timezone.now().replace(microsecond=0)
+        older = self.telemetry("report-old", 10, 14.55, 121.01, now - timedelta(days=2))
+        newest = self.telemetry("report-new", 11, 14.55, 121.01, now)
+        other_event = TelemetryEvent.objects.create(
+            schema_version="1.0",
+            event_id="report-other",
+            sequence_number=1,
+            vehicle=other_vehicle,
+            recorded_at=now,
+            location=Point(121.11, 14.65, srid=4326),
+            gnss_speed_kph=20,
+            driving_event=TelemetryEvent.DrivingEvent.NORMAL,
+        )
+        first = GeofenceEvent.objects.create(
+            geofence=geofence,
+            vehicle=self.vehicle,
+            telemetry_event=older,
+            event_type=GeofenceEvent.EventType.EXIT,
+            occurred_at=older.recorded_at,
+            location=older.location,
+        )
+        second = GeofenceEvent.objects.create(
+            geofence=geofence,
+            vehicle=self.vehicle,
+            telemetry_event=newest,
+            event_type=GeofenceEvent.EventType.ENTER,
+            occurred_at=newest.recorded_at,
+            location=newest.location,
+        )
+        other_transition = GeofenceEvent.objects.create(
+            geofence=other_geofence,
+            vehicle=other_vehicle,
+            telemetry_event=other_event,
+            event_type=GeofenceEvent.EventType.ENTER,
+            occurred_at=other_event.recorded_at,
+            location=other_event.location,
+        )
+
+        response = self.client.get("/api/v1/fleet-live/geofence-events/?page_size=2")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 3)
+        self.assertEqual(
+            [item["id"] for item in response.json()["results"]],
+            [other_transition.pk, second.pk],
+        )
+        restricted = response.json()["results"][1]
+        self.assertEqual(restricted["geofence_category"], "RESTRICTED")
+        self.assertEqual(restricted["vehicle_name"], "Geofence Van")
+
+        geofence_response = self.client.get(
+            "/api/v1/fleet-live/geofence-events/",
+            {"geofence": geofence.pk, "vehicle": self.vehicle.pk},
+        )
+        self.assertEqual(
+            [item["id"] for item in geofence_response.json()["results"]],
+            [second.pk, first.pk],
+        )
+        enter_response = self.client.get(
+            "/api/v1/fleet-live/geofence-events/",
+            {"event_type": "ENTER", "date_from": timezone.localdate().isoformat()},
+        )
+        self.assertEqual(
+            [item["id"] for item in enter_response.json()["results"]],
+            [other_transition.pk, second.pk],
+        )
+        historical_response = self.client.get(
+            "/api/v1/fleet-live/geofence-events/",
+            {"date_to": (timezone.localdate() - timedelta(days=1)).isoformat()},
+        )
+        self.assertEqual(
+            [item["id"] for item in historical_response.json()["results"]],
+            [first.pk],
+        )
+
+    def test_activity_endpoint_rejects_invalid_filters_and_requires_staff(self):
+        url = "/api/v1/fleet-live/geofence-events/"
+        for query in (
+            "event_type=ARRIVE",
+            "geofence=not-a-uuid",
+            "vehicle=abc",
+            "date_from=not-a-date",
+            "date_from=2026-08-22&date_to=2026-08-21",
+            "page=0",
+            "page_size=101",
+            "unexpected=true",
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get(f"{url}?{query}").status_code, 400)
+        self.client.force_authenticate(user=None)
+        self.assertIn(self.client.get(url).status_code, (401, 403))
+
+    def test_summary_counts_today_and_restricted_entry_category(self):
+        geofence_id = self.client.post(
+            self.url, {**self.payload, "category": "RESTRICTED"}, format="json"
+        ).json()["id"]
+        now = timezone.now()
+        outside = self.telemetry_payload("summary-outside", 20, 14.56, 121.05, now)
+        inside = self.telemetry_payload(
+            "summary-enter", 21, 14.56, 121.02, now + timedelta(seconds=5)
+        )
+        exited = self.telemetry_payload(
+            "summary-exit", 22, 14.56, 121.05, now + timedelta(seconds=10)
+        )
+        for payload in (outside, inside, exited):
+            self.client.post("/api/v1/telemetry/", payload, format="json")
+
+        detail = self.client.get(f"{self.url}{geofence_id}/").json()
+        self.assertEqual(detail["entries_today"], 1)
+        self.assertEqual(detail["exits_today"], 1)
+        self.assertEqual(detail["events"][1]["geofence_category"], "RESTRICTED")
+
+    @staticmethod
+    def _polygon(longitude, latitude):
+        return Polygon(
+            (
+                (longitude, latitude),
+                (longitude + 0.02, latitude),
+                (longitude + 0.02, latitude + 0.02),
+                (longitude, latitude + 0.02),
+                (longitude, latitude),
+            ),
+            srid=4326,
+        )

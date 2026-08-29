@@ -20,3 +20,4 @@ htmlcov/
 .env.*.local
 tmp/
 *.tsbuildinfo
+mobile/expo-output.log

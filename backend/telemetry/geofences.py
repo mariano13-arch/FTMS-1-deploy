@@ -1,5 +1,6 @@
 from django.contrib.gis.geos import Point, Polygon
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
 from fleet.models import Vehicle
@@ -88,6 +89,9 @@ def event_payload(event):
         "device_id": event.vehicle.device_id,
         "vehicle_name": event.vehicle.display_name,
         "plate_number": event.vehicle.plate_number,
+        "geofence_id": event.geofence_id,
+        "geofence_name": event.geofence.name,
+        "geofence_category": event.geofence.category,
     }
 
 
@@ -112,8 +116,10 @@ def current_vehicles(geofence):
 
 
 def geofence_payload(geofence, *, include_activity=False):
-    latest = geofence.events.select_related("vehicle").first()
+    events = geofence.events.select_related("vehicle", "geofence")
+    latest = events.first()
     inside = current_vehicles(geofence)
+    today = timezone.localdate()
     payload = {
         "id": geofence.pk,
         "name": geofence.name,
@@ -128,6 +134,14 @@ def geofence_payload(geofence, *, include_activity=False):
         "is_active": geofence.is_active,
         "current_vehicle_count": len(inside),
         "event_count": geofence.events.count(),
+        "entries_today": events.filter(
+            event_type=GeofenceEvent.EventType.ENTER,
+            occurred_at__date=today,
+        ).count(),
+        "exits_today": events.filter(
+            event_type=GeofenceEvent.EventType.EXIT,
+            occurred_at__date=today,
+        ).count(),
         "latest_event": event_payload(latest) if latest else None,
         "created_at": geofence.created_at,
         "updated_at": geofence.updated_at,
@@ -136,7 +150,7 @@ def geofence_payload(geofence, *, include_activity=False):
         payload["current_vehicles"] = inside
         payload["events"] = [
             event_payload(event)
-            for event in geofence.events.select_related("vehicle")[:100]
+            for event in events[:100]
         ]
     return payload
 

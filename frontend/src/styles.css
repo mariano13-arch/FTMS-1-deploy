@@ -7561,6 +7561,42 @@ button.login-btn-charcoal:disabled {
   background: #fff
 }
 
+.request-map-geofence-activity-marker {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 3px solid #fff;
+  border-radius: 3px;
+  background: #117c65;
+  box-shadow: 0 0 0 2px #117c6555, 0 3px 9px #241a1866;
+  transform: rotate(45deg)
+}
+
+.request-map-geofence-activity-marker::after {
+  color: #fff;
+  font-size: .52rem;
+  font-weight: 900;
+  content: "IN";
+  transform: rotate(-45deg)
+}
+
+.request-map-geofence-activity-marker--exit {
+  background: #a84740;
+  box-shadow: 0 0 0 2px #a8474055, 0 3px 9px #241a1866
+}
+
+.request-map-geofence-activity-marker--exit::after {
+  content: "OUT"
+}
+
+.fleet-map-legend .fleet-legend-geofence-activity {
+  border-radius: 2px;
+  background: #117c65;
+  transform: rotate(45deg)
+}
+
+
 .live-fleet-list {
   display: flex;
   flex-direction: column;
@@ -9204,7 +9240,7 @@ button.login-btn-charcoal:disabled {
   right: 12px;
   bottom: 12px;
   display: flex;
-  width: min(360px, calc(100% - 24px));
+  width: min(620px, calc(100% - 24px));
   flex-direction: column;
   overflow: hidden;
   border: 0;
@@ -9620,6 +9656,189 @@ button.login-btn-charcoal:disabled {
   line-height: 1.4
 }
 
+
+.live-fleet-geofence-monitoring {
+  display: grid;
+  gap: 8px
+}
+
+.live-fleet-geofence-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px
+}
+
+.live-fleet-geofence-summary>span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px;
+  border-radius: 7px;
+  background: #edf4f6;
+  color: #63757f;
+  font-size: .47rem
+}
+
+.live-fleet-geofence-summary strong {
+  overflow: hidden;
+  color: #102a43;
+  font-size: .72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap
+}
+
+.live-fleet-geofence-monitoring>ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none
+}
+
+.live-fleet-geofence-monitoring>ul li {
+  grid-template-columns: 1fr;
+  padding: 6px
+}
+
+.live-fleet-geofence-activity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between
+}
+
+.live-fleet-geofence-activity-heading h3 {
+  margin: 0
+}
+
+.live-fleet-geofence-activity-heading small {
+  color: #70818a;
+  font-size: .49rem
+}
+
+.live-fleet-geofence-activity-filters {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr 1fr;
+  gap: 5px
+}
+
+.live-fleet-geofence-activity-filters label {
+  display: grid;
+  gap: 3px;
+  color: #61727c;
+  font-size: .48rem;
+  font-weight: 750;
+  text-transform: uppercase
+}
+
+.live-fleet-geofence-activity-filters :is(select, input) {
+  min-width: 0;
+  height: 31px;
+  padding: 4px 6px;
+  border: 1px solid #d4e0e4;
+  border-radius: 6px;
+  background: #fff;
+  color: #263943;
+  font-size: .54rem;
+  text-transform: none
+}
+
+.live-fleet-geofence-activity-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #dce6e9;
+  border-radius: 7px;
+  background: #fff
+}
+
+.live-fleet-geofence-activity-table {
+  width: 100%;
+  min-width: 570px;
+  border-collapse: collapse;
+  font-size: .5rem
+}
+
+.live-fleet-geofence-activity-table :is(th, td) {
+  padding: 6px;
+  border-bottom: 1px solid #e6edef;
+  text-align: left;
+  white-space: nowrap
+}
+
+.live-fleet-geofence-activity-table th {
+  background: #edf4f6;
+  color: #526570;
+  font-size: .45rem;
+  letter-spacing: .04em;
+  text-transform: uppercase
+}
+
+.live-fleet-geofence-activity-table tbody tr:last-child td {
+  border-bottom: 0
+}
+
+.live-fleet-geofence-activity-table td:nth-child(2) {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis
+}
+
+.live-fleet-geofence-activity-table button {
+  width: auto;
+  min-height: 25px;
+  padding: 3px 6px;
+  border: 0;
+  background: #e4f2f2;
+  color: #087b79;
+  font-size: .48rem
+}
+
+.live-fleet-geofence-event {
+  display: inline-flex;
+  padding: 3px 5px;
+  border-radius: 999px;
+  background: #dff5ec;
+  color: #087b60;
+  font-size: .45rem;
+  font-weight: 850
+}
+
+.live-fleet-geofence-event--exit {
+  background: #fde8e5;
+  color: #a84740
+}
+
+.live-fleet-geofence-event--restricted {
+  background: #8f1f29;
+  color: #fff
+}
+
+.live-fleet-geofence-activity-pages {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #70818a;
+  font-size: .5rem
+}
+
+.live-fleet-geofence-activity-pages>div {
+  display: flex;
+  gap: 4px
+}
+
+.live-fleet-geofence-activity-pages button {
+  width: auto;
+  min-height: 27px;
+  padding: 4px 7px;
+  border: 1px solid #d4e0e4;
+  background: #fff;
+  color: #526570;
+  font-size: .49rem
+}
+
+.live-fleet-geofence-activity-pages button:disabled {
+  opacity: .45
+}
+
 @media(max-width:720px) {
   .live-fleet-geofence-panel {
     top: 52px;
@@ -9639,3 +9858,20 @@ button.login-btn-charcoal:disabled {
     max-width: 105px
   }
 }
+
+/* Fuel Analytics keeps estimate semantics and operational readiness visually explicit. */
+.fuel-analytics-page{display:grid;width:100%;max-width:1180px;gap:.65rem;margin:0 auto}.fuel-analytics-header{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem}.fuel-analytics-header small,.fuel-analytics-card>small,.fuel-model-card header small,.fuel-readiness-card header small{color:#85766b;font-size:.58rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase}.content .fuel-analytics-header h1{margin:.08rem 0;font-size:1.25rem}.fuel-analytics-header p{margin:0;color:#74685f;font-size:.7rem}.fuel-model-availability{padding:.25rem .5rem;border-radius:999px;background:#f1ece8;color:#70635a;font-size:.6rem;font-weight:800;text-transform:capitalize}.fuel-model-availability--available{background:#e3f4e9;color:#17663a}.fuel-analytics-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:.55rem}.fuel-analytics-card{display:grid;align-content:start;gap:.45rem;padding:.75rem;border:1px solid #ddd4c8;border-radius:.5rem;background:#fff;box-shadow:0 3px 12px #3b2d2412}.fuel-analytics-card header{display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem}.fuel-analytics-card h2,.fuel-analytics-card h3,.fuel-analytics-card p{margin:0}.fuel-analytics-card h2{font-size:.86rem}.fuel-analytics-card h3{color:#675b53;font-size:.58rem;text-transform:uppercase}.fuel-model-card header>div,.fuel-readiness-card header>div{display:grid;gap:.1rem}.fuel-model-card header>strong{padding:.25rem .4rem;border-radius:.3rem;background:#edf2f6;color:#324c61;font-size:.65rem}.fuel-model-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.35rem;margin:0}.fuel-model-card dl>div{padding:.45rem;border-radius:.35rem;background:#f7f4ef}.fuel-model-card dt{color:#81746b;font-size:.52rem;text-transform:uppercase}.fuel-model-card dd{margin:.08rem 0 0;font-size:.65rem;font-weight:750}.fuel-model-card p,.fuel-actual-card p,.fuel-prediction-card p{color:#74685f;font-size:.62rem;line-height:1.45}.fuel-prediction-card{border-left:4px solid #9a771f}.fuel-prediction-card--prediction_available{border-left-color:#16834a}.fuel-prediction-card>strong{color:#17663a;font-size:1.55rem;font-variant-numeric:tabular-nums}.fuel-prediction-card>span{width:max-content;padding:.2rem .4rem;border-radius:999px;background:#e3f4e9;color:#17663a;font-size:.55rem;font-weight:850;text-transform:uppercase}.fuel-prediction-card ul{display:flex;flex-wrap:wrap;gap:.25rem;margin:.3rem 0 0;padding:0;list-style:none}.fuel-prediction-card li{padding:.22rem .35rem;border-radius:.25rem;background:#fff4df;color:#76511b;font-size:.54rem}.fuel-prediction-source{padding-top:.35rem;border-top:1px solid #eee7de}.fuel-actual-card{border-left:4px solid #65737c;background:#f8fafb}.fuel-readiness-card{grid-column:1/-1}.fuel-readiness-card header>span{color:#74685f;font-size:.6rem}.fuel-readiness-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.35rem}.fuel-readiness-list article{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:.4rem;padding:.45rem;border:1px solid #e6dfd7;border-radius:.35rem}.fuel-readiness-list article>div{display:grid;min-width:0;gap:.08rem}.fuel-readiness-list strong{overflow:hidden;font-size:.61rem;text-overflow:ellipsis;white-space:nowrap}.fuel-readiness-list small{color:#81746b;font-size:.52rem;line-height:1.25}.fuel-readiness-status{min-width:58px;padding:.18rem .3rem;border-radius:999px;background:#f4e6e3;color:#94443d;font-size:.47rem;font-weight:850;text-align:center;text-transform:uppercase}.fuel-readiness-status--available{background:#e3f4e9;color:#17663a}.fuel-readiness-status--unverified{background:#fff0d6;color:#815315}.fuel-analytics-state{display:grid;min-height:260px;place-items:center;color:#74685f;font-size:.75rem}.fuel-analytics-state--error{align-content:center;gap:.25rem;color:#92252b;text-align:center}.fuel-analytics-state--error span{color:#74685f;font-size:.65rem}@media(max-width:760px){.fuel-analytics-grid{grid-template-columns:1fr}.fuel-readiness-card{grid-column:auto}.fuel-readiness-list{grid-template-columns:1fr}.fuel-analytics-header{display:grid}}
+
+/* Fleet Fuel Analytics operational dashboard */
+.fuel-dashboard-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.fuel-dashboard-header>div:first-child{display:grid;gap:2px}.fuel-dashboard-header small,.fuel-dashboard-card header small,.fuel-kpi-grid small{color:#647780;font-size:.5rem;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.content .fuel-dashboard-header h1{margin:0;color:#102a43;font-size:1.18rem}.fuel-dashboard-header p{max-width:650px;margin:0;color:#657780;font-size:.62rem;line-height:1.4}.fuel-header-status{display:grid;justify-items:end;gap:3px;color:#324a58}.fuel-header-status strong{font-size:.62rem}.fuel-header-status>small{letter-spacing:0;text-transform:none}.fuel-model-availability--unavailable{background:#f8e6e4;color:#963f3a}.fuel-dashboard-alert{padding:7px 10px;border-left:3px solid #a83e42;background:#fceceb;color:#813438;font-size:.58rem}.fuel-kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.fuel-kpi-grid article{display:grid;gap:3px;min-height:78px;padding:10px;border:1px solid #dce6e9;border-radius:7px;background:#fff;box-shadow:0 2px 8px #18323f0a}.fuel-kpi-grid strong{color:#102a43;font-size:1.15rem;font-variant-numeric:tabular-nums}.fuel-kpi-grid span{color:#71818a;font-size:.52rem}.fuel-dashboard-primary-grid{display:grid;grid-template-columns:minmax(0,2.25fr) minmax(220px,.75fr);gap:8px}.fuel-dashboard-card{display:grid;align-content:start;gap:8px;padding:10px;border:1px solid #dce6e9;border-radius:7px;background:#fff;box-shadow:0 2px 8px #18323f0a}.fuel-dashboard-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.fuel-dashboard-card header>div{display:grid;gap:1px}.fuel-dashboard-card h2,.fuel-dashboard-card h3,.fuel-dashboard-card p{margin:0}.fuel-dashboard-card h2{color:#173246;font-size:.7rem}.fuel-chart-filters{display:flex;align-items:end;gap:6px}.fuel-chart-filters label{display:grid;gap:2px;color:#657780;font-size:.46rem;font-weight:800;text-transform:uppercase}.fuel-chart-filters select{width:150px;height:29px;padding:3px 6px;border:1px solid #cedce1;border-radius:5px;background:#fff;color:#263e4c;font-size:.52rem}.fuel-chart-filters>div{display:flex;gap:2px}.fuel-chart-filters button{width:auto;min-height:29px;padding:4px 7px;border:1px solid #d5e0e4;border-radius:5px;background:#f5f8f9;color:#5f717b;font-size:.48rem}.fuel-chart-filters button.active{border-color:#008f8c;background:#e1f4f2;color:#087a77}.fuel-trend-plot{display:grid;min-height:200px}.fuel-trend-plot svg{display:block;width:100%;height:185px}.fuel-trend-plot line{stroke:#e1e9ec;stroke-width:1}.fuel-trend-plot polyline{fill:none;stroke:#008f8c;stroke-linecap:round;stroke-linejoin:round;stroke-width:3}.fuel-trend-plot circle{fill:#fff;stroke:#008f8c;stroke-width:3}.fuel-chart-axis{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;color:#71818a;font-size:.45rem}.fuel-chart-axis span:last-child{text-align:right}.fuel-chart-axis strong{color:#516771;font-size:.47rem}.fuel-chart-note{padding-top:4px;border-top:1px solid #edf1f3;color:#71818a;font-size:.48rem}.fuel-chart-empty{display:grid;min-height:204px;place-content:center;gap:4px;border:1px dashed #cad9de;border-radius:5px;background:#f8fafb;color:#687b84;text-align:center}.fuel-chart-empty strong{color:#314d5d;font-size:.65rem}.fuel-chart-empty span{max-width:360px;font-size:.53rem;line-height:1.4}.fuel-chart-empty--short{min-height:105px}.fuel-readiness-chart{display:grid;grid-template-columns:130px 1fr;align-items:center;gap:6px;min-height:218px}.fuel-readiness-chart svg{width:130px;height:130px;transform:rotate(-90deg)}.fuel-readiness-chart circle{fill:none;stroke-width:14}.fuel-ring-base{stroke:#edf2f4}.fuel-ring-segment{transform-origin:center;stroke-linecap:butt}.fuel-ring-segment--ready{stroke:#14805b}.fuel-ring-segment--blocked{stroke:#d8952f}.fuel-ring-segment--no-telemetry{stroke:#7a8c96}.fuel-ring-segment--unavailable{stroke:#ad4348}.fuel-readiness-chart text{fill:#173246;font-size:18px;font-weight:850;text-anchor:middle;transform:rotate(90deg);transform-origin:center}.fuel-readiness-chart .fuel-ring-caption{fill:#71818a;font-size:8px;font-weight:650}.fuel-readiness-chart ul{display:grid;gap:7px;margin:0;padding:0;list-style:none}.fuel-readiness-chart li{display:grid;grid-template-columns:8px 1fr auto;align-items:center;gap:5px;color:#526771;font-size:.52rem}.fuel-readiness-chart li strong{color:#173246;font-variant-numeric:tabular-nums}.fuel-key{width:7px;height:7px;border-radius:50%;background:#7a8c96}.fuel-key--ready{background:#14805b}.fuel-key--blocked{background:#d8952f}.fuel-key--unavailable{background:#ad4348}.fuel-comparison-bars{display:grid;gap:7px;padding:4px}.fuel-comparison-row{display:grid;grid-template-columns:minmax(100px,1fr) minmax(180px,4fr) minmax(95px,1fr);align-items:center;gap:8px}.fuel-comparison-row>span{display:grid;min-width:0}.fuel-comparison-row>span:last-child{text-align:right}.fuel-comparison-row strong{overflow:hidden;color:#284553;font-size:.55rem;text-overflow:ellipsis;white-space:nowrap}.fuel-comparison-row small{color:#7a8b94;font-size:.46rem}.fuel-comparison-row>div{height:14px;border-radius:3px;background:#eef3f5}.fuel-comparison-row i{display:block;height:100%;min-width:3px;border-radius:3px;background:#56aaa6}.fuel-table-wrap{overflow-x:auto;border:1px solid #dce6e9;border-radius:5px}.fuel-table-wrap table{width:100%;min-width:940px;border-collapse:collapse;font-size:.5rem}.fuel-table-wrap :is(th,td){padding:7px;text-align:left;border-bottom:1px solid #e5ecef;vertical-align:middle}.fuel-table-wrap th{background:#edf4f6;color:#526872;font-size:.44rem;letter-spacing:.04em;text-transform:uppercase}.fuel-table-wrap tbody tr:last-child td{border-bottom:0}.fuel-table-wrap td>strong,.fuel-table-wrap td>small{display:block}.fuel-table-wrap td>small{margin-top:2px;color:#74858d;font-size:.44rem}.fuel-table-wrap button,.fuel-vehicle-detail button{width:auto;min-height:25px;padding:3px 7px;border:1px solid #c9dcde;border-radius:5px;background:#e5f3f2;color:#087a77;font-size:.48rem}.fuel-status{display:inline-flex;padding:3px 5px;border-radius:999px;background:#fff0d9;color:#825715;font-size:.44rem;font-weight:850;text-transform:uppercase}.fuel-status--available,.fuel-status--prediction_available{background:#e1f3ea;color:#17633f}.fuel-status--no_telemetry,.fuel-status--no-telemetry{background:#e9eef0;color:#5d707a}.fuel-status--model_unavailable{background:#f7e5e4;color:#943e42}.fuel-vehicle-detail{display:grid;gap:8px;padding:9px;border:1px solid #cfe1e3;border-radius:6px;background:#f4f9f9}.fuel-vehicle-detail>header{display:flex;justify-content:space-between}.fuel-vehicle-detail h3{font-size:.65rem}.fuel-vehicle-detail dl,.fuel-model-details dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin:0}.fuel-vehicle-detail dl>div,.fuel-model-details dl>div{padding:6px;border-radius:4px;background:#fff}.fuel-vehicle-detail dt,.fuel-model-details dt{color:#71818a;font-size:.45rem;text-transform:uppercase}.fuel-vehicle-detail dd,.fuel-model-details dd{margin:2px 0 0;color:#263f4d;font-size:.53rem;font-weight:750}.fuel-detail-readiness{display:grid;grid-template-columns:1fr 1fr;gap:6px}.fuel-detail-readiness>div{padding:7px;border-radius:4px;background:#fff}.fuel-detail-readiness strong{font-size:.5rem;text-transform:uppercase}.fuel-detail-readiness ul{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0 0;padding:0;list-style:none}.fuel-detail-readiness li,.fuel-detail-readiness span{padding:2px 4px;border-radius:3px;background:#fff0d9;color:#76501a;font-size:.46rem}.fuel-input-card>header>span{color:#647780;font-size:.53rem}.fuel-model-details>header>strong{padding:4px 6px;border-radius:4px;background:#e7f2f4;color:#285363;font-size:.56rem}.fuel-model-details dl{grid-template-columns:repeat(3,minmax(0,1fr))}.fuel-model-details dl>div{background:#f4f7f8}.fuel-model-details p{color:#677a83;font-size:.53rem;line-height:1.45}@media(max-width:900px){.fuel-dashboard-primary-grid{grid-template-columns:1fr}.fuel-kpi-grid{grid-template-columns:repeat(2,1fr)}.fuel-readiness-chart{grid-template-columns:140px 1fr;min-height:150px}.fuel-vehicle-detail dl,.fuel-model-details dl{grid-template-columns:repeat(2,1fr)}}@media(max-width:620px){.fuel-dashboard-header{display:grid}.fuel-header-status{justify-items:start}.fuel-kpi-grid{grid-template-columns:1fr 1fr}.fuel-chart-filters{display:grid}.fuel-chart-filters select{width:100%}.fuel-readiness-chart{grid-template-columns:1fr;justify-items:center}.fuel-readiness-chart ul{width:100%}.fuel-comparison-row{grid-template-columns:90px minmax(80px,1fr) 78px}.fuel-readiness-list,.fuel-model-details dl,.fuel-vehicle-detail dl,.fuel-detail-readiness{grid-template-columns:1fr}}
+.fuel-vehicle-search{position:relative;z-index:20;display:grid;width:min(360px,42vw);gap:3px;color:#647780;font-size:.48rem;font-weight:800;text-transform:uppercase}.fuel-vehicle-search input{width:100%;height:30px;padding:5px 9px;border:1px solid #cedce1;border-radius:5px;background:#fff;color:#263e4c;font-size:.56rem;font-weight:500;text-transform:none}.fuel-vehicle-search input:focus{border-color:#8b1c2e;outline:2px solid #8b1c2e20}.fuel-vehicle-search-options{position:absolute;z-index:30;top:100%;right:0;display:grid;width:100%;max-height:240px;overflow-y:auto;border:1px solid #cbd7dc;border-radius:0 0 5px 5px;background:#fff;box-shadow:0 8px 22px #20313a2b;text-transform:none}.content .fuel-vehicle-search-options button{display:grid;width:100%;min-height:0;gap:2px;padding:8px 10px;border:0;border-bottom:1px solid #e5ecef;border-radius:0;background:#fff;color:#263e4c;text-align:left}.content .fuel-vehicle-search-options button:last-child{border-bottom:0}.content .fuel-vehicle-search-options button:hover,.content .fuel-vehicle-search-options button:focus-visible{background:#edf4f6;color:#8b1c2e}.fuel-vehicle-search-options strong{font-size:.57rem}.fuel-vehicle-search-options small{color:#74858d;font-size:.49rem;font-weight:500}.fuel-vehicle-search-options>span{padding:10px;color:#74858d;font-size:.54rem;font-weight:500}.fuel-table-pagination{display:flex;align-items:center;color:#687b84;font-size:.5rem}.fuel-table-pagination--summary{justify-content:flex-start}@media(max-width:620px){.fuel-vehicle-search{width:100%}}
+.fuel-dashboard-tabs{display:flex;gap:2px;overflow-x:auto;border-bottom:1px solid #cfc3b3}.fuel-dashboard-tabs button{display:flex;align-items:center;gap:5px;width:auto;min-height:34px;padding:6px 10px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:#7e7167;font-size:.62rem;white-space:nowrap}.fuel-dashboard-tabs button.active,.fuel-dashboard-tabs button[aria-selected=true]{border-bottom-color:#8b1c2e;color:#8b1c2e;font-weight:750}.fuel-dashboard-tabs button:focus-visible{outline:2px solid #8b1c2e;outline-offset:-2px}.fuel-dashboard-tabs span{padding:2px 5px;border-radius:999px;background:#e8e0d5;color:#6f6259;font-size:.5rem}.fuel-dashboard-tab-panel{display:grid;gap:8px;min-width:0}
+.fuel-analytics-page{width:100%;max-width:none;gap:0;margin:0}.fuel-dashboard-header{gap:.75rem}.fuel-dashboard-header>div:first-child{gap:0}.content .fuel-dashboard-header h1{margin:.2rem 0 0;color:#241f1c;font-size:1.55rem;line-height:1.15}.fuel-dashboard-header p:not(.breadcrumb){max-width:none;margin:.25rem 0;color:#83766b;font-size:.8rem}.fuel-dashboard-header .breadcrumb{margin:0 0 .12rem;color:#9c8c80;font-size:.62rem}.fuel-dashboard-alert{margin-top:.5rem}.fuel-dashboard-tabs{margin-top:.25rem}.fuel-dashboard-tabs button{padding:.48rem .65rem;font-size:.7rem}.fuel-dashboard-tabs span{padding:.05rem .35rem;font-size:.62rem}.fuel-dashboard-tab-panel{padding-top:.65rem}
+.fuel-dashboard-header{display:block;width:100%}.fuel-dashboard-header>div{width:100%}.fuel-dashboard-tab-panel,.fuel-dashboard-tab-panel>.fuel-dashboard-card,.fuel-table-card,.fuel-table-wrap{width:100%;max-width:none;min-width:0}.fuel-table-wrap table{width:100%}
+@media(min-width:901px) and (min-height:760px){.content:has(> .fuel-analytics-page){box-sizing:border-box;height:calc(100dvh - 60px);min-height:0;overflow:hidden;padding:1.35rem .35rem 1rem}.fuel-analytics-page{display:flex;height:100%;min-height:0;flex-direction:column}.fuel-dashboard-header,.fuel-dashboard-tabs,.fuel-dashboard-alert{flex:0 0 auto}#fuel-panel-overview{display:grid;flex:1 1 auto;min-height:0;grid-template-rows:auto auto minmax(120px,1fr)}#fuel-panel-overview>.fuel-dashboard-card:last-child{min-height:0;height:100%;overflow:hidden}#fuel-panel-overview>.fuel-dashboard-card:last-child .fuel-chart-empty--short{height:100%;min-height:0}#fuel-panel-overview>.fuel-dashboard-card:last-child .fuel-comparison-bars{max-height:100%;overflow-y:auto}}
+.fuel-table-workspace{display:grid;min-width:0;min-height:0;grid-template-columns:minmax(0,1fr);overflow:hidden;border:1px solid #dce6e9;border-radius:5px;background:#fff}.fuel-table-list-panel{display:flex;min-width:0;min-height:0;flex-direction:column;overflow:hidden}.fuel-table-list-panel .fuel-table-wrap{flex:1 1 auto;min-height:0;border:0;border-radius:0}.fuel-table-list-panel .fuel-table-wrap th{position:sticky;z-index:2;top:0}.fuel-table-list-panel .fuel-table-pagination{flex:0 0 auto;padding:6px 8px;border-top:1px solid #dce6e9;background:#fafcfc}.fuel-table-wrap tbody tr.selected{box-shadow:inset 3px 0 #8b1c2e;background:#fff8f6}.fuel-details-drawer{display:flex;min-width:0;min-height:0;flex-direction:column;overflow:hidden;border-left:1px solid #d5cabd;background:#f8f5ef;box-shadow:-8px 0 22px #2d211d1f;animation:drawer-slide-in .2s ease-out}.fuel-details-drawer>header{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px;padding:10px 12px;border-bottom:1px solid #ddd4c8;background:#fffdf9}.fuel-details-drawer>header>div{display:grid;gap:1px;min-width:0}.fuel-details-drawer>header small,.fuel-details-drawer>header span{color:#897a70;font-size:.54rem}.fuel-details-drawer h3{margin:0;overflow:hidden;color:#2b2521;font-size:.82rem;text-overflow:ellipsis;white-space:nowrap}.content .fuel-details-drawer>header>button{display:grid;width:24px;height:24px;min-height:0;place-items:center;padding:0;border:0;background:transparent;color:#6c5d54;font-size:1rem}.fuel-details-drawer-body{display:grid;align-content:start;gap:10px;flex:1 1 auto;min-height:0;overflow-y:auto;padding:10px 12px;scrollbar-gutter:stable}.fuel-details-drawer-body>section{display:grid;gap:6px;padding-bottom:10px;border-bottom:1px solid #e4dbd0}.fuel-details-drawer-body>section:last-child{border-bottom:0}.fuel-details-drawer-body h4{margin:0;color:#75675e;font-size:.52rem;letter-spacing:.06em;text-transform:uppercase}.fuel-details-drawer-body dl{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:0}.fuel-details-drawer-body dl>div{min-width:0;padding:7px;border-radius:4px;background:#fff}.fuel-details-drawer-body dt{color:#93857a;font-size:.46rem;text-transform:uppercase}.fuel-details-drawer-body dd{margin:2px 0 0;overflow-wrap:anywhere;color:#372f2a;font-size:.56rem;font-weight:750}.fuel-drawer-readiness-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px;border-radius:4px;background:#fff}.fuel-drawer-readiness-summary strong{font-size:.58rem}.fuel-drawer-readiness-summary span{color:#81746b;font-size:.49rem}@media(min-width:761px){.fuel-table-workspace--drawer-open{grid-template-columns:minmax(280px,30%) minmax(0,70%)}.fuel-table-workspace--drawer-open .fuel-table-wrap table{min-width:0;table-layout:fixed}.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(2),.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(3),.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(4),.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(6),.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(7){display:none}.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(1){width:48%}.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(5){width:32%}.fuel-table-workspace--drawer-open .fuel-table-wrap :is(th,td):nth-child(8){width:20%}.fuel-table-workspace--drawer-open .fuel-table-pagination{grid-template-columns:1fr auto}.fuel-table-workspace--drawer-open .fuel-table-pagination>strong{display:none}.fuel-table-workspace--drawer-open .fuel-table-pagination>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}@media(min-width:901px) and (min-height:760px){#fuel-panel-fleet-status{display:flex;flex:1 1 auto;min-height:0}#fuel-panel-fleet-status>.fuel-table-card{display:grid;height:100%;min-height:0;grid-template-rows:auto minmax(0,1fr)}#fuel-panel-fleet-status .fuel-table-workspace{height:100%}}@media(max-width:760px){.fuel-table-workspace--drawer-open{display:flex;flex-direction:column}.fuel-details-drawer{max-height:60vh;border-top:1px solid #d5cabd;border-left:0}.fuel-details-drawer-body dl{grid-template-columns:1fr}.fuel-table-workspace--drawer-open .fuel-table-list-panel{min-height:360px}}
+.fuel-table-card>header{align-items:center}.fuel-vehicle-search{display:flex;width:min(440px,48vw);align-items:center;gap:8px;font-size:.48rem;line-height:normal;white-space:nowrap}.fuel-vehicle-search input{display:block;min-width:0;flex:1 1 auto;line-height:normal}.fuel-vehicle-search-options{top:calc(100% + 4px);right:0;width:calc(100% - 92px);line-height:normal}@media(max-width:620px){.fuel-table-card>header{align-items:stretch;flex-direction:column}.fuel-vehicle-search{width:100%}.fuel-vehicle-search-options{width:calc(100% - 92px)}}
+.fuel-demo-data-note{display:flex;align-items:center;gap:8px;margin-top:6px;padding:5px 8px;border:1px solid #dec277;border-radius:5px;background:#fff8e7;color:#684d16;font-size:.52rem}.fuel-demo-data-note strong{flex:0 0 auto;font-size:.5rem;letter-spacing:.05em}.fuel-demo-data-note span{color:#77633a}.fuel-status--demo_ready{background:#eee6fa;color:#6b3991}.fuel-ring-segment--demo{stroke:#8a5bb1}.fuel-key--demo{background:#8a5bb1}.fuel-demo-inline-note{padding:6px;border-left:3px solid #b78731;background:#fff8e7;color:#70551f!important;font-size:.5rem!important}.fuel-model-input-list{display:grid;gap:4px}.fuel-model-input-list>div{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 7px;border-radius:4px;background:#fff}.fuel-model-input-list>div>span{display:grid;min-width:0;gap:1px}.fuel-model-input-list strong{font-size:.52rem}.fuel-model-input-list small{color:#81746b;font-size:.46rem}.fuel-model-input-list b{flex:0 0 auto;color:#2f494f;font-size:.52rem;font-variant-numeric:tabular-nums}@media(max-width:620px){.fuel-demo-data-note{align-items:flex-start;flex-direction:column;gap:2px}}
+
+/* Modern, estimate-honest Fuel Analytics visualizations. */
+.fuel-trend-plot{display:grid;min-height:0;gap:5px}.fuel-trend-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.fuel-trend-stats article{display:grid;min-width:0;gap:2px;padding:7px 9px;border:1px solid #e0e9eb;border-radius:6px;background:linear-gradient(145deg,#fbfdfd,#f3f8f8)}.fuel-trend-stats small{color:#6d7e86;font-size:.45rem;font-weight:850;letter-spacing:.05em;text-transform:uppercase}.fuel-trend-stats strong{color:#163847;font-size:.7rem;font-variant-numeric:tabular-nums}.fuel-trend-stats span{overflow:hidden;color:#7a8a91;font-size:.44rem;text-overflow:ellipsis;white-space:nowrap}.fuel-trend-plot svg{display:block;width:100%;height:220px;overflow:visible}.fuel-trend-plot .fuel-chart-grid{stroke:#dce7e9;stroke-dasharray:3 4;stroke-width:1}.fuel-trend-plot .fuel-chart-y-label{fill:#71858d;font-size:8px;text-anchor:end}.fuel-trend-plot .fuel-chart-unit{fill:#59717b;font-size:8px;font-weight:800}.fuel-trend-area{fill:url(#fuelTrendArea)}.fuel-trend-line-glow{fill:none;stroke:#16a39e;stroke-width:7;opacity:.13;filter:url(#fuelTrendGlow)}.fuel-trend-line{fill:none;stroke:#008f8c;stroke-linecap:round;stroke-linejoin:round;stroke-width:2.7}.fuel-trend-plot .fuel-trend-point{fill:#fff;stroke:#008f8c;stroke-width:2.5;cursor:crosshair;transition:r .12s ease,fill .12s ease}.fuel-trend-plot .fuel-trend-point:hover,.fuel-trend-plot .fuel-trend-point:focus,.fuel-trend-plot .fuel-trend-point.active{fill:#008f8c;outline:none}.fuel-chart-tooltip{pointer-events:none}.fuel-chart-tooltip rect{fill:#173846;filter:drop-shadow(0 3px 5px #17384640)}.fuel-chart-tooltip text{fill:#fff;font-size:8px;font-weight:750}.fuel-chart-tooltip .fuel-chart-tooltip-time{fill:#bed3d8;font-size:6.8px;font-weight:500}.fuel-trend-disclosure{margin:0!important;padding-top:4px;border-top:1px solid #e7edef;color:#778990!important;font-size:.45rem!important}.fuel-comparison-bars{display:grid;align-content:start;gap:0;padding:0 3px}.fuel-comparison-row{display:grid;grid-template-columns:22px minmax(110px,1.35fr) minmax(180px,4fr) 72px 78px;align-items:center;gap:8px;padding:8px 5px;border-bottom:1px solid #edf1f2}.fuel-comparison-row:last-child{border-bottom:0}.fuel-comparison-rank{display:grid;width:20px;height:20px;place-items:center;border-radius:50%;background:#eef4f5;color:#5d737c;font-size:.48rem}.fuel-comparison-row>span{display:grid;min-width:0}.fuel-comparison-row>span:last-child{text-align:center}.fuel-comparison-track{height:11px;overflow:hidden;border-radius:999px;background:#eaf0f1;box-shadow:inset 0 1px 2px #17384612}.fuel-comparison-track i{display:block;height:100%;min-width:4px;border-radius:999px;background:linear-gradient(90deg,#0d8f8b,#62b9b2);box-shadow:0 0 8px #0d8f8b38}.fuel-comparison-track i.demo{background:linear-gradient(90deg,#76509a,#aa82c7);box-shadow:0 0 8px #76509a38}.fuel-comparison-value{color:#173846;font-size:.54rem;text-align:right;font-variant-numeric:tabular-nums}.fuel-comparison-badge{display:inline-flex!important;justify-content:center;width:max-content;padding:3px 5px;border-radius:999px;background:#e6f3f0;color:#17715d;font-size:.43rem!important;font-weight:850;text-align:center;white-space:nowrap}.fuel-comparison-badge.demo{background:#eee6fa;color:#6b3991}@media(max-width:760px){.fuel-trend-stats{grid-template-columns:1fr 1fr}.fuel-trend-stats article:last-child{grid-column:1/-1}.fuel-trend-plot svg{height:190px}.fuel-comparison-row{grid-template-columns:20px minmax(90px,1.2fr) minmax(100px,2fr) 65px}.fuel-comparison-badge{display:none!important}}@media(max-width:480px){.fuel-trend-stats{grid-template-columns:1fr}.fuel-trend-stats article:last-child{grid-column:auto}.fuel-comparison-row{grid-template-columns:20px minmax(85px,1fr) 1.6fr 62px}}

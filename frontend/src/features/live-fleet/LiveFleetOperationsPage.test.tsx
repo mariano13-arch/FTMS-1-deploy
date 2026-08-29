@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   getDrivers: vi.fn(),
   getGeofences: vi.fn(),
   getGeofence: vi.fn(),
+  getGeofenceActivity: vi.fn(),
   createGeofence: vi.fn(),
   updateGeofence: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock("./api", async (importOriginal) => ({
   getFleetSafetyEvents: mocks.getSafetyEvents,
   getGeofences: mocks.getGeofences,
   getGeofence: mocks.getGeofence,
+  getGeofenceActivity: mocks.getGeofenceActivity,
   createGeofence: mocks.createGeofence,
   updateGeofence: mocks.updateGeofence,
 }));
@@ -42,6 +44,7 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
     fleetTrail,
     fleetPopup,
     safetyEvents,
+    geofenceActivityEvent,
     onVehicleSelect,
     onVehiclePopupClose,
     onSafetyEventSelect,
@@ -60,6 +63,10 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
       telemetrySource: string;
     };
     safetyEvents: Array<{ event_id: string; vehicle_name: string }>;
+    geofenceActivityEvent?: null | {
+      vehicleName: string;
+      eventType: string;
+    };
     onVehicleSelect: (id: string) => void;
     onVehiclePopupClose: () => void;
     onSafetyEventSelect: (id: string) => void;
@@ -97,6 +104,12 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
           Safety marker {item.vehicle_name}
         </button>
       ))}
+      {geofenceActivityEvent && (
+        <span data-testid="historical-geofence-marker">
+          Historical {geofenceActivityEvent.eventType}:{" "}
+          {geofenceActivityEvent.vehicleName}
+        </span>
+      )}
       {fleetPopup && (
         <article aria-label={`${fleetPopup.label} map details`}>
           <strong>{fleetPopup.plateNumber}</strong>
@@ -203,49 +216,17 @@ const snapshot = {
   ],
 };
 const geofence = {
-  id: "geo-1",
-  name: "Oxford Zone",
-  description: "Hotel loading area",
-  category: "HOTEL",
-  shape_type: "CIRCLE",
-  vertices: [
-    { latitude: 14.56, longitude: 121.02 },
-    { latitude: 14.56, longitude: 121.03 },
-    { latitude: 14.57, longitude: 121.02 },
-  ],
-  center: { latitude: 14.56, longitude: 121.02 },
-  radius_meters: 150,
-  color: "#008F8C",
-  show_on_map: true,
-  is_active: true,
-  current_vehicle_count: 1,
-  event_count: 1,
-  latest_event: null,
-  created_at: "2026-08-21T07:00:00Z",
-  updated_at: "2026-08-21T07:00:00Z",
-  current_vehicles: [
-    {
-      vehicle_id: 1,
-      device_id: "LIVE-001",
-      vehicle_name: "Hotel Shuttle",
-      plate_number: "ABC-123",
-      recorded_at: "2026-08-21T07:59:50Z",
-    },
-  ],
-  events: [
-    {
-      id: 1,
-      event_type: "ENTER",
-      occurred_at: "2026-08-21T07:59:50Z",
-      latitude: 14.56,
-      longitude: 121.02,
-      vehicle_id: 1,
-      device_id: "LIVE-001",
-      vehicle_name: "Hotel Shuttle",
-      plate_number: "ABC-123",
-    },
-  ],
+  id: "geo-1", name: "Oxford Zone", description: "Hotel loading area", category: "RESTRICTED", shape_type: "CIRCLE",
+  vertices: [{ latitude: 14.56, longitude: 121.02 }, { latitude: 14.56, longitude: 121.03 }, { latitude: 14.57, longitude: 121.02 }],
+  center: { latitude: 14.56, longitude: 121.02 }, radius_meters: 150, color: "#008F8C", show_on_map: true, is_active: true,
+  current_vehicle_count: 1, event_count: 2, entries_today: 1, exits_today: 1, latest_event: { id: 1, event_type: "ENTER", occurred_at: "2026-08-21T07:59:50Z", latitude: 14.56, longitude: 121.02, vehicle_id: 1, device_id: "LIVE-001", vehicle_name: "Hotel Shuttle", plate_number: "ABC-123", geofence_id: "geo-1", geofence_name: "Oxford Zone", geofence_category: "RESTRICTED" }, created_at: "2026-08-21T07:00:00Z", updated_at: "2026-08-21T07:00:00Z",
+  current_vehicles: [{ vehicle_id: 1, device_id: "LIVE-001", vehicle_name: "Hotel Shuttle", plate_number: "ABC-123", recorded_at: "2026-08-21T07:59:50Z" }],
+  events: [],
 };
+const activityEvents = [
+  { id: 1, event_type: "ENTER", occurred_at: "2026-08-21T07:59:50Z", latitude: 14.56, longitude: 121.02, vehicle_id: 1, device_id: "LIVE-001", vehicle_name: "Hotel Shuttle", plate_number: "ABC-123", geofence_id: "geo-1", geofence_name: "Oxford Zone", geofence_category: "RESTRICTED" },
+  { id: 2, event_type: "EXIT", occurred_at: "2026-08-21T06:59:50Z", latitude: 14.57, longitude: 121.03, vehicle_id: 2, device_id: "STALE-001", vehicle_name: "Service Van", plate_number: "DEF-456", geofence_id: "geo-1", geofence_name: "Oxford Zone", geofence_category: "RESTRICTED" },
+];
 
 beforeEach(() => {
   mocks.getFleet.mockResolvedValue(snapshot);
@@ -328,6 +309,7 @@ beforeEach(() => {
   });
   mocks.getGeofences.mockResolvedValue({ results: [geofence] });
   mocks.getGeofence.mockResolvedValue(geofence);
+  mocks.getGeofenceActivity.mockReset().mockResolvedValue({ count: 2, next: null, previous: null, results: activityEvents });
   mocks.createGeofence.mockResolvedValue(geofence);
   mocks.updateGeofence.mockResolvedValue(geofence);
 });
@@ -524,14 +506,20 @@ test("lists geofence occupancy and activity and creates a customizable map bound
   await screen.findByText("ABC-123 · Van");
   fireEvent.click(screen.getByRole("button", { name: /Geofences/ }));
   fireEvent.click(await screen.findByRole("button", { name: /Oxford Zone/ }));
-  const detail = await screen.findByRole("region", {
-    name: "Oxford Zone geofence details",
-  });
-  expect(within(detail).getByText("Currently inside")).toHaveTextContent(
-    "1Currently inside",
-  );
-  expect(within(detail).getAllByText("Hotel Shuttle")).toHaveLength(2);
-  expect(within(detail).getAllByText(/ABC-123/)).toHaveLength(2);
+  const detail = await screen.findByRole("region", { name: "Oxford Zone geofence details" });
+  expect(within(detail).getByText("Assets inside")).toHaveTextContent("1Assets inside");
+  expect(within(detail).getByText("Entries today")).toHaveTextContent("1Entries today");
+  expect(within(detail).getByText("Exits today")).toHaveTextContent("1Exits today");
+  expect(await within(detail).findByText("Restricted Entry")).toBeInTheDocument();
+  expect(within(detail).getAllByText("EXIT")).toHaveLength(2);
+  fireEvent.click(within(detail).getAllByRole("button", { name: "View on map" })[0]);
+  expect(screen.getByTestId("historical-geofence-marker")).toHaveTextContent("Historical ENTER: Hotel Shuttle");
+  fireEvent.change(within(detail).getByLabelText("Filter geofence activity by event type"), { target: { value: "EXIT" } });
+  await waitFor(() => expect(mocks.getGeofenceActivity).toHaveBeenLastCalledWith(expect.objectContaining({ geofence: "geo-1", event_type: "EXIT", page: 1 }), expect.any(AbortSignal)));
+  fireEvent.change(within(detail).getByLabelText("Filter geofence activity by vehicle"), { target: { value: "2" } });
+  fireEvent.change(within(detail).getByLabelText("Geofence activity date from"), { target: { value: "2026-08-01" } });
+  fireEvent.change(within(detail).getByLabelText("Geofence activity date to"), { target: { value: "2026-08-21" } });
+  await waitFor(() => expect(mocks.getGeofenceActivity).toHaveBeenLastCalledWith(expect.objectContaining({ vehicle: 2, date_from: "2026-08-01", date_to: "2026-08-21" }), expect.any(AbortSignal)));
   fireEvent.click(screen.getByRole("button", { name: "+ New geofence" }));
   fireEvent.click(
     screen.getByRole("button", { name: "Place geofence on map" }),
@@ -543,13 +531,29 @@ test("lists geofence occupancy and activity and creates a customizable map bound
     target: { value: "300" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Create geofence" }));
-  await waitFor(() =>
-    expect(mocks.createGeofence).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "New Depot",
-        radius_meters: 300,
-        shape_type: "CIRCLE",
-      }),
-    ),
-  );
+  await waitFor(() => expect(mocks.createGeofence).toHaveBeenCalledWith(expect.objectContaining({ name: "New Depot", radius_meters: 300, shape_type: "CIRCLE" })));
+  await screen.findByRole("button", { name: "+ New geofence" });
+  expect(await screen.findByText("Restricted Entry")).toBeInTheDocument();
+});
+
+test("shows geofence activity loading and empty states", async () => {
+  let resolveActivity!: (value: { count: number; next: null; previous: null; results: never[] }) => void;
+  mocks.getGeofenceActivity.mockImplementationOnce(() => new Promise(resolve => { resolveActivity = resolve; }));
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: /Geofences/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Oxford Zone/ }));
+  expect(await screen.findByRole("status", { name: "" })).toHaveTextContent("Loading geofence activity");
+  resolveActivity({ count: 0, next: null, previous: null, results: [] });
+  expect(await screen.findByText("No persisted activity matches these filters.")).toBeInTheDocument();
+});
+
+test("shows a geofence activity error without hiding the monitoring summary", async () => {
+  mocks.getGeofenceActivity.mockRejectedValueOnce(new Error("activity unavailable"));
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: /Geofences/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Oxford Zone/ }));
+  expect(await screen.findByRole("alert", { name: "" })).toHaveTextContent("Unable to load geofence activity");
+  expect(screen.getByText("Entries today")).toBeInTheDocument();
 });

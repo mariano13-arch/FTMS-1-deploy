@@ -28,10 +28,23 @@ const DriversPage = React.lazy(() => import("./features/drivers/DriversPage"));
 const LiveFleetOperationsPage = React.lazy(
   () => import("./features/live-fleet/LiveFleetOperationsPage"),
 );
+const SetupPasswordPage = React.lazy(
+  () => import("./features/driver-account/SetupPasswordPage"),
+);
+const FuelAnalyticsPage = React.lazy(
+  () => import("./features/fuel-analytics/FuelAnalyticsPage"),
+);
 
 export default function App() {
   return (
     <Switch>
+      <Route path="/setup-password" exact>
+        <Suspense
+          fallback={<LoadingIndicator variant="card" message="Loading…" />}
+        >
+          <SetupPasswordPage />
+        </Suspense>
+      </Route>
       <Route path="/login" exact>
         <LoginPage />
       </Route>
@@ -68,6 +81,9 @@ export default function App() {
                 </Route>
                 <Route path="/live-map" exact>
                   <LiveFleetOperationsPage />
+                </Route>
+                <Route path="/fuel-analytics" exact>
+                  <FuelAnalyticsPage />
                 </Route>
                 {plannedPaths.map((item) => (
                   <Route path={item.path} exact key={item.path}>

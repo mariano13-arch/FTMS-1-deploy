@@ -136,6 +136,16 @@ type MapProps = {
   fleetPopup?: FleetPopupInfo | null;
   onVehiclePopupClose?: () => void;
   onSafetyEventSelect?: (eventId: string) => void;
+  geofenceActivityEvent?: {
+    id: number;
+    focusKey: number;
+    eventType: "ENTER" | "EXIT";
+    occurredAt: string;
+    latitude: number;
+    longitude: number;
+    vehicleName: string;
+    geofenceName: string;
+  } | null;
   geofences?: Array<{
     id: string;
     name: string;
@@ -210,6 +220,21 @@ function safetyEventMarker(
   element.className = "request-map-safety-marker";
   element.title = `${eventType === "HARSH_BRAKING" ? "Harsh braking" : "Harsh acceleration"}: ${label}`;
   element.setAttribute("aria-label", element.title);
+  return element;
+}
+
+function geofenceActivityMarker(
+  label: string,
+  eventType: "ENTER" | "EXIT",
+  occurredAt: string,
+) {
+  const element = document.createElement("div");
+  element.className =
+    `request-map-geofence-activity-marker request-map-geofence-activity-marker--${eventType.toLowerCase()}`;
+  element.title =
+    `Historical ${eventType}: ${label} at ${new Date(occurredAt).toLocaleString()}`;
+  element.setAttribute("aria-label", element.title);
+  element.setAttribute("role", "img");
   return element;
 }
 
@@ -353,6 +378,7 @@ export default function RequestMap({
   onVehicleSelect,
   onVehiclePopupClose,
   onSafetyEventSelect,
+  geofenceActivityEvent,
   geofences,
   geofenceDraft,
   geofenceDrawing,
@@ -373,6 +399,7 @@ export default function RequestMap({
   const fleetPopupRef = useRef<maplibregl.Popup | null>(null);
   const cameraContextRef = useRef("");
   const geofenceCameraRef = useRef("");
+  const geofenceActivityCameraRef = useRef(0);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapError, setMapError] = useState(false);
   const [styleRevision, setStyleRevision] = useState(0);
@@ -1043,6 +1070,51 @@ export default function RequestMap({
           .addTo(map),
       );
     });
+    let geofenceActivityCoordinate: [number, number] | null = null;
+
+    if (geofenceActivityEvent) {
+      const coordinate = validCoordinate(
+        geofenceActivityEvent.latitude,
+        geofenceActivityEvent.longitude,
+      );
+
+      if (coordinate) {
+        geofenceActivityCoordinate = coordinate;
+
+        markersRef.current.push(
+          new maplibregl.Marker({
+            element: geofenceActivityMarker(
+              `${geofenceActivityEvent.vehicleName} · ${geofenceActivityEvent.geofenceName}`,
+              geofenceActivityEvent.eventType,
+              geofenceActivityEvent.occurredAt,
+            ),
+            anchor: "center",
+          })
+            .setLngLat(coordinate)
+            .addTo(map),
+        );
+      }
+    }
+
+    const focusGeofenceActivity = () => {
+      if (
+        !geofenceActivityEvent ||
+        !geofenceActivityCoordinate ||
+        geofenceActivityCameraRef.current === geofenceActivityEvent.focusKey
+      ) {
+        return;
+      }
+
+      geofenceActivityCameraRef.current = geofenceActivityEvent.focusKey;
+
+      map.jumpTo({
+        center: geofenceActivityCoordinate,
+        zoom: 17,
+        bearing: 0,
+        pitch: 0,
+      });
+    };
+
     (geofences ?? [])
       .filter((item) => item.showOnMap)
       .forEach((geofence) => {
@@ -1087,6 +1159,8 @@ export default function RequestMap({
             pitch: 0,
           });
       }
+      focusGeofenceActivity();
+      focusGeofenceActivity();
       return;
     }
     const stopCoordinates = (numberedStops ?? []).flatMap((stop) => {
@@ -1153,10 +1227,13 @@ export default function RequestMap({
         duration: 0,
       });
     }
+
+    focusGeofenceActivity();
   }, [
     fleetLocations,
     fleetPopup,
     fleetTrail,
+    geofenceActivityEvent,
     geofenceDraft,
     geofences,
     mapLoaded,
@@ -1582,6 +1659,12 @@ export default function RequestMap({
             <span>
               <i className="fleet-legend-safety" />
               Safety event
+            </span>
+          )}
+          {geofenceActivityEvent && (
+            <span>
+              <i className="fleet-legend-geofence-activity" />
+              Historical geofence event
             </span>
           )}
         </div>

@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "accounts",
     "health",
     "fleet",
+    "ml",
     "transport_requests",
     "telemetry",
 ]

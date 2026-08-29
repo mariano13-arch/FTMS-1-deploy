@@ -73,5 +73,6 @@ export const plannedPaths = navigation
         "/drivers",
         "/dispatch-board",
         "/live-map",
+        "/fuel-analytics",
       ].includes(item.path),
   );

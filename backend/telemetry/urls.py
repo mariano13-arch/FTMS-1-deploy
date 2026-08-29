@@ -5,6 +5,7 @@ from telemetry.views import (
     FleetLiveVehicleListView,
     FleetLiveVehicleTrailView,
     GeofenceDetailView,
+    GeofenceEventListView,
     GeofenceListCreateView,
     LatestVehicleStatusView,
     TelemetryEventCreateView,
@@ -22,6 +23,11 @@ urlpatterns = [
         "fleet-live/safety-events/",
         FleetLiveSafetyEventListView.as_view(),
         name="fleet-live-safety-events",
+    ),
+    path(
+        "fleet-live/geofence-events/",
+        GeofenceEventListView.as_view(),
+        name="fleet-live-geofence-events",
     ),
     path(
         "fleet-live/geofences/",
