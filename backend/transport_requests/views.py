@@ -149,26 +149,12 @@ class TransportRequestListView(APIView):
         )
 
     def post(self, request):
-        serializer = TransportRequestDetailSerializer(
-            data=request.data, context={"request": request}
-        )
-        if not serializer.is_valid():
-            response_status = (
-                status.HTTP_409_CONFLICT
-                if "external_reference" in serializer.errors
-                and "already been imported" in str(serializer.errors["external_reference"])
-                else status.HTTP_400_BAD_REQUEST
-            )
-            return Response(serializer.errors, status=response_status)
-        try:
-            saved = serializer.save()
-        except serializers.ValidationError as error:
-            if "external_reference" in error.detail:
-                return Response(error.detail, status=status.HTTP_409_CONFLICT)
-            raise
-        return Response(
-            TransportRequestDetailSerializer(saved, context={"request": request}).data,
-            status=status.HTTP_201_CREATED,
+        self.permission_denied(
+            request,
+            message=(
+                "Transport Request creation requires a trusted HMS/RMS "
+                "integration identity."
+            ),
         )
 
 

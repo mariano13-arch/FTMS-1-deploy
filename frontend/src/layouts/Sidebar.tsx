@@ -14,9 +14,7 @@ import {
   Cpu,
   ShieldCheck,
   Settings,
-  Search,
-  RefreshCw,
-  PanelLeftOpen,
+  ChevronRight,
   PanelLeftClose,
   LucideIcon,
 } from "lucide-react";
@@ -121,37 +119,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   toggleCollapsed,
 }) => {
   const location = useLocation();
-  const [searchQuery, setSearchQuery] = useState("");
   const [liveCounts, setLiveCounts] = useState<SidebarCounts>({});
-  const [countsLoading, setCountsLoading] = useState(false);
-  const [countsError, setCountsError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshCounts = useCallback(async () => {
-    setCountsLoading(true);
-    setCountsError(null);
     try {
       const counts = await fetchSidebarCounts();
       setLiveCounts(counts);
     } catch {
-      setCountsError("Unable to refresh sidebar notifications.");
-    } finally {
-      setCountsLoading(false);
+      // Notification counts are supplementary; retry on the next polling cycle.
     }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     async function initialFetch() {
-      setCountsLoading(true);
-      setCountsError(null);
       try {
         const counts = await fetchSidebarCounts();
         if (!cancelled) setLiveCounts(counts);
       } catch {
-        if (!cancelled) setCountsError("Unable to refresh sidebar notifications.");
-      } finally {
-        if (!cancelled) setCountsLoading(false);
+        // Notification counts are supplementary; retry on the next polling cycle.
       }
     }
     initialFetch();
@@ -175,65 +162,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
       className={`app-sidebar ${open ? "sidebar--open" : ""}`}
       data-collapsed={collapsed}
     >
-      <div className="d-flex align-items-center gap-2 px-2 mb-3">
+      <div className="sidebar-brand d-flex align-items-center gap-2 px-2 mb-3">
         <div className="sidebar-brand-badge d-flex align-items-center justify-content-center fw-bold">
           FT<br />MS
         </div>
         {!collapsed && (
-          <div className="fw-bold text-white lh-sm" style={{ fontSize: "0.85rem" }}>
+          <div className="sidebar-brand-name fw-bold text-white lh-sm">
             Logistics 2 : FTMS
           </div>
         )}
       </div>
 
-      <div className="px-2 mb-3">
-        <div className="d-flex align-items-center justify-content-between mb-1">
-          <div className="sidebar-section-header">SEARCH</div>
-          <button
-            type="button"
-            className="btn btn-sm p-0 border-0 bg-transparent d-flex align-items-center"
-            onClick={refreshCounts}
-            disabled={countsLoading}
-            title="Refresh notifications"
-            aria-label="Refresh sidebar notifications"
-          >
-            <RefreshCw
-              size={11}
-              className={countsLoading ? "truck-wheel-spin" : ""}
-              style={{ color: "rgba(250, 246, 241, 0.6)" }}
-            />
-          </button>
-        </div>
-        {!collapsed && (
-          <div className="sidebar-search-box d-flex align-items-center gap-2 px-2 py-1 rounded">
-            <Search size={14} className="sidebar-search-icon" />
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="sidebar-search-input w-100"
-            />
-          </div>
-        )}
-        {countsError && (
-          <div className="text-danger mt-1" style={{ fontSize: "0.65rem" }} role="alert">
-            {countsError}
-          </div>
-        )}
-      </div>
-
       <nav className="sidebar-nav-scrollable" aria-label="Main navigation">
-        {navSections
-          .map((section) => {
-            const filteredItems = section.items.filter((item) =>
-              item.label.toLowerCase().includes(searchQuery.toLowerCase()),
-            );
-            if (filteredItems.length === 0) return null;
-            return { ...section, items: filteredItems };
-          })
-          .filter((section): section is NonNullable<typeof section> => section !== null)
-          .map((section, idx) => (
+        {navSections.map((section, idx) => (
             <div key={idx} className="sidebar-nav-group">
               {section.title && (
                 <div className="sidebar-section-header px-2" aria-hidden={collapsed || undefined}>
@@ -254,7 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title={collapsed ? item.label : undefined}
                   >
                     <div className="d-flex align-items-center gap-2">
-                      <Icon size={16} className="sidebar-icon" />
+                      <Icon size={18} className="sidebar-icon" />
                       {!collapsed && (
                         <span className="sidebar-label">{item.label}</span>
                       )}
@@ -268,20 +209,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 );
               })}
             </div>
-          ))}
+        ))}
       </nav>
 
-      <div className="px-2 py-2">
+      <div className="sidebar-footer-toggle px-2 py-2">
         <button
           type="button"
-          className="btn btn-sm w-100 d-flex align-items-center justify-content-center gap-1 border-0 bg-transparent text-white-50"
+          className="btn btn-sm d-flex align-items-center justify-content-center border-0 bg-transparent text-white-50"
           onClick={toggleCollapsed}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!collapsed}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          {!collapsed && <span style={{ fontSize: "0.75rem" }}>Collapse</span>}
+          {collapsed ? <ChevronRight size={20} /> : <PanelLeftClose size={16} />}
         </button>
       </div>
     </aside>

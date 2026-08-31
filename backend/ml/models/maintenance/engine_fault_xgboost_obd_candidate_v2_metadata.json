@@ -1,0 +1,85 @@
+{
+  "model_name": "FTMS Engine Fault XGBoost OBD-Aligned Candidate",
+  "version": "2.0-research-candidate",
+  "created_at_utc": "2026-08-25T15:15:13.726208+00:00",
+  "dataset": {
+    "name": "EngineFaultDB",
+    "original_rows": 55999,
+    "modeling_rows": 55998,
+    "duplicate_rows_removed": 1,
+    "development_rows": 44798,
+    "holdout_rows": 11200
+  },
+  "target": {
+    "name": "maintenance_risk",
+    "mapping": {
+      "0": "Healthy",
+      "1": "Maintenance risk"
+    },
+    "source_mapping": "Fault 0 becomes Healthy; Fault 1, 2, or 3 becomes Maintenance risk"
+  },
+  "features": [
+    "MAP",
+    "TPS",
+    "RPM",
+    "Speed"
+  ],
+  "decision_threshold": 0.52,
+  "model_parameters": {
+    "subsample": 0.7,
+    "scale_pos_weight": 0.7,
+    "reg_lambda": 2.0,
+    "reg_alpha": 0.1,
+    "n_estimators": 700,
+    "min_child_weight": 10,
+    "max_depth": 4,
+    "learning_rate": 0.08,
+    "gamma": 0.1,
+    "colsample_bytree": 1.0
+  },
+  "grouped_cv_metrics_at_threshold": {
+    "balanced_accuracy": 0.9144,
+    "risk_precision": 0.9514,
+    "risk_recall": 0.9501,
+    "risk_f1": 0.9507,
+    "healthy_specificity": 0.8788,
+    "false_alerts": 1552,
+    "missed_risks": 1598
+  },
+  "untouched_holdout_metrics": {
+    "accuracy": 0.9716,
+    "balanced_accuracy": 0.968,
+    "roc_auc": 0.9964,
+    "pr_auc": 0.9986,
+    "healthy_precision": 0.942,
+    "healthy_recall": 0.9597,
+    "maintenance_risk_precision": 0.9838,
+    "maintenance_risk_recall": 0.9764,
+    "maintenance_risk_f1": 0.9801,
+    "false_alerts": 129,
+    "missed_risks": 189,
+    "confusion_matrix": [
+      [
+        3071,
+        129
+      ],
+      [
+        189,
+        7811
+      ]
+    ]
+  },
+  "limitations": [
+    "Validated using controlled EngineFaultDB observations only",
+    "Not validated on Toyota Vios or another FTMS fleet vehicle",
+    "Predicts overall maintenance risk rather than an exact component",
+    "Original Fault 1 to 3 labels do not provide confirmed component names",
+    "Live OBD feature availability depends on vehicle make model and year",
+    "Predictions require human review and mechanic confirmation"
+  ],
+  "library_versions": {
+    "xgboost": "3.2.0",
+    "scikit_learn": "1.9.0",
+    "pandas": "3.0.5"
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "schema_version": "2.0",
+  "model_name": "engine_fault_xgboost_obd_candidate_v2",
+  "deployment_state": "research_candidate",
+  "required_features": [
+    "MAP",
+    "TPS",
+    "RPM",
+    "Speed"
+  ],
+  "decision_threshold": 0.52,
+  "score_semantics": "uncalibrated_model_score",
+  "prediction_statuses": [
+    "prediction_available",
+    "prediction_blocked",
+    "invalid_input",
+    "abstained"
+  ],
+  "source_modes": {
+    "research_replay": {
+      "prediction_allowed": true,
+      "dispatchable_alert_allowed": false
+    },
+    "direct_obd": {
+      "prediction_allowed": false,
+      "reason": "MAP/TPS scaling and vehicle compatibility are unverified."
+    },
+    "validated_adapter": {
+      "prediction_allowed_only_if": [
+        "direct_obd_feed_allowed",
+        "unit_scaling_verified",
+        "vehicle_compatibility_verified"
+      ]
+    }
+  },
+  "safety_rules": {
+    "automatic_imputation": false,
+    "automatic_clipping": false,
+    "automatic_unit_conversion": false,
+    "outside_hard_range": "reject_input",
+    "outside_p0_1_p99_9_envelope": "abstain",
+    "mechanic_confirmation_required": true,
+    "specific_component_diagnosis": false,
+    "remaining_useful_life_estimation": false
+  }
+}

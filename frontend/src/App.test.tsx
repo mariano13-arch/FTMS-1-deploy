@@ -83,6 +83,36 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+describe("administration workspace routing", () => {
+  test.each([
+    ["/settings", "Settings Overview"],
+    ["/settings/security", "Security"],
+    ["/settings/operational-rules", "Operational Rules"],
+    ["/settings/integrations", "Integrations"],
+  ])("renders the Settings workspace route %s", async (path, heading) => {
+    renderAt(path);
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+  });
+
+  test("redirects the retired Settings permission route to Users & Access", async () => {
+    auth.user.role = "SUPER_ADMIN";
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({
+      definitions: { TRANSPORT_REQUESTS: ["VIEW"] },
+      roles: { FLEET_MANAGER: { TRANSPORT_REQUESTS: ["VIEW"] }, DISPATCHER: { TRANSPORT_REQUESTS: ["VIEW"] } },
+    }));
+    const { history } = renderWithHistory("/settings/roles-permissions");
+    await waitFor(() => expect(history.location.pathname).toBe("/users/roles-permissions"));
+    expect(await screen.findByRole("link", { name: "Roles & Permissions" })).toHaveClass("active");
+  });
+
+  test("renders the truthful Audit Logs placeholder at its Users route", async () => {
+    auth.user.role = "SUPER_ADMIN";
+    renderAt("/users/audit-logs");
+    expect(await screen.findByText("Centralized administrative audit logging is not available yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+});
+
 describe("Sprint 3 secure registry", () => {
   test("redirects an anonymous user to login", async () => {
     auth.user = null as unknown as typeof auth.user;
@@ -207,7 +237,6 @@ describe("Sprint 3 secure registry", () => {
     renderAt("/vehicles"); expect(screen.getByText("Loading vehicles…")).toBeInTheDocument();
     await screen.findByText("No vehicles match these filters.");
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "demo" } });
-    fireEvent.click(screen.getByText("Apply Filters"));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("search=demo"));
   });
   test("vehicle search updates the table after typing and restores it when cleared", async () => {
@@ -295,22 +324,21 @@ describe("Sprint 3 secure registry", () => {
     await waitFor(() => expect(intersectionCallback).not.toBeNull());
     act(() => intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "false" } });
-    fireEvent.click(screen.getByText("Apply Filters"));
     expect(await screen.findByText("Inactive Van")).toBeInTheDocument();
     await act(async () => staleResponse.resolve(await response({ count: 2, previous: null, next: null, results: [stale] })));
     expect(screen.queryByText("Stale Vehicle")).not.toBeInTheDocument();
     expect(screen.queryByText("Sprint 1 Demo Vehicle")).not.toBeInTheDocument();
   });
-  test("Clear Filters resets all controls and fetches the unfiltered first page", async () => {
+  test("filter selections apply immediately and All options clear them", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 0, next: null, previous: null, results: [] }));
     renderAt("/vehicles"); await screen.findByText("No vehicles match these filters.");
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "demo" } });
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "false" } });
     fireEvent.change(screen.getByLabelText("Vehicle Type"), { target: { value: "VAN" } });
-    fireEvent.click(screen.getByText("Apply Filters"));
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("vehicle_type=VAN"));
-    fireEvent.click(screen.getByText("Clear Filters"));
-    expect(screen.getByLabelText("Search")).toHaveValue(""); expect(screen.getByLabelText("Status")).toHaveValue(""); expect(screen.getByLabelText("Vehicle Type")).toHaveValue("");
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain("is_active=false");
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Vehicle Type"), { target: { value: "" } });
+    expect(screen.getByLabelText("Status")).toHaveValue(""); expect(screen.getByLabelText("Vehicle Type")).toHaveValue("");
     await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toMatch(/\/api\/v1\/vehicles\/$/));
   });
   test("Export Loaded Vehicles creates CSV from only the loaded rows", async () => {

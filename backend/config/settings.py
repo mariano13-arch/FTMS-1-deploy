@@ -127,6 +127,7 @@ DEFAULT_FROM_EMAIL = os.getenv(
 DRIVER_MOBILE_ACCOUNT_SETUP_URL = os.getenv(
     "DRIVER_MOBILE_ACCOUNT_SETUP_URL", "ftms-driver://setup-password"
 )
+STAFF_ACCOUNT_SETUP_URL = os.getenv("STAFF_ACCOUNT_SETUP_URL", "")
 DRIVER_MOBILE_APP_DOWNLOAD_URL = os.getenv("DRIVER_MOBILE_APP_DOWNLOAD_URL", "")
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.authentication.StaffSessionAuthentication"],

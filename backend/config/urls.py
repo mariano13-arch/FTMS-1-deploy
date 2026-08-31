@@ -9,5 +9,6 @@ urlpatterns = [
     path("api/v1/drivers/", include("fleet.driver_urls")),
     path("api/v1/transport-requests/", include("transport_requests.urls")),
     path("api/v1/analytics/fuel/", include("ml.urls")),
+    path("api/v1/analytics/maintenance/", include("ml.maintenance_urls")),
     path("api/v1/", include("telemetry.urls")),
 ]

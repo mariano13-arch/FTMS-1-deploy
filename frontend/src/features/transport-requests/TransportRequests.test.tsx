@@ -1496,6 +1496,11 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(
       within(drawer).queryByRole("button", { name: "Approve" }),
     ).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByTestId("request-workspace-backdrop"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.getByRole("dialog", { name: request.request_number }),
+    ).toBeInTheDocument();
     fireEvent.click(
       within(drawer).getByRole("button", { name: "Close request details" }),
     );
@@ -1518,6 +1523,12 @@ describe("Sprint 4 Transport Requests corrections", () => {
     );
     await screen.findByRole("dialog", { name: request.request_number });
     fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.getByRole("dialog", { name: request.request_number }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close request details" }),
+    );
     expect(
       screen.queryByRole("dialog", { name: request.request_number }),
     ).not.toBeInTheDocument();

@@ -1,0 +1,88 @@
+{
+  "contract_version": "2.0-research-candidate",
+  "model_name": "engine_fault_xgboost_obd_candidate_v2",
+  "feature_order": [
+    "MAP",
+    "TPS",
+    "RPM",
+    "Speed"
+  ],
+  "decision_threshold": 0.52,
+  "score_name": "model_risk_score",
+  "score_is_calibrated_probability": false,
+  "dataset": {
+    "name": "EngineFaultDB",
+    "engine": "C14NE spark-ignition engine",
+    "environment": "controlled laboratory conditions",
+    "target": "binary maintenance risk derived from Fault 0 versus Fault 1/2/3"
+  },
+  "features": {
+    "MAP": {
+      "documented_unit": "kPa",
+      "candidate_obd_pid": "0x0B",
+      "development_data_range": {
+        "min": 0.453,
+        "p0_1": 0.952,
+        "p1": 0.993,
+        "median": 1.543,
+        "p99": 3.631,
+        "p99_9": 3.692,
+        "max": 4.547
+      }
+    },
+    "TPS": {
+      "documented_unit": "percent",
+      "candidate_obd_pid": "0x11",
+      "development_data_range": {
+        "min": 0.382,
+        "p0_1": 0.738,
+        "p1": 0.759,
+        "median": 1.013,
+        "p99": 3.998,
+        "p99_9": 4.028,
+        "max": 4.048
+      }
+    },
+    "RPM": {
+      "documented_unit": "rpm",
+      "candidate_obd_pid": "0x0C",
+      "development_data_range": {
+        "min": 1074.087,
+        "p0_1": 1105.955843,
+        "p1": 1134.64141,
+        "median": 2100.2455,
+        "p99": 4709.2157,
+        "p99_9": 4825.531831000002,
+        "max": 4965.09
+      }
+    },
+    "Speed": {
+      "documented_unit": "km/h",
+      "candidate_obd_pid": "0x0D",
+      "development_data_range": {
+        "min": 22.757,
+        "p0_1": 23.994594,
+        "p1": 24.55397,
+        "median": 45.25,
+        "p99": 101.74606,
+        "p99_9": 103.92,
+        "max": 107.539
+      }
+    }
+  },
+  "integration_status": {
+    "research_candidate": true,
+    "production_ready": false,
+    "direct_obd_feed_allowed": false,
+    "unit_scaling_verified": false,
+    "vehicle_compatibility_verified": false,
+    "blocking_reason": "MAP and TPS values in the dataset do not clearly match direct standard OBD-II value ranges. Scaling and acquisition semantics must be verified before live integration."
+  },
+  "output_limitations": [
+    "Does not identify an exact defective component.",
+    "Does not estimate remaining useful life.",
+    "Does not predict time until failure.",
+    "Requires diagnostic or mechanic confirmation.",
+    "SHAP signals are model contributions, not diagnoses."
+  ]
+}

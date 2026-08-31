@@ -481,6 +481,7 @@ export default function DriversPage() {
           <aside
             className="driver-form-drawer"
             role="dialog"
+            aria-modal="true"
             aria-label={formMode === "add" ? "Add Driver" : "Edit Driver"}
           >
             <header>

@@ -1,0 +1,35 @@
+.permissions-page { box-sizing: border-box; color: #172638; display: flex; flex-direction: column; gap: 7px; min-height: 100%; }
+.permissions-page > header h2 { font-size: 16px; margin: 0; }
+.permissions-page > header p { color: #63768d; font-size: 11px; margin: 2px 0 0; }
+.permissions-workspace { background: #fff; border: 1px solid #d6dce3; display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
+.permissions-toolbar { align-items: end; display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; }
+.permissions-toolbar label { color: #52667d; display: grid; font-size: 10px; gap: 3px; }
+.permissions-toolbar select { background: #fff; border: 1px solid #b8c4d0; border-radius: 3px; font-size: 12px; min-width: 180px; padding: 7px; }
+.permissions-toolbar p { color: #6c7e91; font-size: 10px; margin: 0; }
+.permissions-info { background: #edf6f5; border-block: 1px solid #cce1df; color: #315f5c; font-size: 10px; padding: 7px 11px; }
+.permissions-notice { border-bottom: 1px solid; font-size: 11px; padding: 7px 11px; }
+.permissions-notice--success { background: #edf8f2; border-color: #b6dcc7; color: #1b6846; }
+.permissions-notice--error,.permissions-state--error { background: #fcedef; border-color: #deb7bd; color: #8b2332; }
+.permissions-matrix { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.permissions-matrix-head,.permissions-row { align-items: center; display: grid; grid-template-columns: 190px minmax(450px,1fr) 90px; }
+.permissions-matrix-head { background: #f4f6f8; color: #64758a; font-size: 9px; font-weight: 700; position: sticky; text-transform: uppercase; top: 0; z-index: 2; }
+.permissions-matrix-head span,.permissions-row > div { padding: 7px 9px; }
+.permissions-row { border-top: 1px solid #e1e6eb; min-height: 44px; }
+.permissions-module strong,.permissions-module small { display: block; }
+.permissions-module strong { font-size: 11px; }
+.permissions-module small { color: #8491a1; font-size: 8px; margin-top: 2px; }
+.permissions-actions { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+.permissions-actions label,.permissions-master { align-items: center; color: #3e536a; cursor: pointer; display: inline-flex; font-size: 10px; gap: 4px; white-space: nowrap; }
+.permissions-actions input,.permissions-master input { accent-color: #981b2d; height: 13px; margin: 0; width: 13px; }
+.permissions-master span { font-weight: 700; }
+.permissions-savebar { align-items: center; background: #f7f8fa; border-top: 1px solid #d8dfe6; display: flex; justify-content: space-between; padding: 8px 10px; }
+.permissions-savebar > span { color: #687b90; font-size: 10px; }
+.permissions-savebar .permissions-dirty { color: #9a6810; font-weight: 700; }
+.permissions-savebar > div { display: flex; gap: 6px; }
+.permissions-savebar button { align-items: center; background: #fff; border: 1px solid #b9c4d0; border-radius: 3px; color: #2b4058; cursor: pointer; display: inline-flex; font-size: 10px; gap: 4px; padding: 6px 9px; }
+.permissions-savebar button:disabled { cursor: not-allowed; opacity: .5; }
+.permissions-savebar .permissions-save { background: #981b2d; border-color: #821424; color: #fff; }
+.permissions-state { margin: auto; padding: 30px; text-align: center; }
+.permissions-denied { align-items: center; justify-content: center; text-align: center; }
+.permissions-denied h1,.permissions-denied p { margin: 0; }
+@media(max-width:760px){.permissions-toolbar{align-items:stretch;flex-direction:column}.permissions-matrix-head,.permissions-row{grid-template-columns:150px minmax(400px,1fr) 80px}}

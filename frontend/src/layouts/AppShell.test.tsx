@@ -52,6 +52,7 @@ describe("application sidebar shell", () => {
       "href",
       "/vehicles",
     );
+    expect(screen.getByRole("link", { name: "Users Roles & Audit Logs" })).toHaveAttribute("href", "/users");
     expect(screen.getByText("Route content")).toBeInTheDocument();
   });
 

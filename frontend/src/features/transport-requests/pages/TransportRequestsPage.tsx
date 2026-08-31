@@ -101,14 +101,6 @@ export default function TransportRequestsPage() {
   const [queueMenuId, setQueueMenuId] = useState<string | null>(null);
   const drawerTriggerRef = useRef<HTMLElement | null>(null);
   const [creatingRequest, setCreatingRequest] = useState(false);
-  useEffect(() => {
-    if (!creatingRequest) return;
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setCreatingRequest(false);
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [creatingRequest]);
   const load = useCallback(
     (signal?: AbortSignal) => {
       const values = new URLSearchParams(query);
@@ -812,12 +804,7 @@ export default function TransportRequestsPage() {
         )}
       </div>
       {creatingRequest && (
-        <div
-          className="request-create-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setCreatingRequest(false);
-          }}
-        >
+        <div className="request-create-backdrop">
           <aside
             className="request-create-drawer"
             role="dialog"

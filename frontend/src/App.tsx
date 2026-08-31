@@ -31,9 +31,25 @@ const LiveFleetOperationsPage = React.lazy(
 const SetupPasswordPage = React.lazy(
   () => import("./features/driver-account/SetupPasswordPage"),
 );
+const StaffSetupPasswordPage = React.lazy(
+  () => import("./features/staff-account/StaffSetupPasswordPage"),
+);
 const FuelAnalyticsPage = React.lazy(
   () => import("./features/fuel-analytics/FuelAnalyticsPage"),
 );
+const MaintenancePage = React.lazy(
+  () => import("./features/maintenance/MaintenancePage"),
+);
+const SettingsPage = React.lazy(() => import("./features/settings/SettingsPage"));
+const SecuritySettingsPage = React.lazy(() => import("./features/settings/SettingsStaticPages").then((module) => ({ default: module.SecuritySettingsPage })));
+const OperationalRulesSettingsPage = React.lazy(() => import("./features/settings/SettingsStaticPages").then((module) => ({ default: module.OperationalRulesSettingsPage })));
+const IntegrationsSettingsPage = React.lazy(() => import("./features/settings/SettingsStaticPages").then((module) => ({ default: module.IntegrationsSettingsPage })));
+const AiModelsSettingsPage = React.lazy(() => import("./features/settings/AiModelsSettingsPage"));
+const RolesPermissionsPage = React.lazy(
+  () => import("./features/settings/RolesPermissionsPage"),
+);
+const UsersPage = React.lazy(() => import("./features/users/UsersPage"));
+const AuditLogsPage = React.lazy(() => import("./features/users/AuditLogsPage"));
 
 export default function App() {
   return (
@@ -43,6 +59,11 @@ export default function App() {
           fallback={<LoadingIndicator variant="card" message="Loading…" />}
         >
           <SetupPasswordPage />
+        </Suspense>
+      </Route>
+      <Route path="/setup-staff-password" exact>
+        <Suspense fallback={<LoadingIndicator variant="card" message="Loading…" />}>
+          <StaffSetupPasswordPage />
         </Suspense>
       </Route>
       <Route path="/login" exact>
@@ -84,6 +105,36 @@ export default function App() {
                 </Route>
                 <Route path="/fuel-analytics" exact>
                   <FuelAnalyticsPage />
+                </Route>
+                <Route path="/maintenance" exact>
+                  <MaintenancePage />
+                </Route>
+                <Route path="/settings/roles-permissions" exact>
+                  <Redirect to="/users/roles-permissions" />
+                </Route>
+                <Route path="/settings/security" exact>
+                  <SecuritySettingsPage />
+                </Route>
+                <Route path="/settings/operational-rules" exact>
+                  <OperationalRulesSettingsPage />
+                </Route>
+                <Route path="/settings/integrations" exact>
+                  <IntegrationsSettingsPage />
+                </Route>
+                <Route path="/settings/ai-models" exact>
+                  <AiModelsSettingsPage />
+                </Route>
+                <Route path="/settings" exact>
+                  <SettingsPage />
+                </Route>
+                <Route path="/users/roles-permissions" exact>
+                  <RolesPermissionsPage />
+                </Route>
+                <Route path="/users/audit-logs" exact>
+                  <AuditLogsPage />
+                </Route>
+                <Route path="/users" exact>
+                  <UsersPage />
                 </Route>
                 {plannedPaths.map((item) => (
                   <Route path={item.path} exact key={item.path}>

@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from datetime import timezone as datetime_timezone
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -18,6 +19,7 @@ from transport_requests.models import (
     TransportRequestEvent,
     generate_request_number,
 )
+from transport_requests.serializers import TransportRequestDetailSerializer
 from transport_requests.services import lock_relevant_vehicles
 
 
@@ -69,21 +71,30 @@ class TransportRequestApiTests(TestCase):
         }
 
     def create_request(self, user=None, external="HMS-100"):
-        self.login(user or self.manager)
-        response = self.client.post(
-            "/api/v1/transport-requests/", self.payload(external), format="json"
+        return self.create_request_from_payload(self.payload(external), user=user)
+
+    def create_request_from_payload(self, payload, user=None):
+        actor = user or self.manager
+        self.login(actor)
+        serializer = TransportRequestDetailSerializer(
+            data=payload,
+            context={"request": SimpleNamespace(user=actor)},
         )
-        self.assertEqual(response.status_code, 201)
-        return response
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        return serializer.save()
 
     def test_create_normalizes_and_audits_and_duplicate_is_conflict(self):
-        response = self.create_request()
-        self.assertRegex(response.json()["request_number"], r"^TR-\d{8}-[A-F0-9]{6}$")
-        self.assertEqual(response.json()["requester_name"], "Front Desk")
-        self.assertEqual(response.json()["status"], "FOR_APPROVAL")
+        item = self.create_request()
+        self.assertRegex(item.request_number, r"^TR-\d{8}-[A-F0-9]{6}$")
+        self.assertEqual(item.requester_name, "Front Desk")
+        self.assertEqual(item.status, "FOR_APPROVAL")
         self.assertEqual(TransportRequestEvent.objects.get().event_type, "CREATED")
-        duplicate = self.client.post("/api/v1/transport-requests/", self.payload(), format="json")
-        self.assertEqual(duplicate.status_code, 409)
+        duplicate = TransportRequestDetailSerializer(
+            data=self.payload(),
+            context={"request": SimpleNamespace(user=self.manager)},
+        )
+        self.assertFalse(duplicate.is_valid())
+        self.assertIn("external_reference", duplicate.errors)
 
     @override_settings(TIME_ZONE="Asia/Manila")
     def test_request_number_uses_manila_local_date_after_midnight(self):
@@ -96,7 +107,7 @@ class TransportRequestApiTests(TestCase):
         self.assertRegex(request_number, r"^TR-20260807-[A-F0-9]{6}$")
 
     def test_manager_transitions_and_dispatcher_permissions(self):
-        request_id = self.create_request().json()["id"]
+        request_id = self.create_request().pk
         self.login(self.dispatcher)
         self.assertEqual(
             self.client.post(
@@ -150,7 +161,7 @@ class TransportRequestApiTests(TestCase):
         self.assertEqual(TransportRequestEvent.objects.filter(request_id=request_id).count(), 4)
 
     def test_assignment_rejects_inactive_and_undersized_vehicles(self):
-        request_id = self.create_request().json()["id"]
+        request_id = self.create_request().pk
         self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
         small = Vehicle.objects.create(
             device_id="CAR-01",
@@ -174,7 +185,7 @@ class TransportRequestApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_filters_summary_and_edit_audit(self):
-        request_id = self.create_request().json()["id"]
+        request_id = self.create_request().pk
         self.assertEqual(
             self.client.patch(
                 f"/api/v1/transport-requests/{request_id}/", {"notes": "Updated"}, format="json"
@@ -190,7 +201,7 @@ class TransportRequestApiTests(TestCase):
         self.assertEqual(TransportRequestEvent.objects.filter(request_id=request_id).count(), 2)
 
     def test_more_details_requires_manager_and_note_then_dispatcher_edits_and_resubmits(self):
-        request_id = self.create_request().json()["id"]
+        request_id = self.create_request().pk
         url = f"/api/v1/transport-requests/{request_id}/request-more-details/"
         self.assertEqual(self.client.post(url, {}, format="json").status_code, 400)
         self.login(self.dispatcher)
@@ -221,7 +232,7 @@ class TransportRequestApiTests(TestCase):
         self.assertTrue(TransportRequestEvent.objects.filter(event_type="RESUBMITTED").exists())
 
     def test_reject_cancel_require_notes_and_approved_records_cannot_be_edited(self):
-        reject_id = self.create_request(external="REJECT-1").json()["id"]
+        reject_id = self.create_request(external="REJECT-1").pk
         reject_url = f"/api/v1/transport-requests/{reject_id}/reject/"
         self.assertEqual(self.client.post(reject_url, {}, format="json").status_code, 400)
         self.assertEqual(
@@ -230,14 +241,14 @@ class TransportRequestApiTests(TestCase):
             ).status_code,
             200,
         )
-        cancel_id = self.create_request(external="CANCEL-1").json()["id"]
+        cancel_id = self.create_request(external="CANCEL-1").pk
         cancel_url = f"/api/v1/transport-requests/{cancel_id}/cancel/"
         self.assertEqual(self.client.post(cancel_url, {}, format="json").status_code, 400)
         self.assertEqual(
             self.client.post(cancel_url, {"note": "Guest cancelled"}, format="json").status_code,
             200,
         )
-        approved_id = self.create_request(external="APPROVED-EDIT").json()["id"]
+        approved_id = self.create_request(external="APPROVED-EDIT").pk
         self.client.post(f"/api/v1/transport-requests/{approved_id}/approve/", {}, format="json")
         edited_events = TransportRequestEvent.objects.filter(
             request_id=approved_id, event_type="EDITED"
@@ -258,7 +269,7 @@ class TransportRequestApiTests(TestCase):
         )
 
     def test_super_admin_cannot_bypass_stale_edit_after_transition(self):
-        request_id = self.create_request(external="STALE-SUPER").json()["id"]
+        request_id = self.create_request(external="STALE-SUPER").pk
         self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
         super_admin = self.make_user("super-admin", superuser=True)
         self.login(super_admin)
@@ -283,19 +294,10 @@ class TransportRequestApiTests(TestCase):
         manila_today = datetime(2026, 8, 7, 0, 30, tzinfo=datetime_timezone(timedelta(hours=8)))
         payload = self.payload("MANILA-TODAY")
         payload["scheduled_pickup_at"] = manila_today.isoformat()
-        self.login(self.manager)
-        self.assertEqual(
-            self.client.post("/api/v1/transport-requests/", payload, format="json").status_code,
-            201,
-        )
+        self.create_request_from_payload(payload)
         previous_day = self.payload("MANILA-PREVIOUS")
         previous_day["scheduled_pickup_at"] = "2026-08-06T15:59:00Z"
-        self.assertEqual(
-            self.client.post(
-                "/api/v1/transport-requests/", previous_day, format="json"
-            ).status_code,
-            201,
-        )
+        self.create_request_from_payload(previous_day)
         with (
             timezone.override("Asia/Manila"),
             patch(
@@ -327,7 +329,7 @@ class TransportRequestApiTests(TestCase):
         self.assertEqual(list(locked), sorted([self.vehicle.pk, later.pk]))
 
     def test_dispatch_queue_summary_assignment_filter_and_serializer_shapes(self):
-        request_id = self.create_request().json()["id"]
+        request_id = self.create_request().pk
         self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
         dispatch = self.client.get("/api/v1/transport-requests/?status=APPROVED")
         self.assertEqual(dispatch.json()["count"], 1)
@@ -351,12 +353,12 @@ class TransportRequestApiTests(TestCase):
             {"vehicle_device_id": self.vehicle.device_id},
             format="json",
         )
-        unassigned_id = self.create_request(external="QUEUE-UNASSIGNED").json()["id"]
+        unassigned_id = self.create_request(external="QUEUE-UNASSIGNED").pk
         self.client.post(f"/api/v1/transport-requests/{unassigned_id}/approve/", {}, format="json")
         ordered_dispatch = self.client.get("/api/v1/transport-requests/?status=APPROVED").json()[
             "results"
         ]
-        self.assertEqual(ordered_dispatch[0]["id"], unassigned_id)
+        self.assertEqual(ordered_dispatch[0]["id"], str(unassigned_id))
         self.assertEqual(
             self.client.get(
                 "/api/v1/transport-requests/?status=APPROVED&assignment=assigned"
@@ -370,7 +372,7 @@ class TransportRequestApiTests(TestCase):
             )
 
     def test_vehicle_type_overlap_and_prepare_revalidation(self):
-        first_id = self.create_request(external="ALLOC-1").json()["id"]
+        first_id = self.create_request(external="ALLOC-1").pk
         self.client.patch(
             f"/api/v1/transport-requests/{first_id}/",
             {"required_vehicle_type": "VAN", "estimated_duration_minutes": 120},
@@ -402,7 +404,7 @@ class TransportRequestApiTests(TestCase):
             ).status_code,
             200,
         )
-        second_id = self.create_request(external="ALLOC-2").json()["id"]
+        second_id = self.create_request(external="ALLOC-2").pk
         self.client.patch(
             f"/api/v1/transport-requests/{second_id}/",
             {"required_vehicle_type": "VAN", "estimated_duration_minutes": 120},
@@ -424,14 +426,14 @@ class TransportRequestApiTests(TestCase):
         self.assertEqual(prepare.status_code, 400)
 
     def test_calendar_validation_conflicts_and_ready_constraint(self):
-        first_id = self.create_request(external="CAL-1").json()["id"]
+        first_id = self.create_request(external="CAL-1").pk
         self.client.post(f"/api/v1/transport-requests/{first_id}/approve/", {}, format="json")
         self.client.post(
             f"/api/v1/transport-requests/{first_id}/assign-vehicle/",
             {"vehicle_device_id": self.vehicle.device_id},
             format="json",
         )
-        second_id = self.create_request(external="CAL-2").json()["id"]
+        second_id = self.create_request(external="CAL-2").pk
         self.client.post(f"/api/v1/transport-requests/{second_id}/approve/", {}, format="json")
         TransportRequest.objects.filter(pk=second_id).update(assigned_vehicle=self.vehicle)
         day = timezone.localdate(
@@ -452,7 +454,7 @@ class TransportRequestApiTests(TestCase):
                 self.client.get(f"/api/v1/transport-requests/calendar/?{query}").status_code,
                 400,
             )
-        third_id = self.create_request(external="INVALID-READY").json()["id"]
+        third_id = self.create_request(external="INVALID-READY").pk
         with self.assertRaises(IntegrityError), transaction.atomic():
             TransportRequest.objects.filter(pk=third_id).update(
                 status=TransportRequest.Status.READY_FOR_DISPATCH

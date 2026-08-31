@@ -54,14 +54,9 @@ export default function RequestDetailsDrawer({
         if (!(error instanceof DOMException && error.name === "AbortError"))
           setState("error");
       });
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !dialogRef.current) onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
     closeRef.current?.focus();
     return () => {
       controller.abort();
-      document.removeEventListener("keydown", closeOnEscape);
     };
   }, [onClose, requestId]);
   useEffect(() => {
@@ -99,13 +94,11 @@ export default function RequestDetailsDrawer({
     <div
       className="request-drawer-backdrop"
       data-testid="request-workspace-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
     >
       <aside
         className="request-details-drawer"
         role="dialog"
+        aria-modal="true"
         aria-labelledby="request-drawer-title"
       >
         <header className="d-flex align-items-start justify-content-between">

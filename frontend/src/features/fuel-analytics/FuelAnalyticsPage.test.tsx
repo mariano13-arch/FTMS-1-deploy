@@ -255,16 +255,12 @@ test("searches fleet rows with suggestions and restores all rows when cleared", 
   await waitFor(() => expect(mocks.getDashboard).toHaveBeenLastCalledWith("24h", null, "", expect.any(AbortSignal)));
 });
 
-test("renders model and input details below the operational dashboard", async () => {
+test("keeps operational input readiness while technical model details live in settings", async () => {
   renderRoute();
 
   fireEvent.click(await screen.findByRole("tab", { name: /Input Readiness/ }));
   expect(screen.getByRole("heading", { name: "Model Input Readiness" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: /Model Details/ }));
-  expect(screen.getByRole("heading", { name: "Model & Analytics Details" })).toBeInTheDocument();
-  expect(screen.getByText("1.0523 L/h")).toBeInTheDocument();
-  expect(screen.getByText("1.6703 L/h")).toBeInTheDocument();
-  expect(screen.getByText(/Experiment 1 has better predictive accuracy/)).toBeInTheDocument();
+  expect(screen.queryByRole("tab", { name: /Model Details/ })).not.toBeInTheDocument();
 });
 
 test("shows loading, backend error, and model-unavailable states distinctly", async () => {

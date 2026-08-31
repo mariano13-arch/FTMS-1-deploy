@@ -1,26 +1,23 @@
 from datetime import timedelta
 from importlib import import_module
+from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.test import APIClient
 
-from accounts.models import StaffProfile
 from transport_requests.domain import (
     DELIVERY_LOGISTICS,
     PASSENGER_TRANSPORT,
     category_for_request_type,
 )
 from transport_requests.models import TransportRequest
+from transport_requests.serializers import TransportRequestDetailSerializer
 
 
 class TransportRequestDomainTests(TestCase):
     def setUp(self):
-        self.client = APIClient()
         self.user = get_user_model().objects.create_user(username="domain-manager", is_staff=True)
-        StaffProfile.objects.create(user=self.user, role=StaffProfile.Role.FLEET_MANAGER)
-        self.client.force_authenticate(self.user)
 
     def payload(self, **changes):
         data = {
@@ -43,23 +40,29 @@ class TransportRequestDomainTests(TestCase):
         data.update(changes)
         return data
 
-    def post(self, **changes):
-        return self.client.post(
-            "/api/v1/transport-requests/", self.payload(**changes), format="json"
+    def intake(self, **changes):
+        return TransportRequestDetailSerializer(
+            data=self.payload(**changes),
+            context={"request": SimpleNamespace(user=self.user)},
         )
 
+    def valid_intake(self, **changes):
+        serializer = self.intake(**changes)
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+        return serializer
+
     def test_known_types_derive_their_category_and_passenger_zero_is_rejected(self):
-        accepted = self.post()
-        self.assertEqual(accepted.status_code, 201)
-        self.assertEqual(accepted.json()["request_category"], PASSENGER_TRANSPORT)
-        rejected = self.post(external_reference="DOMAIN-2", passenger_count=0)
-        self.assertEqual(rejected.status_code, 400)
-        self.assertIn("passenger_count", rejected.json())
+        accepted = self.valid_intake()
+        self.assertEqual(accepted.data["request_category"], PASSENGER_TRANSPORT)
+        rejected = self.intake(external_reference="DOMAIN-2", passenger_count=0)
+        self.assertFalse(rejected.is_valid())
+        self.assertIn("passenger_count", rejected.errors)
         self.assertEqual(category_for_request_type("GUEST_TRANSFER"), PASSENGER_TRANSPORT)
         self.assertEqual(category_for_request_type("FOOD_DELIVERY"), DELIVERY_LOGISTICS)
 
     def test_delivery_zero_passengers_accepts_quantity_and_preserves_intake_identity(self):
-        response = self.post(
+        response = self.valid_intake(
             source_system="RESTAURANT_MANAGEMENT_SYSTEM",
             external_reference="RMS-DELIVERY-1",
             request_type="FOOD_DELIVERY",
@@ -70,8 +73,7 @@ class TransportRequestDomainTests(TestCase):
             handling_instructions=" Keep upright ",
             temperature_requirement=" Keep warm ",
         )
-        self.assertEqual(response.status_code, 201)
-        body = response.json()
+        body = response.data
         self.assertEqual(body["request_category"], DELIVERY_LOGISTICS)
         self.assertEqual(body["passenger_count"], 0)
         self.assertEqual(body["load_description"], "Twelve meal trays")
@@ -79,67 +81,63 @@ class TransportRequestDomainTests(TestCase):
         self.assertEqual(body["temperature_requirement"], "Keep warm")
         self.assertEqual(body["source_system"], "RESTAURANT_MANAGEMENT_SYSTEM")
         self.assertEqual(body["external_reference"], "RMS-DELIVERY-1")
-        duplicate = self.client.post(
-            "/api/v1/transport-requests/",
-            self.payload(
-                source_system="RESTAURANT_MANAGEMENT_SYSTEM",
-                external_reference="RMS-DELIVERY-1",
-                request_type="FOOD_DELIVERY",
-                passenger_count=0,
-                load_description="Meal trays",
-                load_quantity=12,
-            ),
-            format="json",
+        duplicate = self.intake(
+            source_system="RESTAURANT_MANAGEMENT_SYSTEM",
+            external_reference="RMS-DELIVERY-1",
+            request_type="FOOD_DELIVERY",
+            passenger_count=0,
+            load_description="Meal trays",
+            load_quantity=12,
         )
-        self.assertEqual(duplicate.status_code, 409)
+        self.assertFalse(duplicate.is_valid())
+        self.assertIn("external_reference", duplicate.errors)
 
     def test_delivery_accepts_weight_without_quantity(self):
-        response = self.post(
+        response = self.valid_intake(
             external_reference="WEIGHT-ONLY",
             request_type="SUPPLIER_PICKUP",
             passenger_count=0,
             load_description="Kitchen supplies",
             estimated_weight_kg="42.50",
         )
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["estimated_weight_kg"], "42.50")
+        self.assertEqual(response.data["estimated_weight_kg"], "42.50")
 
     def test_delivery_requires_description_and_real_cargo_measure_not_luggage(self):
-        missing_description = self.post(
+        missing_description = self.intake(
             external_reference="NO-DESCRIPTION",
             request_type="CATERING_DELIVERY",
             passenger_count=0,
             load_quantity=2,
         )
-        self.assertEqual(missing_description.status_code, 400)
-        self.assertIn("load_description", missing_description.json())
-        luggage_only = self.post(
+        self.assertFalse(missing_description.is_valid())
+        self.assertIn("load_description", missing_description.errors)
+        luggage_only = self.intake(
             external_reference="LUGGAGE-ONLY",
             request_type="BANQUET_LOGISTICS",
             passenger_count=0,
             luggage_count=10,
             load_description="Banquet equipment",
         )
-        self.assertEqual(luggage_only.status_code, 400)
-        self.assertIn("load_quantity", luggage_only.json())
-        self.assertIn("estimated_weight_kg", luggage_only.json())
+        self.assertFalse(luggage_only.is_valid())
+        self.assertIn("load_quantity", luggage_only.errors)
+        self.assertIn("estimated_weight_kg", luggage_only.errors)
 
     def test_ambiguous_types_require_explicit_valid_category(self):
         for request_type in ("BRANCH_TRANSFER", "OTHER"):
-            missing = self.post(
+            missing = self.intake(
                 external_reference=f"{request_type}-MISSING",
                 request_type=request_type,
             )
-            self.assertEqual(missing.status_code, 400)
-            self.assertIn("request_category", missing.json())
-        passenger = self.post(
+            self.assertFalse(missing.is_valid())
+            self.assertIn("request_category", missing.errors)
+        passenger = self.valid_intake(
             external_reference="BRANCH-PASSENGER",
             request_type="BRANCH_TRANSFER",
             request_category=PASSENGER_TRANSPORT,
             passenger_count=1,
         )
-        self.assertEqual(passenger.status_code, 201)
-        delivery = self.post(
+        self.assertEqual(passenger.data["request_category"], PASSENGER_TRANSPORT)
+        delivery = self.valid_intake(
             external_reference="OTHER-DELIVERY",
             request_type="OTHER",
             request_category=DELIVERY_LOGISTICS,
@@ -147,17 +145,16 @@ class TransportRequestDomainTests(TestCase):
             load_description="Documents",
             load_quantity=1,
         )
-        self.assertEqual(delivery.status_code, 201)
+        self.assertEqual(delivery.data["request_category"], DELIVERY_LOGISTICS)
 
     def test_known_type_rejects_conflicting_explicit_category(self):
-        response = self.post(request_category=DELIVERY_LOGISTICS)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("request_category", response.json())
+        response = self.intake(request_category=DELIVERY_LOGISTICS)
+        self.assertFalse(response.is_valid())
+        self.assertIn("request_category", response.errors)
 
     def test_new_delivery_fields_are_empty_for_new_passenger_requests(self):
-        response = self.post()
-        self.assertEqual(response.status_code, 201)
-        item = TransportRequest.objects.get(pk=response.json()["id"])
+        response = self.valid_intake()
+        item = TransportRequest.objects.get(pk=response.instance.pk)
         self.assertEqual(item.load_description, "")
         self.assertIsNone(item.load_quantity)
         self.assertIsNone(item.estimated_weight_kg)
