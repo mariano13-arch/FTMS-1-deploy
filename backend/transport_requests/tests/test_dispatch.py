@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
-from fleet.models import Driver, Vehicle
+from fleet.models import Driver, Vehicle, VehicleInspection
 from transport_requests import dispatch
 from transport_requests.models import (
     DispatchAssignment,
@@ -38,7 +38,24 @@ class DispatchBoardTests(TestCase):
             vehicle_type=Vehicle.VehicleType.VAN,
             passenger_capacity=8,
         )
+        self.pass_inspection(self.vehicle)
         self.request = self.make_request("REQ-001")
+
+    def pass_inspection(self, vehicle):
+        return VehicleInspection.objects.create(
+            vehicle=vehicle,
+            inspection_date=timezone.localdate(),
+            inspection_type=VehicleInspection.InspectionType.PRE_TRIP,
+            result=VehicleInspection.Result.PASSED,
+            exterior_condition=VehicleInspection.Condition.OK,
+            interior_condition=VehicleInspection.Condition.OK,
+            tires_condition=VehicleInspection.Condition.OK,
+            lights_condition=VehicleInspection.Condition.OK,
+            brakes_condition=VehicleInspection.Condition.OK,
+            fluids_condition=VehicleInspection.Condition.OK,
+            safety_equipment_condition=VehicleInspection.Condition.OK,
+            inspected_by=self.user,
+        )
 
     def make_request(self, reference, *, hours=2):
         return TransportRequest.objects.create(
@@ -108,6 +125,31 @@ class DispatchBoardTests(TestCase):
             format="json",
         )
         self.assertEqual(old_endpoint.status_code, 400)
+        refreshed = self.client.get("/api/v1/transport-requests/dispatch-board/")
+        persisted = refreshed.json()["assignments"][0]
+        self.assertEqual(persisted["transport_request_id"], str(self.request.pk))
+        self.assertEqual(persisted["driver"]["id"], self.driver.pk)
+        self.assertEqual(persisted["vehicle"]["id"], self.vehicle.pk)
+
+    def test_non_dispatchable_and_unauthorized_confirmation_are_rejected(self):
+        pending = self.make_request("REQ-PENDING", hours=4)
+        pending.status = TransportRequest.Status.FOR_APPROVAL
+        pending.save(update_fields=["status", "updated_at"])
+        board = self.client.get("/api/v1/transport-requests/dispatch-board/")
+        self.assertNotIn(
+            str(pending.pk),
+            {item["id"] for item in board.json()["requests"]},
+        )
+        self.assertEqual(
+            self.confirmation(transport_request_id=str(pending.pk)).status_code,
+            400,
+        )
+
+        unauthorized = get_user_model().objects.create_user(
+            username="profileless", is_staff=True
+        )
+        self.client.force_authenticate(unauthorized)
+        self.assertEqual(self.confirmation().status_code, 403)
 
     def test_restricted_driver_and_change_without_reason_are_rejected(self):
         restricted = Driver.objects.create(
@@ -172,6 +214,7 @@ class DispatchBoardTests(TestCase):
             vehicle_type=Vehicle.VehicleType.VAN,
             passenger_capacity=8,
         )
+        self.pass_inspection(second_vehicle)
         matrix_mock.return_value = {
             "vehicle_ids": [self.vehicle.device_id, second_vehicle.device_id],
             "request_ids": [str(self.request.pk)],

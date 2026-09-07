@@ -5,6 +5,7 @@ urlpatterns = [
     path("api/v1/auth/", include("accounts.urls")),
     path("api/v1/driver-auth/", include("accounts.driver_urls")),
     path("api/v1/driver-trips/", include("transport_requests.driver_urls")),
+    path("api/v1/integrations/", include("transport_requests.integration_urls")),
     path("api/v1/vehicles/", include("fleet.urls")),
     path("api/v1/drivers/", include("fleet.driver_urls")),
     path("api/v1/transport-requests/", include("transport_requests.urls")),

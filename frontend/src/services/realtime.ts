@@ -33,7 +33,7 @@ function isTelemetryEvent(
 ): value is TelemetryEvent {
   if (!isRecord(value)) return false;
   return (
-    value.schema_version === "1.0" &&
+    (value.schema_version === "1.0" || value.schema_version === "1.1") &&
     typeof value.event_id === "string" &&
     Number.isSafeInteger(value.sequence_number) &&
     Number(value.sequence_number) >= 0 &&
@@ -42,7 +42,15 @@ function isTelemetryEvent(
     isValidTimestamp(value.received_at) &&
     isNumberInRange(value.latitude, -90, 90) &&
     isNumberInRange(value.longitude, -180, 180) &&
-    isNumberInRange(value.gnss_speed_kph, 0, 300) &&
+    (value.position_source === undefined ||
+      value.position_source === "GNSS" || value.position_source === "CELLULAR_LBS") &&
+    (value.position_accuracy_m === undefined || isNullableNumber(value.position_accuracy_m)) &&
+    (((value.position_source === undefined || value.position_source === "GNSS") &&
+      isNumberInRange(value.gnss_speed_kph, 0, 300)) ||
+      (value.position_source === "CELLULAR_LBS" &&
+        value.gnss_speed_kph === null &&
+        typeof value.position_accuracy_m === "number" &&
+        value.position_accuracy_m > 0)) &&
     (value.rpm === null ||
       (Number.isSafeInteger(value.rpm) &&
         Number(value.rpm) >= 0 &&

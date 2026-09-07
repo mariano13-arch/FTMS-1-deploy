@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
@@ -56,6 +57,106 @@ class TelemetryApiTests(TestCase):
         self.assertEqual(event.location.srid, 4326)
         self.assertAlmostEqual(event.location.y, 14.5186)
         self.assertAlmostEqual(event.location.x, 121.0196)
+        self.assertEqual(event.position_source, TelemetryEvent.PositionSource.GNSS)
+        self.assertIsNone(event.position_accuracy_m)
+
+    def test_accepts_source_aware_gnss_v1_1(self):
+        payload = {**self.payload, "schema_version": "1.1", "position_source": "GNSS",
+                   "position_accuracy_m": None}
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(TelemetryEvent.objects.get().position_source, "GNSS")
+
+    def test_accepts_cellular_lbs_v1_1_without_gnss_speed(self):
+        payload = {**self.payload, "schema_version": "1.1",
+                   "position_source": "CELLULAR_LBS", "position_accuracy_m": 550,
+                   "gnss_speed_kph": None}
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 201)
+        event = TelemetryEvent.objects.get()
+        self.assertEqual(event.position_source, "CELLULAR_LBS")
+        self.assertEqual(event.position_accuracy_m, Decimal("550.00"))
+        self.assertIsNone(event.gnss_speed_kph)
+
+    def test_accepts_v1_2_simulated_test_obd_provenance(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.2",
+            "position_source": "GNSS",
+            "position_accuracy_m": None,
+            "obd_source": "SIMULATED_TEST",
+        }
+        self.assertEqual(self.post(payload).status_code, 201)
+        event = TelemetryEvent.objects.get()
+        self.assertEqual(event.obd_source, TelemetryEvent.ObdSource.SIMULATED_TEST)
+        self.assertEqual(event.rpm, 1750)
+
+    def test_accepts_v1_2_physical_obd_provenance(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.2",
+            "position_source": "GNSS",
+            "position_accuracy_m": None,
+            "obd_source": "PHYSICAL_OBD",
+        }
+        self.assertEqual(self.post(payload).status_code, 201)
+        self.assertEqual(TelemetryEvent.objects.get().obd_source, "PHYSICAL_OBD")
+
+    def test_v1_2_rejects_obd_values_without_provenance(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.2",
+            "position_source": "GNSS",
+            "position_accuracy_m": None,
+        }
+        self.assertEqual(self.post(payload).status_code, 400)
+        self.assertFalse(TelemetryEvent.objects.exists())
+
+    def test_v1_2_allows_null_obd_values_and_null_provenance(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.2",
+            "position_source": "CELLULAR_LBS",
+            "position_accuracy_m": 550,
+            "gnss_speed_kph": None,
+            "rpm": None,
+            "coolant_c": None,
+            "engine_load_pct": None,
+            "driving_event": None,
+            "obd_source": None,
+        }
+        self.assertEqual(self.post(payload).status_code, 201)
+        event = TelemetryEvent.objects.get()
+        self.assertIsNone(event.obd_source)
+        self.assertIsNone(event.rpm)
+
+    def test_rejects_cellular_lbs_with_gnss_speed(self):
+        payload = {**self.payload, "schema_version": "1.1",
+                   "position_source": "CELLULAR_LBS", "position_accuracy_m": 550}
+        self.assertEqual(self.post(payload).status_code, 400)
+        self.assertFalse(TelemetryEvent.objects.exists())
+
+    def test_rejects_cellular_lbs_without_accuracy(self):
+        payload = {**self.payload, "schema_version": "1.1",
+                   "position_source": "CELLULAR_LBS", "gnss_speed_kph": None}
+        self.assertEqual(self.post(payload).status_code, 400)
+        self.assertFalse(TelemetryEvent.objects.exists())
+
+    def test_model_validation_enforces_position_source_semantics(self):
+        self.post()
+        event = TelemetryEvent.objects.get()
+        event.position_source = TelemetryEvent.PositionSource.CELLULAR_LBS
+        event.position_accuracy_m = None
+        with self.assertRaises(ValidationError):
+            event.full_clean()
+
+        event.position_accuracy_m = Decimal("100.00")
+        event.gnss_speed_kph = None
+        event.full_clean()
+
+        event.position_source = TelemetryEvent.PositionSource.GNSS
+        with self.assertRaises(ValidationError):
+            event.full_clean()
 
     def test_exact_duplicate_is_idempotent(self):
         self.post()
@@ -262,6 +363,59 @@ class TelemetryApiTests(TestCase):
         payload = deepcopy(self.payload)
         payload["driving_event"] = "SPEEDING"
         self.assertEqual(self.post(payload).status_code, 400)
+
+    def test_v1_0_rejects_null_driving_event(self):
+        payload = deepcopy(self.payload)
+        payload["driving_event"] = None
+        self.assertEqual(self.post(payload).status_code, 400)
+        self.assertFalse(TelemetryEvent.objects.exists())
+
+    def test_v1_0_accepts_existing_driving_event(self):
+        self.assertEqual(self.post().status_code, 201)
+        self.assertEqual(TelemetryEvent.objects.get().driving_event, "NORMAL")
+
+    def test_v1_1_accepts_null_driving_event(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.1",
+            "position_source": "GNSS",
+            "position_accuracy_m": None,
+            "driving_event": None,
+        }
+        self.assertEqual(self.post(payload).status_code, 201)
+        self.assertIsNone(TelemetryEvent.objects.get().driving_event)
+
+    def test_v1_1_accepts_valid_driving_event(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.1",
+            "position_source": "GNSS",
+            "position_accuracy_m": None,
+        }
+        self.assertEqual(self.post(payload).status_code, 201)
+        self.assertEqual(TelemetryEvent.objects.get().driving_event, "NORMAL")
+
+    def test_v1_1_location_only_lbs_with_null_driving_event_is_idempotent(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.1",
+            "position_source": "CELLULAR_LBS",
+            "position_accuracy_m": 550,
+            "gnss_speed_kph": None,
+            "rpm": None,
+            "coolant_c": None,
+            "engine_load_pct": None,
+            "driving_event": None,
+        }
+        self.assertEqual(self.post(payload).status_code, 201)
+        duplicate = self.post(payload)
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertTrue(duplicate.json()["duplicate"])
+        self.assertIsNone(TelemetryEvent.objects.get().driving_event)
+
+        conflict = {**payload, "driving_event": "NORMAL"}
+        self.assertEqual(self.post(conflict).status_code, 409)
+        self.assertIsNone(TelemetryEvent.objects.get().driving_event)
 
     def test_ingestion_only_allows_post(self):
         self.assertEqual(self.client.get("/api/v1/telemetry/").status_code, 405)

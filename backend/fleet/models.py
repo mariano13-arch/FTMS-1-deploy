@@ -151,6 +151,16 @@ class Vehicle(models.Model):
 
 
 class VehicleInspection(models.Model):
+    CHECKLIST_FIELDS = (
+        "exterior_condition",
+        "interior_condition",
+        "tires_condition",
+        "lights_condition",
+        "brakes_condition",
+        "fluids_condition",
+        "safety_equipment_condition",
+    )
+
     class InspectionType(models.TextChoices):
         PRE_TRIP = "PRE_TRIP", "Pre-trip"
         POST_TRIP = "POST_TRIP", "Post-trip"
@@ -209,6 +219,64 @@ class VehicleInspection(models.Model):
 
     def __str__(self):
         return f"{self.vehicle.device_id} {self.inspection_date} {self.result}"
+
+
+class VehicleMaintenanceRecord(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        SCHEDULED = "SCHEDULED", "Scheduled"
+        IN_PROGRESS = "IN_PROGRESS", "In progress"
+        COMPLETED = "COMPLETED", "Completed"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    class Source(models.TextChoices):
+        MANUAL = "MANUAL", "Manual"
+        INSPECTION = "INSPECTION", "Inspection"
+
+    vehicle = models.ForeignKey(
+        Vehicle, on_delete=models.PROTECT, related_name="maintenance_records"
+    )
+    inspection = models.ForeignKey(
+        VehicleInspection,
+        on_delete=models.PROTECT,
+        related_name="maintenance_records",
+        null=True,
+        blank=True,
+    )
+    source = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    title = models.CharField(max_length=160)
+    notes = models.TextField(blank=True, default="")
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="vehicle_maintenance_records",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        indexes = [
+            models.Index(fields=["vehicle", "status"], name="fleet_maint_vehicle_status_idx")
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(status="SCHEDULED") | models.Q(scheduled_at__isnull=False),
+                name="fleet_maint_scheduled_at_required",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(inspection__isnull=True, source="MANUAL")
+                | models.Q(inspection__isnull=False, source="INSPECTION"),
+                name="fleet_maint_source_matches_inspection",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.vehicle.device_id} {self.title} ({self.status})"
 
 
 class VehicleDocument(models.Model):

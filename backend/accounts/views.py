@@ -1,10 +1,14 @@
+import time
+
 from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.contrib.auth.hashers import check_password
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
@@ -17,9 +21,15 @@ from rest_framework.views import APIView
 from fleet.models import Driver
 from fleet.serializers import driver_eligibility
 
-from .models import VALID_MODULE_ACTIONS, RolePermission, StaffProfile
+from .models import (
+    VALID_MODULE_ACTIONS,
+    RolePermission,
+    StaffProfile,
+    TwoFactorCredential,
+    TwoFactorRecoveryCode,
+)
 from .permissions import DriverAccess, StaffAccess
-from .roles import SUPER_ADMIN, resolve_role, user_data
+from .roles import SUPER_ADMIN, is_driver_identity, resolve_role, user_data
 from .serializers import (
     DriverPasswordSetupSerializer,
     LoginSerializer,
@@ -28,13 +38,41 @@ from .serializers import (
     ManagedStaffStatusSerializer,
     RolePermissionReplaceSerializer,
     StaffPasswordSetupSerializer,
+    TwoFactorCodeSerializer,
+    TwoFactorDisableSerializer,
+    TwoFactorVerifySerializer,
+)
+from .session_security import (
+    end_authenticated_session,
+    establish_authenticated_session,
+    record_meaningful_activity,
 )
 from .staff_invitations import (
     INVITATION_NOT_SENT,
     INVITATION_SENT,
     send_staff_setup_email,
 )
-from .throttles import LoginThrottle
+from .throttles import LoginThrottle, TwoFactorVerifyThrottle
+from .two_factor import (
+    CHALLENGE_MAX_ATTEMPTS,
+    ChallengeCacheUnavailable,
+    InvalidSecondFactor,
+    ReplayedTotp,
+    TwoFactorConfigurationError,
+    claim_challenge,
+    consume_challenge,
+    create_challenge,
+    decrypt_secret,
+    encrypt_secret,
+    issue_recovery_codes,
+    load_challenge,
+    matched_totp_time_step,
+    provisioning_data,
+    record_challenge_failure,
+    release_challenge_claim,
+    verify_recovery_code,
+    verify_totp,
+)
 
 
 class CsrfView(APIView):
@@ -66,8 +104,260 @@ class LoginView(APIView):
         )
         if user is None or resolve_role(user) is None:
             return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
-        login(request, user)
+        credential = TwoFactorCredential.objects.filter(user=user, is_enabled=True).first()
+        if credential:
+            try:
+                decrypt_secret(credential.encrypted_secret)
+            except TwoFactorConfigurationError:
+                return Response(
+                    {"detail": "Two-factor authentication is temporarily unavailable."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            try:
+                challenge_token = create_challenge(user.pk)
+            except ChallengeCacheUnavailable:
+                return self.two_factor_unavailable()
+            return Response({"two_factor_required": True, "challenge_token": challenge_token})
+        establish_authenticated_session(request, user)
         return Response({"user": user_data(user), "csrf_token": get_token(request)})
+
+    @staticmethod
+    def two_factor_unavailable():
+        return Response(
+            {"detail": "Two-factor authentication is temporarily unavailable."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+class StaffTwoFactorMixin:
+    permission_classes = [StaffAccess]
+
+    @staticmethod
+    def service_unavailable():
+        return Response(
+            {"detail": "Two-factor authentication is temporarily unavailable."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+class TwoFactorStatusView(StaffTwoFactorMixin, APIView):
+    def get(self, request):
+        credential = TwoFactorCredential.objects.filter(user=request.user).first()
+        enabled = bool(credential and credential.is_enabled)
+        remaining = (
+            TwoFactorRecoveryCode.objects.filter(
+                credential=credential, used_at__isnull=True
+            ).count()
+            if enabled
+            else 0
+        )
+        return Response(
+            {
+                "enabled": enabled,
+                "recovery_codes_remaining": remaining,
+                "enabled_at": credential.enabled_at if enabled else None,
+            }
+        )
+
+
+class TwoFactorSetupView(StaffTwoFactorMixin, APIView):
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        if not isinstance(request.data, dict) or request.data:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Request body must be empty."]}
+            )
+        try:
+            import pyotp
+
+            secret = pyotp.random_base32()
+            encrypted_secret = encrypt_secret(secret)
+        except TwoFactorConfigurationError:
+            return self.service_unavailable()
+        with transaction.atomic():
+            credential, created = TwoFactorCredential.objects.select_for_update().get_or_create(
+                user=request.user,
+                defaults={"encrypted_secret": encrypted_secret},
+            )
+            if not created and credential.is_enabled:
+                return Response(
+                    {"detail": "Two-factor authentication is already enabled."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if not created:
+                credential.encrypted_secret = encrypted_secret
+                credential.last_used_time_step = None
+                credential.save(
+                    update_fields=["encrypted_secret", "last_used_time_step", "updated_at"]
+                )
+                TwoFactorRecoveryCode.objects.filter(credential=credential).delete()
+        return Response(provisioning_data(request.user, secret))
+
+
+class TwoFactorConfirmView(StaffTwoFactorMixin, APIView):
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        serializer = TwoFactorCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            with transaction.atomic():
+                credential = TwoFactorCredential.objects.select_for_update().get(user=request.user)
+                if credential.is_enabled:
+                    return Response(
+                        {"detail": "Two-factor authentication is already enabled."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                time_step = matched_totp_time_step(
+                    decrypt_secret(credential.encrypted_secret),
+                    serializer.validated_data["code"],
+                )
+                if time_step is None:
+                    return Response(
+                        {"detail": "Invalid authenticator code."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                credential.is_enabled = True
+                credential.enabled_at = timezone.now()
+                credential.last_used_time_step = time_step
+                credential.save(
+                    update_fields=[
+                        "is_enabled", "enabled_at", "last_used_time_step", "updated_at"
+                    ]
+                )
+                recovery_codes = issue_recovery_codes(credential)
+        except TwoFactorCredential.DoesNotExist:
+            return Response(
+                {"detail": "No pending two-factor setup exists."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except TwoFactorConfigurationError:
+            return self.service_unavailable()
+        return Response({"recovery_codes": recovery_codes})
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class TwoFactorVerifyView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [TwoFactorVerifyThrottle]
+
+    def post(self, request):
+        serializer = TwoFactorVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        token = values["challenge_token"]
+        try:
+            challenge = load_challenge(token)
+        except ChallengeCacheUnavailable:
+            return self.service_unavailable()
+        if not challenge:
+            return self.invalid_challenge()
+        try:
+            claim_id = claim_challenge(token)
+        except ChallengeCacheUnavailable:
+            return self.service_unavailable()
+        if not claim_id:
+            return self.invalid_challenge()
+        consumed = False
+        try:
+            user = get_user_model().objects.select_related("two_factor_credential").get(
+                pk=challenge["user_id"]
+            )
+            credential = user.two_factor_credential
+            if not user.is_active or resolve_role(user) is None or not credential.is_enabled:
+                return self.invalid_challenge()
+            if values["method"] == "totp":
+                verify_totp(credential.pk, values["code"])
+            else:
+                verify_recovery_code(credential.pk, values["code"])
+        except (get_user_model().DoesNotExist, TwoFactorCredential.DoesNotExist):
+            return self.invalid_challenge()
+        except TwoFactorConfigurationError:
+            return Response(
+                {"detail": "Two-factor authentication is temporarily unavailable."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except (InvalidSecondFactor, ReplayedTotp):
+            try:
+                attempts = record_challenge_failure(
+                    token,
+                    claim_id,
+                    challenge["expires_at"] - time.time(),
+                )
+            except ChallengeCacheUnavailable:
+                return self.service_unavailable()
+            if attempts is None or attempts >= CHALLENGE_MAX_ATTEMPTS:
+                return self.invalid_challenge()
+            return Response(
+                {"detail": "Invalid authenticator code."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        except ChallengeCacheUnavailable:
+            return self.service_unavailable()
+        else:
+            try:
+                consumed = consume_challenge(token, claim_id)
+            except ChallengeCacheUnavailable:
+                return self.service_unavailable()
+            if not consumed:
+                return self.invalid_challenge()
+            establish_authenticated_session(request, user)
+            return Response({"user": user_data(user), "csrf_token": get_token(request)})
+        finally:
+            if not consumed:
+                try:
+                    release_challenge_claim(token, claim_id)
+                except ChallengeCacheUnavailable:
+                    pass
+
+    @staticmethod
+    def service_unavailable():
+        return Response(
+            {"detail": "Two-factor authentication is temporarily unavailable."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    @staticmethod
+    def invalid_challenge():
+        return Response(
+            {"detail": "Invalid or expired two-factor challenge."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+class TwoFactorDisableView(StaffTwoFactorMixin, APIView):
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        serializer = TwoFactorDisableSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if not check_password(values["current_password"], request.user.password):
+            return Response(
+                {"detail": "Current password or second factor is invalid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            credential = TwoFactorCredential.objects.get(user=request.user, is_enabled=True)
+            if values["method"] == "totp":
+                verify_totp(credential.pk, values["code"])
+            else:
+                verify_recovery_code(credential.pk, values["code"])
+        except TwoFactorCredential.DoesNotExist:
+            return Response(
+                {"detail": "Two-factor authentication is not enabled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except (InvalidSecondFactor, ReplayedTotp):
+            return Response(
+                {"detail": "Current password or second factor is invalid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except TwoFactorConfigurationError:
+            return self.service_unavailable()
+        credential.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MeView(APIView):
@@ -81,7 +371,20 @@ class LogoutView(APIView):
     permission_classes = [StaffAccess]
 
     def post(self, request):
-        logout(request)
+        end_authenticated_session(request, request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SessionActivityView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        if not isinstance(request.data, dict) or request.data:
+            raise serializers.ValidationError(
+                {"non_field_errors": ["Request body must be empty."]}
+            )
+        record_meaningful_activity(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -367,7 +670,7 @@ class DriverLoginView(APIView):
             password=serializer.validated_data["password"],
         )
         driver = None
-        if user is not None and user.is_active:
+        if is_driver_identity(user):
             driver = Driver.objects.filter(linked_user=user).first()
         if driver is None:
             return Response(
@@ -410,7 +713,7 @@ class DriverPasswordSetupView(APIView):
             return self.invalid_link_response()
 
         if (
-            not user.is_active
+            not is_driver_identity(user)
             or user.has_usable_password()
             or not hasattr(user, "driver_record")
             or not default_token_generator.check_token(user, values["token"])

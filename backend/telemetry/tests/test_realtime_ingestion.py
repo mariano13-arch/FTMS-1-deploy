@@ -1,9 +1,11 @@
 import json
 from copy import deepcopy
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from django.test import TransactionTestCase
+from django.utils import timezone
 
 from fleet.models import Vehicle
 from telemetry.models import TelemetryEvent
@@ -116,7 +118,7 @@ class RealtimeIngestionTests(TransactionTestCase):
         self.assertEqual(result.status, IngestionStatus.CREATED)
         self.assertTrue(TelemetryEvent.objects.filter(event_id="mqtt-event-1").exists())
 
-    def test_broadcast_uses_event_that_passed_latest_check_without_requery(self):
+    def test_broadcast_drops_event_superseded_during_latest_check(self):
         first = ingest_telemetry(self.payload).event
         layer = SimpleNamespace(group_send=AsyncMock())
 
@@ -138,8 +140,25 @@ class RealtimeIngestionTests(TransactionTestCase):
             _broadcast_if_latest(first.event_id)
 
         broadcast.assert_called_once()
-        message = layer.group_send.await_args.args[1]["message"]
-        self.assertEqual(message["data"]["latest"]["event_id"], first.event_id)
+        layer.group_send.assert_not_awaited()
+
+    @patch("telemetry.services.broadcast_vehicle_status")
+    def test_realtime_latest_selection_ignores_preserved_future_event(self, broadcast):
+        current = ingest_telemetry(self.payload).event
+        broadcast.reset_mock()
+        future_values = self.serializer_values(self.payload)
+        future_values.update(
+            event_id="preserved-future-event",
+            sequence_number=999,
+            recorded_at=timezone.now() + timedelta(days=3650),
+        )
+        future = TelemetryEvent.objects.create(**future_values)
+
+        _broadcast_if_latest(current.event_id)
+        _broadcast_if_latest(future.event_id)
+
+        broadcast.assert_called_once_with(current)
+        self.assertTrue(TelemetryEvent.objects.filter(pk=future.pk).exists())
 
     def serializer_values(self, payload):
         from telemetry.serializers import TelemetryEventInputSerializer

@@ -13,7 +13,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
-from fleet.models import Driver, Vehicle
+from fleet.models import Driver, Vehicle, VehicleInspection
 from transport_requests.models import (
     TransportRequest,
     TransportRequestEvent,
@@ -35,6 +35,20 @@ class TransportRequestApiTests(TestCase):
             plate_number="VAN-01",
             display_name="Guest Van",
             passenger_capacity=6,
+        )
+        VehicleInspection.objects.create(
+            vehicle=self.vehicle,
+            inspection_date=timezone.localdate(),
+            inspection_type=VehicleInspection.InspectionType.PRE_TRIP,
+            result=VehicleInspection.Result.PASSED,
+            exterior_condition=VehicleInspection.Condition.OK,
+            interior_condition=VehicleInspection.Condition.OK,
+            tires_condition=VehicleInspection.Condition.OK,
+            lights_condition=VehicleInspection.Condition.OK,
+            brakes_condition=VehicleInspection.Condition.OK,
+            fluids_condition=VehicleInspection.Condition.OK,
+            safety_equipment_condition=VehicleInspection.Condition.OK,
+            inspected_by=self.manager,
         )
 
     def make_user(self, username, role=None, superuser=False):

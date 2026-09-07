@@ -5,7 +5,13 @@ from rest_framework.views import APIView
 from accounts.permissions import StaffAccess
 from fleet.models import Vehicle
 from ml.dashboard import RANGES, dashboard_data
-from ml.fuel import model_info, operational_readiness, predict_fuel
+from ml.fuel import (
+    VALIDATED_TELEMETRY_SOURCE_MODE,
+    model_info,
+    operational_readiness,
+    operational_telemetry_inputs,
+    predict_fuel,
+)
 from ml.models import FuelPrediction
 from telemetry.models import TelemetryEvent
 from telemetry.serializers import AwareDateTimeField
@@ -26,12 +32,18 @@ class FuelPredictionTimestampSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "vehicle_id and input_timestamp must be provided together for persistence."
             )
-        if has_vehicle and not TelemetryEvent.objects.filter(
-            vehicle=attrs["vehicle"], recorded_at=attrs["input_timestamp"]
-        ).exists():
-            raise serializers.ValidationError(
-                {"input_timestamp": "No matching telemetry event exists for this vehicle."}
+        if has_vehicle:
+            event = (
+                TelemetryEvent.objects.select_related("device", "vehicle")
+                .filter(vehicle=attrs["vehicle"], recorded_at=attrs["input_timestamp"])
+                .order_by("-sequence_number", "-received_at", "-pk")
+                .first()
             )
+            if event is None:
+                raise serializers.ValidationError(
+                    {"input_timestamp": "No matching telemetry event exists for this vehicle."}
+                )
+            attrs["telemetry_event"] = event
         return attrs
 
 
@@ -121,9 +133,23 @@ class FuelPredictionView(APIView):
             for key, value in request.data.items()
             if key not in {"input_timestamp", "vehicle_id"}
         }
+        telemetry_event = timestamp_serializer.validated_data.get("telemetry_event")
+        if telemetry_event is not None:
+            if inputs:
+                raise serializers.ValidationError(
+                    {
+                        "inputs": (
+                            "Vehicle-linked inference derives model inputs from the matched "
+                            "telemetry event; request-supplied model inputs are not accepted."
+                        )
+                    }
+                )
+            inputs = operational_telemetry_inputs(telemetry_event)
         result = predict_fuel(
             inputs,
-            input_timestamp=timestamp_serializer.validated_data.get("input_timestamp"),
+            input_timestamp=(
+                telemetry_event.recorded_at if telemetry_event is not None else None
+            ),
         )
         result["history_persisted"] = False
         if (
@@ -137,7 +163,7 @@ class FuelPredictionView(APIView):
                 defaults={
                     "estimated_fuel_lph": result["estimated_fuel_lph"],
                     "model_name": result["model_name"],
-                    "source_mode": "explicit_validated_api",
+                    "source_mode": VALIDATED_TELEMETRY_SOURCE_MODE,
                     "validated_inputs": result["inputs"],
                 },
             )

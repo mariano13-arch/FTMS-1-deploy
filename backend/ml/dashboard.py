@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from fleet.models import Vehicle
 from ml.demo_fuel import DEMO_SOURCE_MODE, NOT_OPERATIONAL_TELEMETRY
-from ml.fuel import contract, model_info
+from ml.fuel import VALIDATED_TELEMETRY_SOURCE_MODE, contract, model_info
 from ml.models import FuelPrediction
 from telemetry.models import TelemetryEvent
 
@@ -30,7 +30,10 @@ FEATURE_UNITS = {
 
 
 def _prediction_input_details(inputs, source_mode):
-    if not inputs:
+    if not inputs or source_mode not in {
+        VALIDATED_TELEMETRY_SOURCE_MODE,
+        DEMO_SOURCE_MODE,
+    }:
         return []
     is_demo = source_mode == DEMO_SOURCE_MODE
     return [
@@ -43,7 +46,7 @@ def _prediction_input_details(inputs, source_mode):
                 if is_demo and feature in NOT_OPERATIONAL_TELEMETRY
                 else "Actual persisted telemetry"
                 if is_demo
-                else "Validated API Input"
+                else "Validated vehicle telemetry"
             ),
         }
         for feature in contract()["features"]
@@ -106,6 +109,9 @@ def _vehicle_rows(model_availability):
     for vehicle in vehicles:
         has_telemetry = vehicle.latest_telemetry_at is not None
         is_demo_prediction = vehicle.latest_prediction_source_mode == DEMO_SOURCE_MODE
+        is_validated_prediction = (
+            vehicle.latest_prediction_source_mode == VALIDATED_TELEMETRY_SOURCE_MODE
+        )
         prediction_matches_latest_telemetry = (
             vehicle.latest_prediction_id is not None
             and vehicle.latest_prediction_input_at == vehicle.latest_telemetry_at
@@ -116,7 +122,7 @@ def _vehicle_rows(model_availability):
             prediction_status = "model_unavailable"
         elif prediction_matches_latest_telemetry and is_demo_prediction:
             prediction_status = "demo_ready"
-        elif prediction_matches_latest_telemetry:
+        elif prediction_matches_latest_telemetry and is_validated_prediction:
             prediction_status = "prediction_available"
         else:
             prediction_status = "prediction_blocked"
@@ -148,8 +154,10 @@ def _vehicle_rows(model_availability):
                 "prediction_source_label": (
                     "Demo/Test Inputs"
                     if is_demo_prediction
-                    else "Validated API Inputs"
-                    if vehicle.latest_prediction_id is not None
+                    else "Validated Vehicle Telemetry"
+                    if is_validated_prediction
+                    else "Unverified API Inputs"
+                    if vehicle.latest_prediction_source_mode == "explicit_validated_api"
                     else None
                 ),
                 "latest_prediction_input_timestamp": vehicle.latest_prediction_input_at,
@@ -169,7 +177,10 @@ def dashboard_data(*, range_key="24h", vehicle_id=None, page=1, page_size=10, se
     rows = _vehicle_rows(metadata["availability"])
     now = timezone.now()
     window, truncator = RANGES[range_key]
-    history = FuelPrediction.objects.filter(input_timestamp__gte=now - window)
+    history = FuelPrediction.objects.filter(
+        input_timestamp__gte=now - window,
+        source_mode__in=(VALIDATED_TELEMETRY_SOURCE_MODE, DEMO_SOURCE_MODE),
+    )
     selected_vehicle = None
     if vehicle_id is not None:
         selected = next((row for row in rows if row["vehicle_id"] == vehicle_id), None)
@@ -223,7 +234,8 @@ def dashboard_data(*, range_key="24h", vehicle_id=None, page=1, page_size=10, se
             "is_demo_prediction": row["is_demo_prediction"],
         }
         for row in rows
-        if row["latest_estimated_fuel_lph"] is not None
+        if row["prediction_status"] in {"prediction_available", "demo_ready"}
+        and row["latest_estimated_fuel_lph"] is not None
     ]
     comparison.sort(key=lambda item: item["estimated_fuel_lph"], reverse=True)
     demo_data_present = history.filter(source_mode=DEMO_SOURCE_MODE).exists() or any(

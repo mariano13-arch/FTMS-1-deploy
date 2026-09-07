@@ -15,6 +15,19 @@ export class ApiError extends Error {
   }
 }
 
+const SESSION_EXPIRED_MESSAGE = "Your session expired. Please sign in again.";
+
+function sessionExpirationMessage(body: unknown) {
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "detail" in body &&
+    typeof body.detail === "string" &&
+    (body.detail.includes("session expired") || body.detail.includes("signed in from another"))
+  ) return body.detail;
+  return SESSION_EXPIRED_MESSAGE;
+}
+
 async function refreshCsrfToken() {
   const response = await fetch(`${apiBaseUrl}/api/v1/auth/csrf/`, {
     credentials: "include",
@@ -72,8 +85,16 @@ export async function api<T>(
         if (refreshError instanceof ApiError) throw refreshError;
       }
     }
-    if (response.status === 401)
-      window.dispatchEvent(new Event("ftms:session-expired"));
+    if (
+      response.status === 401 &&
+      !path.endsWith("/auth/login/") &&
+      !path.endsWith("/auth/me/") &&
+      !path.endsWith("/auth/2fa/verify/")
+    ) {
+      window.dispatchEvent(new CustomEvent("ftms:session-expired", {
+        detail: { message: sessionExpirationMessage(body) },
+      }));
+    }
     throw new ApiError(response.status, body);
   }
   return body as T;

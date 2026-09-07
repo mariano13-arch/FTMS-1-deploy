@@ -6,7 +6,9 @@ export type DispatchVehicle = AssignedVehicle & { current_location_available?:bo
 export type DispatchAssignment = {
   id:number; plan_id?:number|null; transport_request_id:string; request_number:string; vehicle:AssignedVehicle;
   driver:DispatchDriver; selection_mode:"OPTIMIZED"|"MANUAL"; override_reason:string;
-  confirmed_by:string; confirmed_at:string; created_at:string; updated_at:string;
+  confirmed_by:string; confirmed_at:string; is_accepted:boolean; accepted_at:string|null;
+  execution_status:"ASSIGNED"|"EN_ROUTE_TO_PICKUP"|"AT_PICKUP"|"IN_TRANSIT"|"AT_DESTINATION"|"COMPLETED";
+  execution_status_label:string; completed_at:string|null; created_at:string; updated_at:string;
 };
 export type ConsolidationStop={sequence:number;request_id:string;request_number:string;stop_type:"PICKUP"|"DELIVERY";label:string;latitude:string;longitude:string;load_change_kg:string};
 export type ConsolidationMetrics={vehicles:number;travel_time_seconds:number;distance_meters:number};
@@ -20,7 +22,7 @@ export type DispatchBoardData = {
   manual_candidates:Record<string,{drivers:DispatchDriver[];vehicles:DispatchVehicle[]}>;
   assignment_audit:Record<string,DispatchAuditEvent[]>;
 };
-export type DispatchAuditEvent={kind:"ASSIGNMENT_CONFIRMED"|"ASSIGNMENT_CHANGED"|"PREPARED_FOR_DISPATCH";driver?:DispatchDriver;vehicle?:AssignedVehicle;selection_mode?:"OPTIMIZED"|"MANUAL";reason:string;operator:string;timestamp:string};
+export type DispatchAuditEvent={kind:"ASSIGNMENT_CONFIRMED"|"ASSIGNMENT_CHANGED"|"PREPARED_FOR_DISPATCH"|"DRIVER_ACCEPTED";driver?:DispatchDriver;vehicle?:AssignedVehicle;selection_mode?:"OPTIMIZED"|"MANUAL";reason:string;operator:string;timestamp:string};
 export type ScheduleContext={selected:{start:string;end:string};driver:{status:"AVAILABLE"|"CONFLICT";windows:{request_number:string;start:string;end:string}[]};vehicle:{status:"AVAILABLE"|"CONFLICT";windows:{request_number:string;start:string;end:string}[]}};
 export type CandidateComparison={driver:DispatchDriver;vehicle:AssignedVehicle;travel_time_seconds:number|null;distance_meters:number|null;traffic_delay_seconds:number|null;result:"RECOMMENDED"|"FEASIBLE"|"MANUAL_ONLY"};
 export type Recommendation = {

@@ -61,6 +61,7 @@ DATABASES = {
     )
 }
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+TWO_FACTOR_ENCRYPTION_KEY = os.getenv("TWO_FACTOR_ENCRYPTION_KEY", "")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
 DISPATCH_TELEMETRY_MAX_AGE_SECONDS = int(
     os.getenv("DISPATCH_TELEMETRY_MAX_AGE_SECONDS", "300")
@@ -111,6 +112,13 @@ CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = os.getenv("DJANGO_SESSION_COOKIE_SECURE", "true").lower() == "true"
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+FTMS_SESSION_IDLE_TIMEOUT_SECONDS = int(
+    os.getenv("FTMS_SESSION_IDLE_TIMEOUT_SECONDS", "900")
+)
+FTMS_SESSION_ABSOLUTE_TIMEOUT_SECONDS = int(
+    os.getenv("FTMS_SESSION_ABSOLUTE_TIMEOUT_SECONDS", "28800")
+)
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = os.getenv("DJANGO_CSRF_COOKIE_SECURE", "true").lower() == "true"
 EMAIL_BACKEND = os.getenv(
@@ -132,5 +140,8 @@ DRIVER_MOBILE_APP_DOWNLOAD_URL = os.getenv("DRIVER_MOBILE_APP_DOWNLOAD_URL", "")
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.authentication.StaffSessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    "DEFAULT_THROTTLE_RATES": {"login": os.getenv("DJANGO_LOGIN_THROTTLE", "5/min")},
+    "DEFAULT_THROTTLE_RATES": {
+        "login": os.getenv("DJANGO_LOGIN_THROTTLE", "5/min"),
+        "two_factor_verify": os.getenv("DJANGO_TWO_FACTOR_VERIFY_THROTTLE", "10/min"),
+    },
 }

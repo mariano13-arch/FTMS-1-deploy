@@ -4,7 +4,15 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Driver, DriverDocument, Vehicle, VehicleDocument, VehicleInspection
+from .maintenance import ALLOWED_TRANSITIONS
+from .models import (
+    Driver,
+    DriverDocument,
+    Vehicle,
+    VehicleDocument,
+    VehicleInspection,
+    VehicleMaintenanceRecord,
+)
 
 
 class VehicleInspectionSummarySerializer(serializers.ModelSerializer):
@@ -29,10 +37,12 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     latest_inspection = serializers.SerializerMethodField()
     document_count = serializers.SerializerMethodField()
     document_health = serializers.SerializerMethodField()
+    current_telemetry_device = serializers.SerializerMethodField()
 
     class Meta:
         model = Vehicle
         fields = [
+            "id",
             "device_id",
             "plate_number",
             "display_name",
@@ -64,14 +74,33 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
             "latest_inspection",
             "document_count",
             "document_health",
+            "current_telemetry_device",
         ]
         read_only_fields = [
+            "id",
             "created_at",
             "updated_at",
             "latest_inspection",
             "document_count",
             "document_health",
+            "current_telemetry_device",
         ]
+
+    def get_current_telemetry_device(self, obj):
+        bindings = getattr(obj, "current_telemetry_device_bindings", None)
+        binding = (
+            next(iter(bindings), None)
+            if bindings is not None
+            else obj.telemetry_device_bindings.select_related("device")
+            .filter(unpaired_at__isnull=True)
+            .first()
+        )
+        if binding is None:
+            return None
+        return {
+            "device_id": binding.device.device_id,
+            "registration_status": binding.device.registration_status,
+        }
 
     def get_latest_inspection(self, obj):
         inspection = next(iter(obj.inspections.all()), None)
@@ -160,11 +189,13 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
                 attrs[field] = value.upper() if field in {"vin", "purchase_currency"} else value
         errors = {}
         for field in (
+            "id",
             "created_at",
             "updated_at",
             "latest_inspection",
             "document_count",
             "document_health",
+            "current_telemetry_device",
         ):
             if field in self.initial_data:
                 errors[field] = "This field is not accepted."
@@ -317,6 +348,7 @@ class VehicleInspectionSerializer(StrictFieldsMixin, serializers.ModelSerializer
             "created_at",
             "updated_at",
         ]
+        extra_kwargs = {"inspection_date": {"required": False}}
 
     def get_inspector_name(self, obj):
         return obj.inspected_by.get_full_name().strip() or obj.inspected_by.username
@@ -332,6 +364,103 @@ class VehicleInspectionSerializer(StrictFieldsMixin, serializers.ModelSerializer
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
+
+
+class VehicleMaintenanceRecordSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    vehicle = serializers.SerializerMethodField()
+    vehicle_device_id = serializers.CharField(write_only=True, max_length=64)
+    inspection = VehicleInspectionSummarySerializer(read_only=True)
+    inspection_id = serializers.PrimaryKeyRelatedField(
+        source="inspection",
+        queryset=VehicleInspection.objects.select_related("vehicle"),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+    created_by_name = serializers.SerializerMethodField()
+    allowed_transitions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VehicleMaintenanceRecord
+        fields = [
+            "id",
+            "vehicle",
+            "vehicle_device_id",
+            "inspection",
+            "inspection_id",
+            "source",
+            "status",
+            "title",
+            "notes",
+            "scheduled_at",
+            "started_at",
+            "completed_at",
+            "created_by",
+            "created_by_name",
+            "allowed_transitions",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "vehicle",
+            "source",
+            "status",
+            "scheduled_at",
+            "started_at",
+            "completed_at",
+            "created_by",
+            "created_by_name",
+            "allowed_transitions",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_vehicle(self, record):
+        return {
+            "id": record.vehicle_id,
+            "device_id": record.vehicle.device_id,
+            "display_name": record.vehicle.display_name,
+            "plate_number": record.vehicle.plate_number,
+        }
+
+    def get_created_by_name(self, record):
+        return record.created_by.get_full_name().strip() or record.created_by.username
+
+    def get_allowed_transitions(self, record):
+        return sorted(ALLOWED_TRANSITIONS.get(record.status, set()))
+
+    def validate(self, attrs):
+        errors = {}
+        for field in self.Meta.read_only_fields:
+            if field in self.initial_data:
+                errors[field] = "This field is not accepted."
+        device_id = attrs.pop("vehicle_device_id", "")
+        vehicle = Vehicle.objects.filter(device_id=device_id).first()
+        if vehicle is None:
+            errors["vehicle_device_id"] = "Vehicle was not found."
+        inspection = attrs.get("inspection")
+        if vehicle is not None and inspection is not None and inspection.vehicle_id != vehicle.pk:
+            errors["inspection_id"] = "Inspection must belong to the selected vehicle."
+        for field in ("title", "notes"):
+            if field in attrs:
+                attrs[field] = attrs[field].strip()
+        if not attrs.get("title"):
+            errors["title"] = "This field may not be blank."
+        if errors:
+            raise serializers.ValidationError(errors)
+        attrs["vehicle"] = vehicle
+        attrs["source"] = (
+            VehicleMaintenanceRecord.Source.INSPECTION
+            if inspection is not None
+            else VehicleMaintenanceRecord.Source.MANUAL
+        )
+        return attrs
+
+
+class MaintenanceTransitionSerializer(StrictFieldsMixin, serializers.Serializer):
+    status = serializers.ChoiceField(choices=VehicleMaintenanceRecord.Status.choices)
+    scheduled_at = serializers.DateTimeField(required=False, allow_null=True)
 
 
 def driver_eligibility(driver):

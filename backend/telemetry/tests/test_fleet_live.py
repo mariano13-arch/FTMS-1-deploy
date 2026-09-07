@@ -58,12 +58,21 @@ class FleetLiveApiTests(TestCase):
         longitude=121.02,
         latitude=14.56,
         driving_event=TelemetryEvent.DrivingEvent.NORMAL,
+        position_source=TelemetryEvent.PositionSource.GNSS,
+        position_accuracy_m=None,
+        gnss_speed_kph=22,
+        rpm=1200,
+        coolant_c=82,
+        engine_load_pct=30,
+        obd_source=None,
     ):
         return TelemetryEvent.objects.create(
             schema_version="1.0", event_id=event_id or f"event-{vehicle.device_id}",
             sequence_number=sequence_number, vehicle=vehicle, recorded_at=recorded_at,
             location=Point(longitude, latitude, srid=4326),
-            gnss_speed_kph=22, rpm=1200, coolant_c=82, engine_load_pct=30,
+            position_source=position_source, position_accuracy_m=position_accuracy_m,
+            gnss_speed_kph=gnss_speed_kph, rpm=rpm, coolant_c=coolant_c,
+            engine_load_pct=engine_load_pct, obd_source=obd_source,
             driving_event=driving_event,
         )
 
@@ -96,6 +105,36 @@ class FleetLiveApiTests(TestCase):
         )
         self.assertEqual(vehicles["LIVE-001"]["telemetry"]["telemetry_source"], "real")
         self.assertFalse(vehicles["LIVE-001"]["telemetry"]["is_demo_telemetry"])
+
+    def test_exposes_cellular_position_source_and_accuracy(self):
+        self.telemetry(
+            self.live,
+            timezone.now(),
+            position_source=TelemetryEvent.PositionSource.CELLULAR_LBS,
+            position_accuracy_m=550,
+            gnss_speed_kph=None,
+        )
+        response = self.client.get("/api/v1/fleet-live/vehicles/")
+        telemetry = response.json()["vehicles"][0]["telemetry"]
+        self.assertEqual(telemetry["position_source"], "CELLULAR_LBS")
+        self.assertEqual(telemetry["position_accuracy_m"], 550.0)
+        self.assertIsNone(telemetry["speed_kph"])
+
+    def test_exposes_actual_obd_values_and_provenance(self):
+        self.telemetry(
+            self.live,
+            timezone.now(),
+            rpm=2345,
+            coolant_c=91,
+            engine_load_pct=47,
+            obd_source=TelemetryEvent.ObdSource.SIMULATED_TEST,
+        )
+        response = self.client.get("/api/v1/fleet-live/vehicles/")
+        telemetry = response.json()["vehicles"][0]["telemetry"]
+        self.assertEqual(telemetry["rpm"], 2345)
+        self.assertEqual(telemetry["coolant_c"], 91.0)
+        self.assertEqual(telemetry["engine_load_pct"], 47.0)
+        self.assertEqual(telemetry["obd_source"], "SIMULATED_TEST")
 
     @override_settings(
         FTMS_DEMO_TELEMETRY_ENABLED=True,
@@ -169,6 +208,7 @@ class FleetLiveApiTests(TestCase):
         DispatchAssignment.objects.create(
             transport_request=item, vehicle=self.live, driver=driver,
             selection_mode=DispatchAssignment.SelectionMode.OPTIMIZED, confirmed_by=self.user,
+            accepted_at=timezone.now(), accepted_by=self.user,
             execution_status=DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP,
         )
 
@@ -178,6 +218,204 @@ class FleetLiveApiTests(TestCase):
         self.assertEqual(vehicle["active_assignment"]["request_number"], item.request_number)
         self.assertEqual(vehicle["active_assignment"]["driver_name"], "Ana Santos")
         self.assertEqual(vehicle["active_assignment"]["execution_status"], "EN_ROUTE_TO_PICKUP")
+
+    def make_assignment(
+        self,
+        *,
+        vehicle=None,
+        request_status=TransportRequest.Status.READY_FOR_DISPATCH,
+        execution_status=DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP,
+        accepted=True,
+    ):
+        vehicle = vehicle or self.live
+        driver = Driver.objects.create(
+            driver_code=f"DRV-LIVE-{Driver.objects.count() + 1:03d}",
+            first_name="Active",
+            last_name="Driver",
+        )
+        item = TransportRequest.objects.create(
+            source_system=TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
+            external_reference=f"HMS-ACTIVE-{TransportRequest.objects.count() + 1}",
+            request_type=TransportRequest.RequestType.GUEST_TRANSFER,
+            request_category=TransportRequest.RequestCategory.PASSENGER_TRANSPORT,
+            requester_name="Front Desk",
+            pickup_name="Hotel",
+            pickup_address="Makati",
+            pickup_latitude="14.560000",
+            pickup_longitude="121.020000",
+            destination_name="Airport",
+            destination_address="Pasay",
+            destination_latitude="14.508600",
+            destination_longitude="121.019800",
+            scheduled_pickup_at=timezone.now() + timedelta(hours=1),
+            passenger_count=2,
+            status=request_status,
+            assigned_vehicle=vehicle,
+            created_by=self.user,
+        )
+        return DispatchAssignment.objects.create(
+            transport_request=item,
+            vehicle=vehicle,
+            driver=driver,
+            selection_mode=DispatchAssignment.SelectionMode.OPTIMIZED,
+            confirmed_by=self.user,
+            accepted_at=timezone.now() if accepted else None,
+            accepted_by=self.user if accepted else None,
+            execution_status=execution_status,
+        )
+
+    def live_vehicle_payload(self):
+        response = self.client.get("/api/v1/fleet-live/vehicles/")
+        self.assertEqual(response.status_code, 200)
+        return next(
+            vehicle
+            for vehicle in response.json()["vehicles"]
+            if vehicle["device_id"] == self.live.device_id
+        )
+
+    def test_only_accepted_released_in_progress_assignment_is_active(self):
+        assignment = self.make_assignment(
+            execution_status=DispatchAssignment.ExecutionStatus.ASSIGNED
+        )
+        self.assertIsNone(self.live_vehicle_payload()["active_assignment"])
+
+        assignment.execution_status = DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP
+        assignment.accepted_at = None
+        assignment.accepted_by = None
+        assignment.save(
+            update_fields=["execution_status", "accepted_at", "accepted_by", "updated_at"]
+        )
+        self.assertIsNone(self.live_vehicle_payload()["active_assignment"])
+
+        assignment.accepted_at = timezone.now()
+        assignment.accepted_by = self.user
+        assignment.save(update_fields=["accepted_at", "accepted_by", "updated_at"])
+
+        for execution_status in (
+            DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP,
+            DispatchAssignment.ExecutionStatus.AT_PICKUP,
+            DispatchAssignment.ExecutionStatus.IN_TRANSIT,
+            DispatchAssignment.ExecutionStatus.AT_DESTINATION,
+        ):
+            assignment.execution_status = execution_status
+            assignment.save(update_fields=["execution_status", "updated_at"])
+            self.assertEqual(
+                self.live_vehicle_payload()["active_assignment"]["assignment_id"],
+                assignment.pk,
+            )
+
+        assignment.transport_request.status = TransportRequest.Status.APPROVED
+        assignment.transport_request.save(update_fields=["status", "updated_at"])
+        self.assertIsNone(self.live_vehicle_payload()["active_assignment"])
+
+        assignment.transport_request.status = TransportRequest.Status.READY_FOR_DISPATCH
+        assignment.transport_request.save(update_fields=["status", "updated_at"])
+
+        assignment.execution_status = DispatchAssignment.ExecutionStatus.COMPLETED
+        assignment.save(update_fields=["execution_status", "updated_at"])
+        self.assertIsNone(self.live_vehicle_payload()["active_assignment"])
+
+    def test_active_assignment_uses_only_its_assigned_vehicle_telemetry(self):
+        assignment = self.make_assignment()
+        other_event = self.telemetry(
+            self.missing,
+            timezone.now(),
+            longitude=120.75,
+            latitude=14.25,
+        )
+
+        assigned_vehicle = self.live_vehicle_payload()
+        self.assertEqual(
+            assigned_vehicle["active_assignment"]["assignment_id"], assignment.pk
+        )
+        self.assertEqual(assigned_vehicle["telemetry_state"], "no_telemetry")
+        self.assertIsNone(assigned_vehicle["telemetry"])
+
+        self.telemetry(
+            self.live,
+            timezone.now() + timedelta(seconds=1),
+            event_id="assigned-older",
+            sequence_number=1,
+            longitude=121.04,
+            latitude=14.57,
+        )
+        own_event = self.telemetry(
+            self.live,
+            timezone.now() + timedelta(seconds=2),
+            event_id="assigned-latest",
+            sequence_number=2,
+            longitude=121.05,
+            latitude=14.58,
+        )
+        assigned_vehicle = self.live_vehicle_payload()
+        self.assertEqual(assigned_vehicle["telemetry"]["latitude"], own_event.location.y)
+        self.assertNotEqual(
+            assigned_vehicle["telemetry"]["latitude"], other_event.location.y
+        )
+
+    def test_invalid_latest_coordinates_are_not_exposed_as_position(self):
+        self.make_assignment()
+        self.telemetry(
+            self.live,
+            timezone.now(),
+            longitude=181,
+            latitude=91,
+        )
+
+        vehicle = self.live_vehicle_payload()
+        self.assertEqual(vehicle["telemetry_state"], "no_telemetry")
+        self.assertIsNone(vehicle["telemetry"])
+        self.assertIsNotNone(vehicle["active_assignment"])
+
+    @override_settings(FTMS_TELEMETRY_CLOCK_SKEW_SECONDS=300)
+    def test_future_event_cannot_override_current_event_and_rows_are_preserved(self):
+        recorded_at = timezone.now()
+        self.telemetry(
+            self.live,
+            recorded_at,
+            event_id="current-lower-sequence",
+            sequence_number=1,
+            latitude=14.51,
+        )
+        selected = self.telemetry(
+            self.live,
+            recorded_at,
+            event_id="current-higher-sequence",
+            sequence_number=2,
+            latitude=14.52,
+        )
+        future = self.telemetry(
+            self.live,
+            recorded_at + timedelta(days=3650),
+            event_id="preserved-future-event",
+            sequence_number=999,
+            latitude=15.99,
+        )
+
+        vehicle = self.live_vehicle_payload()
+
+        self.assertEqual(vehicle["telemetry"]["latitude"], selected.location.y)
+        self.assertNotEqual(vehicle["telemetry"]["latitude"], future.location.y)
+        self.assertEqual(TelemetryEvent.objects.filter(vehicle=self.live).count(), 3)
+        self.assertTrue(TelemetryEvent.objects.filter(pk=future.pk).exists())
+
+        latest = self.client.get(f"/api/v1/vehicles/{self.live.device_id}/latest-status/")
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.json()["latest"]["event_id"], selected.event_id)
+    @override_settings(
+        FTMS_DEMO_TELEMETRY_ENABLED=True,
+        FTMS_DEMO_TELEMETRY_CENTER_LATITUDE="14.5652",
+        FTMS_DEMO_TELEMETRY_CENTER_LONGITUDE="121.0286",
+        FTMS_DEMO_TELEMETRY_RADIUS_METERS="1200",
+    )
+    def test_active_assignment_never_uses_demo_telemetry_as_fallback(self):
+        self.make_assignment()
+
+        vehicle = self.live_vehicle_payload()
+
+        self.assertEqual(vehicle["telemetry_state"], "no_telemetry")
+        self.assertIsNone(vehicle["telemetry"])
+        self.assertIsNotNone(vehicle["active_assignment"])
 
     def test_endpoint_requires_staff_authentication(self):
         self.client.force_authenticate(user=None)
@@ -203,6 +441,34 @@ class FleetLiveApiTests(TestCase):
             ["trail-1", "trail-2"],
         )
         self.assertEqual(response.json()["points"][1]["latitude"], 14.52)
+
+    @override_settings(FTMS_TELEMETRY_CLOCK_SKEW_SECONDS=300)
+    def test_precise_trail_excludes_lbs_and_future_events_without_deleting_them(self):
+        now = timezone.now()
+        gnss = self.telemetry(
+            self.live, now - timedelta(minutes=1), event_id="recent-gnss",
+            sequence_number=1, longitude=121.01, latitude=14.51,
+        )
+        lbs = self.telemetry(
+            self.live, now, event_id="current-lbs", sequence_number=2,
+            position_source=TelemetryEvent.PositionSource.CELLULAR_LBS,
+            position_accuracy_m=550, gnss_speed_kph=None,
+        )
+        future = self.telemetry(
+            self.live, now + timedelta(days=3650), event_id="future-gnss",
+            sequence_number=3,
+        )
+
+        response = self.client.get(f"/api/v1/fleet-live/vehicles/{self.live.pk}/trail/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [point["event_id"] for point in response.json()["points"]],
+            [gnss.event_id],
+        )
+        self.assertEqual(
+            TelemetryEvent.objects.filter(pk__in=[lbs.pk, future.pk]).count(), 2
+        )
 
     def test_returns_only_supported_real_safety_events_as_map_pins(self):
         now = timezone.now()

@@ -387,6 +387,7 @@ def confirm(token, user):
         item.save(update_fields=["assigned_vehicle", "updated_at"])
         DispatchAssignmentEvent.objects.create(
             assignment=assignment,
+            event_type=DispatchAssignmentEvent.EventType.ASSIGNMENT_CONFIRMED,
             new_driver=driver,
             new_vehicle=vehicle,
             performed_by=user,

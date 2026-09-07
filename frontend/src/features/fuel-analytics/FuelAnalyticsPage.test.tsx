@@ -116,9 +116,16 @@ const populatedDashboard = {
     { timestamp: "2026-08-26T00:00:00Z", estimated_fuel_lph: 3.4 },
     { timestamp: "2026-08-26T01:00:00Z", estimated_fuel_lph: 3.82 },
   ],
-  vehicle_comparison: [{ vehicle_id: 1, vehicle_name: "Fuel Analytics Van", plate_number: "ABC-123", estimated_fuel_lph: 3.82, predicted_at: "2026-08-26T01:00:00Z", source_mode: "explicit_validated_api", source_label: "Validated API Inputs", is_demo_prediction: false }],
+  vehicle_comparison: [{ vehicle_id: 1, vehicle_name: "Fuel Analytics Van", plate_number: "ABC-123", estimated_fuel_lph: 3.82, predicted_at: "2026-08-26T01:00:00Z", source_mode: "validated_vehicle_telemetry", source_label: "Validated Vehicle Telemetry", is_demo_prediction: false }],
   readiness_breakdown: { ready: 1, demo_ready: 0, blocked: 0, no_telemetry: 0, model_unavailable: 0 },
-  vehicles: [{ ...blockedVehicle, latest_estimated_fuel_lph: 3.82, prediction_status: "prediction_available", last_prediction_at: "2026-08-26T01:00:00Z" }],
+  vehicles: [{
+    ...blockedVehicle,
+    latest_estimated_fuel_lph: 3.82,
+    prediction_status: "prediction_available",
+    last_prediction_at: "2026-08-26T01:00:00Z",
+    prediction_source_mode: "validated_vehicle_telemetry",
+    prediction_source_label: "Validated Vehicle Telemetry",
+  }],
 } as const;
 
 const demoInputs = modelInfo.features.map((feature, index) => ({

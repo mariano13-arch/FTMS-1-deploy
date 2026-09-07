@@ -8,6 +8,7 @@ from telemetry.models import TelemetryEvent
 MODEL_DIRECTORY = Path(__file__).resolve().parent / "models" / "fuel"
 MODEL_PATH = MODEL_DIRECTORY / "ftms_xgboost_fuel_experiment_3_tuned.joblib"
 CONTRACT_PATH = MODEL_DIRECTORY / "model_contract.json"
+VALIDATED_TELEMETRY_SOURCE_MODE = "validated_vehicle_telemetry"
 
 
 @lru_cache(maxsize=1)
@@ -132,6 +133,16 @@ def predict_fuel(inputs, *, input_timestamp=None):
     return result
 
 
+def operational_telemetry_inputs(event):
+    """Return only model inputs proven by the persisted telemetry contract."""
+    inputs = {
+        "Vehicle_Speed_km_per_h": float(event.gnss_speed_kph),
+    }
+    if event.rpm is not None:
+        inputs["Engine_RPM_RPM"] = float(event.rpm)
+    return inputs
+
+
 def input_readiness():
     return [
         {
@@ -165,19 +176,17 @@ def input_readiness():
 
 
 def operational_readiness():
-    event = TelemetryEvent.objects.select_related("vehicle").first()
+    event = TelemetryEvent.objects.select_related("device", "vehicle").first()
     inputs = {}
     timestamp = None
     telemetry = None
     if event is not None:
-        inputs["Vehicle_Speed_km_per_h"] = float(event.gnss_speed_kph)
-        if event.rpm is not None:
-            inputs["Engine_RPM_RPM"] = event.rpm
+        inputs = operational_telemetry_inputs(event)
         timestamp = event.recorded_at
         telemetry = {
             "event_id": event.event_id,
             "vehicle_id": event.vehicle_id,
-            "device_id": event.vehicle.device_id,
+            "device_id": event.device.device_id,
             "vehicle_name": event.vehicle.display_name,
             "recorded_at": event.recorded_at,
         }

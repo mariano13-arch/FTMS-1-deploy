@@ -18,6 +18,18 @@ def can_view(user):
     return resolve_role(user) is not None
 
 
+def is_driver_identity(user):
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    if user.is_staff or user.is_superuser:
+        return False
+    try:
+        staff_profile = user.staff_profile
+    except StaffProfile.DoesNotExist:
+        return True
+    return staff_profile is None
+
+
 def can_create(user):
     return resolve_role(user) == SUPER_ADMIN
 

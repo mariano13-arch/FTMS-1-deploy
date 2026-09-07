@@ -6,7 +6,7 @@ from django.db import IntegrityError, transaction
 
 from telemetry.geofences import evaluate_geofence_transitions
 from telemetry.models import TelemetryEvent
-from telemetry.presentation import semantic_values
+from telemetry.presentation import current_event_for_vehicle, semantic_values
 from telemetry.realtime import broadcast_vehicle_status
 from telemetry.serializers import TelemetryEventInputSerializer
 
@@ -38,11 +38,17 @@ def _incoming_semantic_values(serializer):
         "recorded_at": data["recorded_at"].isoformat().replace("+00:00", "Z"),
         "latitude": float(data["latitude"]),
         "longitude": float(data["longitude"]),
-        "gnss_speed_kph": float(data["gnss_speed_kph"]),
+        "gnss_speed_kph": (
+            None if data["gnss_speed_kph"] is None else float(data["gnss_speed_kph"])
+        ),
+        "position_accuracy_m": (
+            None if data["position_accuracy_m"] is None else float(data["position_accuracy_m"])
+        ),
         "coolant_c": None if data["coolant_c"] is None else float(data["coolant_c"]),
         "engine_load_pct": (
             None if data["engine_load_pct"] is None else float(data["engine_load_pct"])
         ),
+        "obd_source": data["obd_source"],
     }
 
 
@@ -57,8 +63,8 @@ def _existing_result(event, serializer):
 
 def _broadcast_if_latest(event_id):
     try:
-        event = TelemetryEvent.objects.select_related("vehicle").get(event_id=event_id)
-        latest = event.vehicle.telemetry_events.only("pk").first()
+        event = TelemetryEvent.objects.select_related("device", "vehicle").get(event_id=event_id)
+        latest = current_event_for_vehicle(event.vehicle)
         if latest and latest.pk == event.pk:
             broadcast_vehicle_status(event)
     except Exception:
@@ -76,7 +82,9 @@ def ingest_telemetry(payload):
 
     event_id = serializer.validated_data["event_id"]
     existing = (
-        TelemetryEvent.objects.select_related("vehicle").filter(event_id=event_id).first()
+        TelemetryEvent.objects.select_related("device", "vehicle")
+        .filter(event_id=event_id)
+        .first()
     )
     if existing:
         return _existing_result(existing, serializer)
@@ -87,8 +95,9 @@ def ingest_telemetry(payload):
             evaluate_geofence_transitions(event)
             transaction.on_commit(lambda: _broadcast_if_latest(event.event_id))
     except IntegrityError:
-        event = TelemetryEvent.objects.select_related("vehicle").get(event_id=event_id)
+        event = TelemetryEvent.objects.select_related("device", "vehicle").get(event_id=event_id)
         return _existing_result(event, serializer)
 
+    event.device = serializer.context["device"]
     event.vehicle = serializer.context["vehicle"]
     return IngestionResult(status=IngestionStatus.CREATED, event=event)

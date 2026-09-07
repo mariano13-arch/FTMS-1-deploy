@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission
 
 from fleet.models import Driver
 
-from .roles import can_change_status, can_create, can_edit, can_view
+from .roles import can_change_status, can_create, can_edit, can_view, is_driver_identity
 
 
 class StaffAccess(BasePermission):
@@ -13,7 +13,7 @@ class StaffAccess(BasePermission):
 class DriverAccess(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if not user or not user.is_authenticated or not user.is_active:
+        if not is_driver_identity(user):
             return False
         try:
             request.driver = user.driver_record

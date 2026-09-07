@@ -21,6 +21,8 @@ of scope.
 ```
 
 - `schema_version` must be exactly `"1.0"`.
+- Source-aware senders use the additive [version 1.1 contract](telemetry-contract-v1.1.md);
+  this version remains the legacy GNSS shape and does not accept provenance fields.
 - `event_id` is required and globally unique; `sequence_number` must be a non-negative integer.
 - `device_id` must identify an active `Vehicle`.
 - `recorded_at` must include a timezone. It is normalized and stored in UTC, and differs
@@ -30,7 +32,7 @@ of scope.
 - Coordinates are stored as a PostGIS point with SRID 4326 in longitude/latitude order.
 - Unsupported OBD-II values must be `null`, never falsely converted to zero.
 - `driving_event` is one of `NORMAL`, `HARSH_BRAKING`, `HARSH_ACCELERATION`, or
-  `SHARP_TURN`.
+  `SHARP_TURN`; it is required and cannot be null in schema 1.0.
 
 Accepted events are append-only. Replaying the exact semantic event is idempotent; reusing
 its ID for different data returns `409 Conflict`.

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
-export type SettingsStatusValue = "Available" | "Configured" | "Blocked" | "Planned" | "Not configured" | "Status unavailable";
+export type SettingsStatusValue = "Available" | "Configured" | "Disabled" | "Blocked" | "Planned" | "Not configured" | "Status unavailable";
 export function SettingsStatus({ value }: { value: SettingsStatusValue }) {
   return <span className={`settings-status settings-status--${value.toLowerCase().replaceAll(" ", "-")}`}>{value}</span>;
 }

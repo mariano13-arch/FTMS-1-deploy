@@ -17,6 +17,51 @@ class StaffProfile(models.Model):
         return f"{self.user.username}: {self.role}"
 
 
+class TwoFactorCredential(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="two_factor_credential",
+    )
+    encrypted_secret = models.TextField()
+    is_enabled = models.BooleanField(default=False)
+    enabled_at = models.DateTimeField(null=True, blank=True)
+    last_used_time_step = models.BigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Two-factor credential for {self.user_id}"
+
+
+class TwoFactorRecoveryCode(models.Model):
+    credential = models.ForeignKey(
+        TwoFactorCredential,
+        on_delete=models.CASCADE,
+        related_name="recovery_codes",
+    )
+    code_hash = models.CharField(max_length=128)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Two-factor recovery code {self.pk}"
+
+
+class ActiveUserSession(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="active_ftms_session",
+    )
+    session_key = models.CharField(max_length=40, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Active FTMS session for user {self.user_id}"
+
+
 class PermissionModule(models.TextChoices):
     TRANSPORT_REQUESTS = "TRANSPORT_REQUESTS", "Transport Requests"
     DISPATCH_BOARD = "DISPATCH_BOARD", "Dispatch Board"

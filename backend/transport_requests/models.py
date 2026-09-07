@@ -182,6 +182,50 @@ class TransportRequest(models.Model):
         super().save(*args, **kwargs)
 
 
+class IntegrationClient(models.Model):
+    TRUSTED_SOURCE_CHOICES = (
+        (
+            TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
+            "Hotel management system",
+        ),
+        (
+            TransportRequest.SourceSystem.RESTAURANT_MANAGEMENT_SYSTEM,
+            "Restaurant management system",
+        ),
+    )
+
+    name = models.CharField(max_length=120, unique=True)
+    source_system = models.CharField(max_length=40, choices=TRUSTED_SOURCE_CHOICES)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="transport_integration_client",
+    )
+    key_identifier = models.CharField(max_length=32, unique=True, editable=False)
+    credential_hash = models.CharField(max_length=256, editable=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    rotated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("name", "pk")
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(
+                    source_system__in=(
+                        TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
+                        TransportRequest.SourceSystem.RESTAURANT_MANAGEMENT_SYSTEM,
+                    )
+                ),
+                name="integration_client_trusted_source",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.name}: {self.source_system}"
+
+
 class TransportRequestEvent(models.Model):
     request = models.ForeignKey(TransportRequest, on_delete=models.CASCADE, related_name="events")
     event_type = models.CharField(max_length=40)
@@ -246,6 +290,14 @@ class DispatchAssignment(models.Model):
         related_name="confirmed_dispatch_assignments",
     )
     confirmed_at = models.DateTimeField(default=timezone.now)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="accepted_dispatch_assignments",
+    )
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -283,8 +335,18 @@ class DispatchAssignment(models.Model):
 
 
 class DispatchAssignmentEvent(models.Model):
+    class EventType(models.TextChoices):
+        ASSIGNMENT_CONFIRMED = "ASSIGNMENT_CONFIRMED", "Assignment confirmed"
+        ASSIGNMENT_CHANGED = "ASSIGNMENT_CHANGED", "Assignment changed"
+        DRIVER_ACCEPTED = "DRIVER_ACCEPTED", "Driver accepted"
+
     assignment = models.ForeignKey(
         DispatchAssignment, on_delete=models.PROTECT, related_name="events"
+    )
+    event_type = models.CharField(
+        max_length=24,
+        choices=EventType.choices,
+        default=EventType.ASSIGNMENT_CONFIRMED,
     )
     previous_driver = models.ForeignKey(
         Driver,

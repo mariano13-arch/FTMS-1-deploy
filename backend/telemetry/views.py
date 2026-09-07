@@ -10,7 +10,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import StaffAccess
+from accounts.permissions import CanEditVehicle, StaffAccess
 from fleet.models import Vehicle
 from telemetry import demo
 from telemetry.geofences import (
@@ -19,9 +19,21 @@ from telemetry.geofences import (
     geofence_payload,
     rebuild_geofence_activity,
 )
-from telemetry.models import Geofence, GeofenceEvent, TelemetryEvent
-from telemetry.presentation import event_data, latest_status_data
+from telemetry.models import Geofence, GeofenceEvent, TelemetryDevice, TelemetryEvent
+from telemetry.pairing import DevicePairingConflict, pair_device_to_vehicle, unpair_device
+from telemetry.presentation import (
+    current_telemetry_cutoff,
+    event_data,
+    latest_status_data,
+    numeric,
+    valid_position,
+)
+from telemetry.serializers import (
+    TelemetryDevicePairSerializer,
+    TelemetryDeviceRegistrationSerializer,
+)
 from telemetry.services import IngestionStatus, TelemetryValidationError, ingest_telemetry
+from transport_requests.execution import ACTIVE_EXECUTION_STATUSES
 from transport_requests.models import DispatchAssignment, TransportRequest
 
 
@@ -34,6 +46,88 @@ def accepted_response(event, *, response_status, duplicate, http_status):
         },
         status=http_status,
     )
+
+
+def telemetry_device_data(device):
+    binding = (
+        device.bindings.select_related("vehicle")
+        .filter(unpaired_at__isnull=True)
+        .first()
+    )
+    vehicle = None
+    if binding is not None:
+        vehicle = {
+            "vehicle_id": binding.vehicle_id,
+            "plate_number": binding.vehicle.plate_number,
+            "display_name": binding.vehicle.display_name,
+            "compatibility_device_id": binding.vehicle.device_id,
+        }
+    return {
+        "device_id": device.device_id,
+        "registration_status": device.registration_status,
+        "is_paired": binding is not None,
+        "current_vehicle": vehicle,
+    }
+
+
+class TelemetryDeviceCreateView(APIView):
+    http_method_names = ["post", "options"]
+    permission_classes = [StaffAccess, CanEditVehicle]
+
+    def post(self, request):
+        serializer = TelemetryDeviceRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        device = serializer.save()
+        return Response(telemetry_device_data(device), status=status.HTTP_201_CREATED)
+
+
+class TelemetryDeviceDetailView(APIView):
+    http_method_names = ["get", "options"]
+    permission_classes = [StaffAccess]
+
+    def get(self, request, device_id):
+        device = get_object_or_404(TelemetryDevice, device_id=device_id)
+        return Response(telemetry_device_data(device))
+
+
+class TelemetryDevicePairView(APIView):
+    http_method_names = ["post", "options"]
+    permission_classes = [StaffAccess, CanEditVehicle]
+
+    def post(self, request, device_id):
+        device = get_object_or_404(TelemetryDevice, device_id=device_id)
+        serializer = TelemetryDevicePairSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        vehicle_id = serializer.validated_data["vehicle_id"]
+        get_object_or_404(Vehicle, pk=vehicle_id)
+        try:
+            binding, created = pair_device_to_vehicle(
+                device_id=device.device_id,
+                vehicle_id=vehicle_id,
+                user=request.user,
+                replace_current=serializer.validated_data["replace_current"],
+            )
+        except DevicePairingConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        device.refresh_from_db()
+        return Response(
+            telemetry_device_data(device),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class TelemetryDeviceUnpairView(APIView):
+    http_method_names = ["post", "options"]
+    permission_classes = [StaffAccess, CanEditVehicle]
+
+    def post(self, request, device_id):
+        device = get_object_or_404(TelemetryDevice, device_id=device_id)
+        try:
+            unpair_device(device_id=device.device_id, user=request.user)
+        except DevicePairingConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        device.refresh_from_db()
+        return Response(telemetry_device_data(device))
 
 
 class TelemetryEventCreateView(APIView):
@@ -82,19 +176,25 @@ class FleetLiveVehicleListView(APIView):
     def get(self, request):
         vehicles = list(Vehicle.objects.order_by("device_id"))
         vehicle_ids = [vehicle.pk for vehicle in vehicles]
-        latest_events = TelemetryEvent.objects.filter(vehicle_id__in=vehicle_ids).order_by(
-            "vehicle_id", "-recorded_at", "-sequence_number", "-received_at", "-pk"
-        ).distinct("vehicle_id")
+        now = timezone.now()
+        latest_events = (
+            TelemetryEvent.objects.filter(
+                vehicle_id__in=vehicle_ids,
+                recorded_at__lte=current_telemetry_cutoff(now),
+            )
+            .order_by(
+                "vehicle_id", "-recorded_at", "-sequence_number", "-received_at", "-pk"
+            )
+            .distinct("vehicle_id")
+        )
         event_by_vehicle = {event.vehicle_id: event for event in latest_events}
         assignments = (
             DispatchAssignment.objects.filter(
                 vehicle_id__in=vehicle_ids,
-                transport_request__status__in=(
-                    TransportRequest.Status.APPROVED,
-                    TransportRequest.Status.READY_FOR_DISPATCH,
-                ),
+                transport_request__status=TransportRequest.Status.READY_FOR_DISPATCH,
+                accepted_at__isnull=False,
+                execution_status__in=ACTIVE_EXECUTION_STATUSES,
             )
-            .exclude(execution_status=DispatchAssignment.ExecutionStatus.COMPLETED)
             .select_related("driver", "transport_request")
             .order_by("vehicle_id", "transport_request__scheduled_pickup_at", "pk")
         )
@@ -102,7 +202,6 @@ class FleetLiveVehicleListView(APIView):
         for assignment in assignments:
             assignment_by_vehicle.setdefault(assignment.vehicle_id, assignment)
 
-        now = timezone.now()
         demo_config = demo.configuration()
         simulated_vehicle_count = 0
         stale_cutoff = now - timedelta(seconds=settings.DISPATCH_TELEMETRY_MAX_AGE_SECONDS)
@@ -110,27 +209,33 @@ class FleetLiveVehicleListView(APIView):
         for vehicle in vehicles:
             event = event_by_vehicle.get(vehicle.pk)
             assignment = assignment_by_vehicle.get(vehicle.pk)
+            position = valid_position(event)
             if not vehicle.is_active:
                 telemetry_state = "offline"
-            elif event is None:
+            elif position is None:
                 telemetry_state = "no_telemetry"
             elif event.recorded_at < stale_cutoff:
                 telemetry_state = "stale"
             else:
                 telemetry_state = "live"
             telemetry = None
-            if event is not None:
+            if event is not None and position is not None:
                 telemetry = {
-                    "latitude": event.location.y,
-                    "longitude": event.location.x,
-                    "speed_kph": float(event.gnss_speed_kph),
+                    **position,
+                    "speed_kph": numeric(event.gnss_speed_kph),
+                    "position_source": event.position_source,
+                    "position_accuracy_m": numeric(event.position_accuracy_m),
                     "recorded_at": event.recorded_at,
                     "age_seconds": max(0, int((now - event.recorded_at).total_seconds())),
                     "driving_event": event.driving_event,
+                    "rpm": event.rpm,
+                    "coolant_c": numeric(event.coolant_c),
+                    "engine_load_pct": numeric(event.engine_load_pct),
+                    "obd_source": event.obd_source,
                     "telemetry_source": "real",
                     "is_demo_telemetry": False,
                 }
-            elif demo_config["active"]:
+            elif event is None and assignment is None and demo_config["active"]:
                 telemetry_state = "offline" if not vehicle.is_active else demo.state(vehicle)
                 telemetry = demo.point(
                     vehicle,
@@ -216,16 +321,18 @@ class FleetLiveVehicleTrailView(APIView):
     def get(self, request, vehicle_id):
         vehicle = get_object_or_404(Vehicle, pk=vehicle_id)
         recent_events = list(
-            TelemetryEvent.objects.filter(vehicle=vehicle).order_by(
-                "-recorded_at", "-sequence_number", "-received_at", "-pk"
-            )[:25]
+            TelemetryEvent.objects.filter(
+                vehicle=vehicle,
+                position_source=TelemetryEvent.PositionSource.GNSS,
+                recorded_at__lte=current_telemetry_cutoff(),
+            ).order_by("-recorded_at", "-sequence_number", "-received_at", "-pk")[:25]
         )
         points = [
             {
                 "event_id": event.event_id,
                 "latitude": event.location.y,
                 "longitude": event.location.x,
-                "speed_kph": float(event.gnss_speed_kph),
+                "speed_kph": numeric(event.gnss_speed_kph),
                 "recorded_at": event.recorded_at,
             }
             for event in reversed(recent_events)
@@ -259,7 +366,7 @@ class FleetLiveSafetyEventListView(APIView):
                         "recorded_at": event.recorded_at,
                         "latitude": event.location.y,
                         "longitude": event.location.x,
-                        "speed_kph": float(event.gnss_speed_kph),
+                        "speed_kph": numeric(event.gnss_speed_kph),
                         "vehicle_id": event.vehicle_id,
                         "device_id": event.vehicle.device_id,
                         "vehicle_name": event.vehicle.display_name,

@@ -1,0 +1,23 @@
+.vehicle-status-backdrop { position: fixed; inset: 0; z-index: 1200; pointer-events: none; }
+.vehicle-status-page { position: absolute; inset: 0 0 0 auto; width: min(50vw, 760px); overflow-y: auto; pointer-events: auto; display: grid; align-content: start; gap: 12px; padding: 16px; background: var(--page-background, #f6f2ec); box-shadow: -12px 0 28px rgb(25 31 42 / 20%); animation: drawer-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1); will-change: transform; }
+.vehicle-status-page > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.vehicle-status-page h1, .vehicle-status-page h2, .vehicle-status-page p { margin: 0; }
+.vehicle-status-page h1 { font-size: 1.35rem; }
+.vehicle-status-page h2 { font-size: 0.95rem; }
+.vehicle-status-page > header div { display: grid; gap: 4px; }
+.vehicle-status-close { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid var(--border-color, #d9dee5); border-radius: 6px; color: inherit; background: #fff; font-size: 1.25rem; line-height: 1; text-decoration: none; }
+.vehicle-status-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vehicle-status-summary > div, .vehicle-status-grid > section, .vehicle-status-empty, .vehicle-status-state { border: 1px solid var(--border-color, #d9dee5); border-radius: 8px; background: var(--surface-color, #fff); padding: 12px; }
+.vehicle-status-summary div { display: grid; gap: 4px; }
+.vehicle-status-summary span, .vehicle-status-page dt { color: var(--text-muted, #667085); font-size: 0.76rem; }
+.vehicle-status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.vehicle-status-grid > section { display: grid; align-content: start; gap: 8px; }
+.vehicle-status-grid section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vehicle-status-grid dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.vehicle-status-grid dl div { display: grid; gap: 3px; }
+.vehicle-status-grid dd { margin: 0; font-weight: 650; }
+.vehicle-status-simulated { color: #a33a20; font-size: 0.72rem; }
+.vehicle-status-empty { display: grid; gap: 6px; }
+@media (max-width: 1100px) { .vehicle-status-page { width: min(68vw, 720px); } .vehicle-status-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .vehicle-status-page { width: 100%; } .vehicle-status-summary, .vehicle-status-grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .vehicle-status-page { animation: none; } }

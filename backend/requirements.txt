@@ -13,3 +13,5 @@ ruff==0.9.10
 ortools==9.11.4210
 joblib==1.5.2
 xgboost-cpu==3.2.0
+pyotp==2.9.0
+cryptography==44.0.2

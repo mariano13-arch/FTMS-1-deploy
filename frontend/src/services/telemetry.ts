@@ -1,5 +1,5 @@
 export type TelemetryEvent = {
-  schema_version: "1.0";
+  schema_version: "1.0" | "1.1";
   event_id: string;
   sequence_number: number;
   device_id: string;
@@ -7,7 +7,9 @@ export type TelemetryEvent = {
   received_at: string;
   latitude: number;
   longitude: number;
-  gnss_speed_kph: number;
+  position_source?: "GNSS" | "CELLULAR_LBS";
+  position_accuracy_m?: number | null;
+  gnss_speed_kph: number | null;
   rpm: number | null;
   coolant_c: number | null;
   engine_load_pct: number | null;

@@ -12,11 +12,21 @@ function Consumer() {
   const auth = useAuth();
   return <div>
     <span>{auth.loading ? "loading" : auth.user?.username ?? "anonymous"}</span>
+    <span>{auth.sessionMessage}</span>
     <button onClick={() => void auth.signIn("manager", "supplied-password").catch(() => undefined)}>login</button>
     <button onClick={() => void auth.signOut().catch(() => undefined)}>logout</button>
   </div>;
 }
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+function authenticatedFetch(input: RequestInfo | URL) {
+  const url = String(input);
+  if (url.includes("/auth/csrf/")) return json({ csrf_token: "token" });
+  if (url.includes("/auth/me/")) return json({ user });
+  if (url.includes("/auth/activity/")) return Promise.resolve(new Response(null, { status: 204 }));
+  if (url.includes("/auth/logout/")) return Promise.resolve(new Response(null, { status: 204 }));
+  return json({});
+}
 
 test("CSRF bootstrap precedes session restoration and includes credentials", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -58,6 +68,58 @@ test("a REST 401 expires the restored frontend session", async () => {
   render(<AuthProvider><Consumer /></AuthProvider>);
   await screen.findByText("manager");
   await act(async () => { await api("/api/v1/protected/").catch(() => undefined); });
+  expect(screen.getByText("anonymous")).toBeInTheDocument();
+});
+
+test("15 minutes without interaction logs out and displays the inactivity message", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(authenticatedFetch);
+  render(<AuthProvider><Consumer /></AuthProvider>);
+  await act(async () => undefined);
+  expect(screen.getByText("manager")).toBeInTheDocument();
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(899_000); });
+  expect(screen.getByText("manager")).toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+  expect(screen.getByText("anonymous")).toBeInTheDocument();
+  expect(screen.getByText("Your session expired due to inactivity. Please sign in again.")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/auth/logout/"))).toBe(true);
+});
+
+test("meaningful interaction resets idle time and is reported at most once per minute", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(authenticatedFetch);
+  render(<StrictMode><AuthProvider><Consumer /></AuthProvider></StrictMode>);
+  await act(async () => undefined);
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(840_000); });
+  fireEvent.scroll(window);
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+  fireEvent.keyDown(window, { key: "Tab" });
+  fireEvent.click(window);
+  await act(async () => { await vi.advanceTimersByTimeAsync(59_000); });
+
+  expect(screen.getByText("manager")).toBeInTheDocument();
+  let activityCalls = fetchMock.mock.calls.filter(([input]) =>
+    String(input).includes("/auth/activity/"));
+  expect(activityCalls).toHaveLength(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+  activityCalls = fetchMock.mock.calls.filter(([input]) =>
+    String(input).includes("/auth/activity/"));
+  expect(activityCalls).toHaveLength(3);
+});
+
+test("background API traffic does not reset the local idle countdown", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(globalThis, "fetch").mockImplementation(authenticatedFetch);
+  render(<AuthProvider><Consumer /></AuthProvider>);
+  await act(async () => undefined);
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(840_000); });
+  await act(async () => { await api("/api/v1/background-poll/"); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+
   expect(screen.getByText("anonymous")).toBeInTheDocument();
 });
 

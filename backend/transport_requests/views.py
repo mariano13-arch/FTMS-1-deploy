@@ -12,6 +12,8 @@ from rest_framework.views import APIView
 from accounts.models import StaffProfile
 from accounts.permissions import StaffAccess
 from accounts.roles import SUPER_ADMIN, resolve_role
+from fleet.inspection_readiness import inspection_readiness, with_latest_inspection
+from fleet.maintenance import maintenance_readiness, with_maintenance_readiness
 from fleet.models import Driver, Vehicle
 
 from . import consolidation, dispatch, matrix, places, routing, services
@@ -358,9 +360,21 @@ class DispatchBoardView(APIView):
             for driver in Driver.objects.all()
             if dispatch.driver_eligibility(driver)[0] == "ELIGIBLE"
         ]
-        vehicles = Vehicle.objects.filter(is_active=True).order_by("device_id")
+        vehicles = [
+            vehicle
+            for vehicle in with_maintenance_readiness(
+                with_latest_inspection(
+                    Vehicle.objects.filter(is_active=True).order_by("device_id")
+                )
+            )
+            if inspection_readiness(vehicle).eligible
+            and maintenance_readiness(vehicle).eligible
+        ]
         located_vehicle_ids = {
-            item["vehicle_id"] for item in matrix.eligible_vehicle_origins()
+            item["vehicle_id"]
+            for item in matrix.eligible_vehicle_origins(
+                [vehicle.device_id for vehicle in vehicles]
+            )
         }
         approved = [item for item in requests if item.status == TransportRequest.Status.APPROVED]
         confirmed_count = sum(item.pk in assignment_by_request for item in approved)
@@ -419,9 +433,13 @@ class DispatchBoardView(APIView):
             audit_by_request[str(event.assignment.transport_request_id)].append(
                 {
                     "kind": (
-                        "ASSIGNMENT_CHANGED"
-                        if event.previous_driver_id or event.previous_vehicle_id
-                        else "ASSIGNMENT_CONFIRMED"
+                        event.event_type
+                        if event.event_type == DispatchAssignmentEvent.EventType.DRIVER_ACCEPTED
+                        else (
+                            "ASSIGNMENT_CHANGED"
+                            if event.previous_driver_id or event.previous_vehicle_id
+                            else "ASSIGNMENT_CONFIRMED"
+                        )
                     ),
                     "driver": DispatchDriverSerializer(event.new_driver).data,
                     "vehicle": AssignedVehicleSerializer(event.new_vehicle).data,
@@ -496,6 +514,11 @@ class DispatchBoardView(APIView):
                     "confirmed_assignments": confirmed_count,
                     "ready_for_dispatch": sum(
                         item.status == TransportRequest.Status.READY_FOR_DISPATCH
+                        and (
+                            item.pk not in assignment_by_request
+                            or assignment_by_request[item.pk].execution_status
+                            != DispatchAssignment.ExecutionStatus.COMPLETED
+                        )
                         for item in requests
                     ),
                     "optimizer_eligible": optimizer_eligible,

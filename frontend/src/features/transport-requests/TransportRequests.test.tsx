@@ -851,7 +851,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(map.sources.get("fleet-trail-source")!.setData).toHaveBeenCalledWith(expect.objectContaining({ geometry: { type: "LineString", coordinates: [[121.01, 14.55], [121.02, 14.56]] } }));
     expect(maplibre.markers.map(marker => marker.options.element.title)).toEqual(["Hotel Shuttle — Live telemetry", "Inactive Sedan — Offline telemetry", "Stale Van — Stale telemetry", "Harsh braking: Hotel Shuttle", "Pickup: NAIA Terminal 3", "Destination: Oxford Suites Makati"]);
     expect((map.fitBounds.mock.calls[0][0] as { points: [number, number][] }).points).toEqual(expect.arrayContaining([[121.02, 14.56], [121.03, 14.55], [121.04, 14.54]]));
-    expect(screen.getByLabelText("Fleet map legend")).toHaveTextContent("LiveStaleOfflineNo telemetrySelected vehicleActive dispatch routeRecent breadcrumb trailSafety event");
+    expect(screen.getByLabelText("Fleet map legend")).toHaveTextContent("LiveStaleOfflineNo telemetrySelected vehicleActive dispatch routeObserved telemetry trailSafety event");
     fireEvent.click(maplibre.markers[0].options.element); fireEvent.click(maplibre.markers[3].options.element);
     expect(onVehicleSelect).toHaveBeenCalledWith("LIVE-001"); expect(onSafetyEventSelect).toHaveBeenCalledWith("brake-1");
   });

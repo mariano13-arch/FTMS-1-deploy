@@ -8,7 +8,7 @@ import type { Role } from "./services/auth";
 
 const auth = vi.hoisted(() => ({
   user: { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" as Role },
-  loading: false, signIn: vi.fn(), signOut: vi.fn(), expire: vi.fn(),
+  loading: false, sessionMessage: "", signIn: vi.fn(), completeTwoFactor: vi.fn(), signOut: vi.fn(), expire: vi.fn(),
 }));
 vi.mock("./contexts/AuthContext", () => ({ useAuth: () => auth }));
 vi.mock("./services/sidebarService", () => ({
@@ -76,7 +76,7 @@ class FakeIntersectionObserver {
 
 beforeEach(() => {
   auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" };
-  auth.loading = false; auth.signIn.mockReset(); auth.signOut.mockReset();
+  auth.loading = false; auth.sessionMessage = ""; auth.signIn.mockReset(); auth.completeTwoFactor.mockReset(); auth.signOut.mockReset();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   intersectionCallback = null;
@@ -130,9 +130,18 @@ describe("Sprint 3 secure registry", () => {
     expect(screen.queryByText(/internal credential detail/)).not.toBeInTheDocument();
     expect(screen.getByText("Sign in")).toBeEnabled();
   });
+  test("login displays the authenticated-session expiration reason", async () => {
+    auth.user = null as unknown as typeof auth.user;
+    auth.sessionMessage = "Your session expired due to inactivity. Please sign in again.";
+    renderAt("/login");
+    expect(screen.getByRole("status")).toHaveTextContent(auth.sessionMessage);
+  });
   test("successful login follows a safe internal redirect under StrictMode", async () => {
     auth.user = null as unknown as typeof auth.user;
-    auth.signIn.mockImplementationOnce(async () => { auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" }; });
+    auth.signIn.mockImplementationOnce(async () => {
+      auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" };
+      return { kind: "authenticated", user: auth.user };
+    });
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response(vehicle));
     const { history } = renderWithHistory("/login", { from: "/vehicles/LILYGO-001" });
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "staff" } });
@@ -140,9 +149,27 @@ describe("Sprint 3 secure registry", () => {
     fireEvent.submit(screen.getByRole("button", { name: "Sign in" }).closest("form")!);
     await waitFor(() => expect(history.location.pathname).toBe("/vehicles/LILYGO-001"));
   });
+  test("two-factor login keeps the user unauthenticated until verification", async () => {
+    auth.user = null as unknown as typeof auth.user;
+    auth.signIn.mockResolvedValueOnce({ kind: "two_factor_required", challengeToken: "memory-only-challenge" });
+    auth.completeTwoFactor.mockResolvedValueOnce(undefined);
+    renderAt("/login");
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "staff" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByText("Sign in"));
+    expect(await screen.findByRole("heading", { name: "Two-Factor Authentication" })).toBeInTheDocument();
+    expect(auth.user).toBeNull();
+    expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use recovery code" }));
+    expect(screen.getByLabelText("Recovery code")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use authenticator code" }));
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    await waitFor(() => expect(auth.completeTwoFactor).toHaveBeenCalledWith("memory-only-challenge", "totp", "123456"));
+  });
   test("rapid login submissions invoke sign-in once", async () => {
     auth.user = null as unknown as typeof auth.user;
-    const pending = deferred<void>(); auth.signIn.mockReturnValue(pending.promise);
+    const pending = deferred<{ kind: "authenticated"; user: typeof auth.user }>(); auth.signIn.mockReturnValue(pending.promise);
     renderAt("/login");
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "staff" } });
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });

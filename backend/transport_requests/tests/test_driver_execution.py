@@ -6,7 +6,9 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from accounts.models import StaffProfile
 from fleet.models import Driver, Vehicle
+from transport_requests import dispatch, services
 from transport_requests.models import (
     DispatchAssignment,
     DispatchExecutionEvent,
@@ -19,6 +21,9 @@ class DriverExecutionApiTests(TestCase):
         self.client = APIClient()
         self.operator = get_user_model().objects.create_user(
             username="execution-operator", is_staff=True
+        )
+        StaffProfile.objects.create(
+            user=self.operator, role=StaffProfile.Role.DISPATCHER
         )
         self.driver_user = get_user_model().objects.create_user(
             username="execution-driver", password="Strong-test-password-42!"
@@ -66,7 +71,7 @@ class DriverExecutionApiTests(TestCase):
             estimated_duration_minutes=60,
             required_vehicle_type=Vehicle.VehicleType.VAN,
             passenger_count=4,
-            status=TransportRequest.Status.APPROVED,
+            status=TransportRequest.Status.READY_FOR_DISPATCH,
             assigned_vehicle=self.vehicle,
             created_by=self.operator,
         )
@@ -77,6 +82,8 @@ class DriverExecutionApiTests(TestCase):
             selection_mode=DispatchAssignment.SelectionMode.MANUAL,
             override_reason="Controlled execution test",
             confirmed_by=self.operator,
+            accepted_at=timezone.now(),
+            accepted_by=self.driver_user,
         )
         self.url = f"/api/v1/driver-trips/{self.trip.pk}/transition/"
 
@@ -100,6 +107,9 @@ class DriverExecutionApiTests(TestCase):
         self.assertEqual(self.post_action("START_TOWARD_PICKUP").status_code, 404)
 
         self.client.force_login(self.unlinked_user)
+        self.assertEqual(self.post_action("START_TOWARD_PICKUP").status_code, 403)
+
+        self.client.force_login(self.operator)
         self.assertEqual(self.post_action("START_TOWARD_PICKUP").status_code, 403)
 
     def test_malformed_or_arbitrary_status_payload_is_rejected(self):
@@ -157,6 +167,24 @@ class DriverExecutionApiTests(TestCase):
             previous_status = expected_status
 
         self.assertEqual(self.assignment.execution_events.count(), len(transitions))
+        refetched = self.client.get(f"/api/v1/driver-trips/{self.trip.pk}/")
+        self.assertEqual(refetched.json()["trip"]["execution"]["status"], "COMPLETED")
+        self.assertEqual(
+            refetched.json()["trip"]["execution"]["allowed_actions"], []
+        )
+        self.assertIsNotNone(
+            refetched.json()["trip"]["execution"]["completed_at"]
+        )
+        self.trip.refresh_from_db()
+        self.assertEqual(
+            self.trip.status, TransportRequest.Status.READY_FOR_DISPATCH
+        )
+
+        self.client.force_authenticate(self.operator)
+        board = self.client.get("/api/v1/transport-requests/dispatch-board/").json()
+        self.assertEqual(board["assignments"][0]["execution_status"], "COMPLETED")
+        self.assertIsNotNone(board["assignments"][0]["completed_at"])
+        self.assertEqual(board["summary"]["ready_for_dispatch"], 0)
 
     def test_skip_backward_terminal_and_duplicate_actions_are_safe(self):
         self.client.force_login(self.driver_user)
@@ -177,6 +205,7 @@ class DriverExecutionApiTests(TestCase):
         self.assertEqual(self.post_action("COMPLETE").status_code, 200)
         self.assertEqual(self.assignment.execution_events.count(), event_count)
         self.assertEqual(self.post_action("ARRIVE_AT_DESTINATION").status_code, 409)
+        self.assertEqual(self.post_action("START_TOWARD_PICKUP").status_code, 409)
 
     def test_cancelled_transport_request_blocks_transition(self):
         self.trip.status = TransportRequest.Status.CANCELLED
@@ -189,6 +218,89 @@ class DriverExecutionApiTests(TestCase):
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.execution_status, "ASSIGNED")
         self.assertEqual(self.assignment.execution_events.count(), 0)
+
+    def test_start_requires_release_and_explicit_acceptance(self):
+        self.client.force_login(self.driver_user)
+        self.assignment.accepted_at = None
+        self.assignment.accepted_by = None
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "updated_at"])
+
+        unaccepted = self.post_action("START_TOWARD_PICKUP")
+        self.assertEqual(unaccepted.status_code, 409)
+        self.assertIn("Accept this trip", unaccepted.json()["detail"])
+
+        self.assignment.accepted_at = timezone.now()
+        self.assignment.accepted_by = self.driver_user
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "updated_at"])
+        self.trip.status = TransportRequest.Status.APPROVED
+        self.trip.save(update_fields=["status", "updated_at"])
+
+        unreleased = self.post_action("START_TOWARD_PICKUP")
+        self.assertEqual(unreleased.status_code, 409)
+        self.assertIn("released", unreleased.json()["detail"])
+
+    def test_later_action_requires_request_to_remain_released_and_accepted(self):
+        self.client.force_login(self.driver_user)
+        self.assertEqual(self.post_action("START_TOWARD_PICKUP").status_code, 200)
+        event_count = self.assignment.execution_events.count()
+
+        self.trip.status = TransportRequest.Status.REJECTED
+        self.trip.save(update_fields=["status", "updated_at"])
+        rejected = self.post_action("ARRIVE_AT_PICKUP")
+        self.assertEqual(rejected.status_code, 409)
+
+        self.trip.status = TransportRequest.Status.READY_FOR_DISPATCH
+        self.trip.save(update_fields=["status", "updated_at"])
+        self.assignment.accepted_at = None
+        self.assignment.accepted_by = None
+        self.assignment.save(update_fields=["accepted_at", "accepted_by", "updated_at"])
+        unaccepted = self.post_action("ARRIVE_AT_PICKUP")
+        self.assertEqual(unaccepted.status_code, 409)
+
+        self.assignment.refresh_from_db()
+        self.assertEqual(
+            self.assignment.execution_status,
+            DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP,
+        )
+        self.assertEqual(self.assignment.execution_events.count(), event_count)
+
+    def test_completion_releases_driver_and_vehicle_scheduling_conflicts(self):
+        candidate = TransportRequest.objects.create(
+            source_system=TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
+            external_reference="EXECUTION-NEXT",
+            request_type=TransportRequest.RequestType.GUEST_TRANSFER,
+            request_category=TransportRequest.RequestCategory.PASSENGER_TRANSPORT,
+            requester_name="Front Desk",
+            pickup_name="FTMS Hotel",
+            pickup_address="Makati City",
+            pickup_latitude="14.565200",
+            pickup_longitude="121.028600",
+            destination_name="Airport",
+            destination_address="Pasay City",
+            destination_latitude="14.508600",
+            destination_longitude="121.019800",
+            scheduled_pickup_at=self.trip.scheduled_pickup_at,
+            estimated_duration_minutes=60,
+            required_vehicle_type=Vehicle.VehicleType.VAN,
+            passenger_count=4,
+            status=TransportRequest.Status.APPROVED,
+            created_by=self.operator,
+        )
+        self.assertTrue(services.allocation_conflicts(candidate, self.vehicle))
+        self.assertTrue(dispatch.driver_conflicts(candidate, self.driver))
+
+        self.client.force_login(self.driver_user)
+        for action in (
+            "START_TOWARD_PICKUP",
+            "ARRIVE_AT_PICKUP",
+            "DEPART_PICKUP",
+            "ARRIVE_AT_DESTINATION",
+            "COMPLETE",
+        ):
+            self.assertEqual(self.post_action(action).status_code, 200)
+
+        self.assertEqual(services.allocation_conflicts(candidate, self.vehicle), [])
+        self.assertEqual(dispatch.driver_conflicts(candidate, self.driver), [])
 
     def test_execution_events_are_immutable(self):
         self.client.force_login(self.driver_user)

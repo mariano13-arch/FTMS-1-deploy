@@ -248,6 +248,11 @@ test("shows OR-Tools recommendation with real TomTom metrics and confirms only o
                 override_reason: "",
                 confirmed_by: "Operator",
                 confirmed_at: "2026-08-14T00:01:00Z",
+                is_accepted: false,
+                accepted_at: null,
+                execution_status: "ASSIGNED",
+                execution_status_label: "Assigned",
+                completed_at: null,
                 created_at: "2026-08-14T00:01:00Z",
                 updated_at: "2026-08-14T00:01:00Z",
               },
@@ -463,6 +468,11 @@ test("does not auto-optimize non-approved or already confirmed requests", async 
         override_reason: "Fixture",
         confirmed_by: "Operator",
         confirmed_at: "2026-08-14T00:01:00Z",
+        is_accepted: true,
+        accepted_at: "2026-08-14T00:05:00Z",
+        execution_status: "COMPLETED",
+        execution_status_label: "Completed",
+        completed_at: "2026-08-14T01:05:00Z",
         created_at: "2026-08-14T00:01:00Z",
         updated_at: "2026-08-14T00:01:00Z",
       },
@@ -476,12 +486,21 @@ test("does not auto-optimize non-approved or already confirmed requests", async 
   await waitFor(() =>
     expect(screen.getByText("Confirmed Assignment")).toBeInTheDocument(),
   );
+  expect(screen.getByText(/Accepted ·/)).toBeInTheDocument();
+  expect(screen.getByText(/Completed ·/)).toBeInTheDocument();
+  expect(screen.getByText("Completed")).toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([input]) => isOptimization(input))).toBe(
     false,
   );
   expect(
     screen.getByRole("button", { name: "Refresh Optimization" }),
   ).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Modify Assignment" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Confirm Manual Assignment" }),
+  ).not.toBeInTheDocument();
 });
 
 test("shows controlled auto-optimization error and allows explicit retry", async () => {

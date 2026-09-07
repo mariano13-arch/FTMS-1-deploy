@@ -48,12 +48,30 @@ describe("System Rules & Settings workspace", () => {
     storage.mockRestore();
   });
 
-  test("shows planned Security capabilities without fake controls", () => {
+  test("shows real staff 2FA status while leaving other Security items planned", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ enabled: false, recovery_codes_remaining: 0, enabled_at: null }), { headers: { "Content-Type": "application/json" } }));
     renderAt(<SecuritySettingsPage />, "/settings/security");
     expect(screen.getByRole("link", { name: "Security" })).toHaveClass("active");
     for (const section of ["Two-Factor Authentication", "Password", "Active Sessions"]) expect(screen.getByText(section)).toBeInTheDocument();
-    expect(screen.getAllByText("Planned")).toHaveLength(3);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up authenticator" })).toBeInTheDocument();
+    expect(screen.getAllByText("Planned")).toHaveLength(2);
+  });
+
+  test("renders real setup data and displays recovery codes only from confirmation", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ enabled: false, recovery_codes_remaining: 0, enabled_at: null }), { headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ provisioning_uri: "otpauth://totp/FTMS:manager?secret=TEST", manual_setup_key: "TEST-MANUAL-KEY", issuer: "FTMS", account_label: "manager" }), { headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ recovery_codes: ["CODE-ONE", "CODE-TWO"] }), { headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ enabled: true, recovery_codes_remaining: 2, enabled_at: "2026-08-31T00:00:00Z" }), { headers: { "Content-Type": "application/json" } }));
+    renderAt(<SecuritySettingsPage />, "/settings/security");
+    fireEvent.click(await screen.findByRole("button", { name: "Set up authenticator" }));
+    expect(await screen.findByText("TEST-MANUAL-KEY")).toBeInTheDocument();
+    expect(document.querySelector("svg")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm setup" }));
+    expect(await screen.findByText(/CODE-ONE/)).toBeInTheDocument();
+    expect(screen.getByText(/Recovery codes remaining: 2/)).toBeInTheDocument();
   });
 
   test("shows only truthful read-only Operational Rules", () => {

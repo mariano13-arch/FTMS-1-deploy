@@ -483,6 +483,11 @@ export default function DispatchBoardPage() {
                     assigned={data.assignments.some(
                       (entry) => entry.transport_request_id === item.id,
                     )}
+                    executionStatus={
+                      data.assignments.find(
+                        (entry) => entry.transport_request_id === item.id,
+                      )?.execution_status
+                    }
                     attention={
                       optimization?.unassigned.find(
                         (entry) => entry.transport_request_id === item.id,
@@ -655,13 +660,15 @@ export default function DispatchBoardPage() {
                       Confirm Recommendation
                     </button>
                   )}
-                <button
-                  className="btn-action--filled"
-                  onClick={() => setManual((value) => !value)}
-                >
-                  {manual ? "Cancel Modification" : "Modify Assignment"}
-                </button>
-                {manual && (
+                {selected.status === "APPROVED" && (
+                  <button
+                    className="btn-action--filled"
+                    onClick={() => setManual((value) => !value)}
+                  >
+                    {manual ? "Cancel Modification" : "Modify Assignment"}
+                  </button>
+                )}
+                {manual && selected.status === "APPROVED" && (
                   <div className="dispatch-manual">
                     <label>
                       Eligible Driver
@@ -745,17 +752,21 @@ function RequestRow({
   item,
   selected,
   assigned,
+  executionStatus,
   attention,
   onClick,
 }: {
   item: TransportRequestListItem;
   selected: boolean;
   assigned: boolean;
+  executionStatus?: DispatchAssignment["execution_status"];
   attention?: string;
   onClick: () => void;
 }) {
   const statusText =
-    item.status === "READY_FOR_DISPATCH"
+    executionStatus === "COMPLETED"
+      ? "Completed"
+      : item.status === "READY_FOR_DISPATCH"
       ? "Ready for Dispatch"
       : assigned
         ? "Confirmed"
@@ -770,20 +781,24 @@ function RequestRow({
         <span className="dispatch-row-type">{label(item.request_type)}</span>
         <StatusBadge
           status={
-            statusText === "Confirmed"
+            statusText === "Completed"
+              ? "completed"
+              : statusText === "Confirmed"
               ? "confirmed"
               : statusText === "Ready for Dispatch"
                 ? "ready"
                 : "pending"
           }
           tone={
-            dispatchStatusTone[
-              statusText === "Confirmed"
-                ? "confirmed"
-                : statusText === "Ready for Dispatch"
-                  ? "ready"
-                  : "pending"
-            ]
+            statusText === "Completed"
+              ? "success"
+              : dispatchStatusTone[
+                  statusText === "Confirmed"
+                    ? "confirmed"
+                    : statusText === "Ready for Dispatch"
+                      ? "ready"
+                      : "pending"
+                ]
           }
           label={statusText}
         />
@@ -891,6 +906,22 @@ function Confirmed({ assignment }: { assignment: DispatchAssignment }) {
         <Metric
           name="Selection source"
           value={label(assignment.selection_mode)}
+        />
+        <Metric
+          name="Driver acknowledgement"
+          value={
+            assignment.is_accepted
+              ? `Accepted${assignment.accepted_at ? ` · ${dateTime(assignment.accepted_at)}` : ""}`
+              : "Awaiting Driver Acceptance"
+          }
+        />
+        <Metric
+          name="Execution"
+          value={
+            assignment.execution_status === "COMPLETED" && assignment.completed_at
+              ? `Completed · ${dateTime(assignment.completed_at)}`
+              : assignment.execution_status_label
+          }
         />
       </dl>
     </div>

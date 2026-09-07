@@ -1,40 +1,273 @@
-.settings-page { box-sizing: border-box; color: #172638; display: flex; flex-direction: column; gap: 7px; min-height: 100%; padding: 10px 12px 12px; }
-.settings-breadcrumb { color: #61748b; font-size: 10px; }
-.settings-header h1 { font-size: 21px; margin: 0; }
-.settings-header p { color: #60728a; font-size: 11px; margin: 2px 0 0; }
-.settings-tabs { border-bottom: 1px solid #d5dce4; display: flex; gap: 3px; margin-top: 2px; overflow-x: auto; }
-.settings-tabs a { background: #f5f3ef; border: 1px solid #ddd8d0; border-bottom: 0; border-radius: 3px 3px 0 0; color: #364b62; font-size: 11px; min-width: 108px; padding: 7px 11px; text-align: center; text-decoration: none; white-space: nowrap; }
-.settings-tabs a:hover { background: #fff; }
-.settings-tabs a.active { background: #981b2d; border-color: #821424; color: #fff; font-weight: 700; }
-.settings-content { display: flex; flex: 1 1 auto; min-height: 0; }
-.settings-content > * { flex: 1 1 auto; min-width: 0; }
-.settings-panel { background: #fff; border: 1px solid #d2dae3; border-radius: 4px; overflow: hidden; }
-.settings-panel > header { align-items: center; border-bottom: 1px solid #e1e6ec; display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; }
-.settings-panel h2 { font-size: 15px; margin: 0; }
-.settings-panel header p { color: #60728a; font-size: 11px; margin: 2px 0 0; }
-.settings-panel header small { color: #60748a; display: block; font-size: 9px; font-weight: 700; margin-bottom: 2px; text-transform: uppercase; }
-.settings-category-list,.settings-rows { display: grid; }
-.settings-category-list a,.settings-row { align-items: center; border-top: 1px solid #e6eaee; color: inherit; display: flex; justify-content: space-between; gap: 12px; padding: 10px 11px; text-decoration: none; }
-.settings-category-list a:first-child,.settings-row:first-child { border-top: 0; }
-.settings-category-list a:hover { background: #f8f9fa; }
-.settings-category-list strong,.settings-category-list small,.settings-row strong,.settings-row small { display: block; }
-.settings-category-list strong,.settings-row strong { font-size: 12px; }
-.settings-category-list small,.settings-row small { color: #687a8f; font-size: 10px; margin-top: 2px; }
-.settings-status { border-radius: 999px; flex: 0 0 auto; font-size: 9px; font-weight: 700; padding: 4px 8px; }
-.settings-status--available,.settings-status--configured { background: #e7f4ed; color: #1f6b49; }
-.settings-status--blocked { background: #fff1d8; color: #865a08; }
-.settings-status--planned,.settings-status--status-unavailable { background: #edf0f3; color: #657383; }
-.settings-status--not-configured { background: #fcedef; color: #8b2332; }
-.settings-models { display: grid; gap: 8px; }
-.settings-panel dl { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; margin: 0; padding: 4px 11px; }
-.settings-panel dl div { align-items: center; border-bottom: 1px solid #edf0f3; display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; }
-.settings-panel dt { color: #708196; font-size: 10px; }
-.settings-panel dd { font-size: 11px; font-weight: 700; margin: 0; text-align: right; }
-.settings-yes { color: #16804a; }.settings-no { color: #a64b3c; }
-.settings-features { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 11px 0; }
-.settings-features span { background: #eef7f6; border-radius: 3px; color: #006e6b; font-size: 10px; font-weight: 700; padding: 4px 6px; }
-.settings-blocking,.settings-note { background: #fff8e8; color: #66552e; font-size: 10px; line-height: 1.45; margin: 8px 11px; padding: 7px 8px; }
-.settings-note { background: #eef7f6; color: #245b59; }
-.settings-error { color: #8b2332; padding: 16px; }
-.settings-error p { margin: 4px 0 0; }
-@media(max-width:700px){.settings-panel dl{grid-template-columns:1fr}.settings-tabs a{min-width:max-content}}
+.settings-page {
+  box-sizing: border-box;
+  color: #172638;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 100%;
+  padding: 10px 12px 12px;
+}
+
+.settings-breadcrumb {
+  color: #61748b;
+  font-size: 10px;
+}
+
+.settings-header h1 {
+  font-size: 21px;
+  margin: 0;
+}
+
+.settings-header p {
+  color: #60728a;
+  font-size: 11px;
+  margin: 2px 0 0;
+}
+
+.settings-tabs {
+  border-bottom: 1px solid #d5dce4;
+  display: flex;
+  gap: 3px;
+  margin-top: 2px;
+  overflow-x: auto;
+}
+
+.settings-tabs a {
+  background: #f5f3ef;
+  border: 1px solid #ddd8d0;
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+  color: #364b62;
+  font-size: 11px;
+  min-width: 108px;
+  padding: 7px 11px;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.settings-tabs a:hover {
+  background: #fff;
+}
+
+.settings-tabs a.active {
+  background: #981b2d;
+  border-color: #821424;
+  color: #fff;
+  font-weight: 700;
+}
+
+.settings-content {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.settings-content > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-panel {
+  background: #fff;
+  border: 1px solid #d2dae3;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.settings-panel > header {
+  align-items: center;
+  border-bottom: 1px solid #e1e6ec;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+}
+
+.settings-panel h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.settings-panel header p {
+  color: #60728a;
+  font-size: 11px;
+  margin: 2px 0 0;
+}
+
+.settings-panel header small {
+  color: #60748a;
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  text-transform: uppercase;
+}
+
+.settings-category-list,
+.settings-rows {
+  display: grid;
+}
+
+.settings-category-list a,
+.settings-row {
+  align-items: center;
+  border-top: 1px solid #e6eaee;
+  color: inherit;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  text-decoration: none;
+}
+
+.settings-category-list a:first-child,
+.settings-row:first-child {
+  border-top: 0;
+}
+
+.settings-category-list a:hover {
+  background: #f8f9fa;
+}
+
+.settings-category-list strong,
+.settings-category-list small,
+.settings-row strong,
+.settings-row small {
+  display: block;
+}
+
+.settings-category-list strong,
+.settings-row strong {
+  font-size: 12px;
+}
+
+.settings-category-list small,
+.settings-row small {
+  color: #687a8f;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.settings-status {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.settings-status--available,
+.settings-status--configured {
+  background: #e7f4ed;
+  color: #1f6b49;
+}
+
+.settings-status--blocked {
+  background: #fff1d8;
+  color: #865a08;
+}
+
+.settings-status--disabled,
+.settings-status--planned,
+.settings-status--status-unavailable {
+  background: #edf0f3;
+  color: #657383;
+}
+
+.settings-status--not-configured {
+  background: #fcedef;
+  color: #8b2332;
+}
+
+.settings-models {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-panel dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+  margin: 0;
+  padding: 4px 11px;
+}
+
+.settings-panel dl div {
+  align-items: center;
+  border-bottom: 1px solid #edf0f3;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+}
+
+.settings-panel dt {
+  color: #708196;
+  font-size: 10px;
+}
+
+.settings-panel dd {
+  font-size: 11px;
+  font-weight: 700;
+  margin: 0;
+  text-align: right;
+}
+
+.settings-yes {
+  color: #16804a;
+}
+
+.settings-no {
+  color: #a64b3c;
+}
+
+.settings-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 11px 0;
+}
+
+.settings-features span {
+  background: #eef7f6;
+  border-radius: 3px;
+  color: #006e6b;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 6px;
+}
+
+.settings-blocking,
+.settings-note {
+  background: #fff8e8;
+  color: #66552e;
+  font-size: 10px;
+  line-height: 1.45;
+  margin: 8px 11px;
+  padding: 7px 8px;
+}
+
+.settings-note {
+  background: #eef7f6;
+  color: #245b59;
+}
+
+.settings-error {
+  color: #8b2332;
+  padding: 16px;
+}
+
+.settings-error p {
+  margin: 4px 0 0;
+}
+
+@media (max-width: 700px) {
+  .settings-panel dl {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-tabs a {
+    min-width: max-content;
+  }
+}

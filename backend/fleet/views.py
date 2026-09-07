@@ -1,8 +1,12 @@
 import mimetypes
+from hashlib import sha256
 
-from django.db.models import Count, Q
+from django.core.cache import cache
+from django.db import transaction
+from django.db.models import Count, Prefetch, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -16,25 +20,46 @@ from accounts.permissions import (
     StaffAccess,
 )
 from accounts.roles import can_create, can_edit
+from telemetry.models import TelemetryDeviceBinding
 
 from .driver_onboarding import (
     DriverUsernameConflict,
     create_driver_with_account,
     send_driver_setup_email,
 )
-from .models import Driver, DriverDocument, Vehicle, VehicleDocument, VehicleInspection
+from .maintenance import transition_maintenance
+from .models import (
+    Driver,
+    DriverDocument,
+    Vehicle,
+    VehicleDocument,
+    VehicleInspection,
+    VehicleMaintenanceRecord,
+)
 from .serializers import (
     DriverDocumentSerializer,
     DriverSerializer,
+    MaintenanceTransitionSerializer,
     VehicleDocumentSerializer,
     VehicleInspectionSerializer,
+    VehicleMaintenanceRecordSerializer,
     VehicleSerializer,
     driver_eligibility,
 )
 
 
 def vehicle_queryset():
-    return Vehicle.objects.prefetch_related("inspections", "documents").annotate(
+    return Vehicle.objects.prefetch_related(
+        "inspections",
+        "documents",
+        Prefetch(
+            "telemetry_device_bindings",
+            queryset=TelemetryDeviceBinding.objects.select_related("device").filter(
+                unpaired_at__isnull=True
+            ),
+            to_attr="current_telemetry_device_bindings",
+        ),
+    ).annotate(
         document_count=Count("documents", distinct=True)
     )
 
@@ -150,6 +175,39 @@ class VehicleInspectionPagination(PageNumberPagination):
     max_page_size = 50
 
 
+class VehicleInspectionDefinitionView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["get", "options"]
+
+    def get(self, request):
+        checklist = []
+        for field_name in VehicleInspection.CHECKLIST_FIELDS:
+            field = VehicleInspection._meta.get_field(field_name)
+            checklist.append(
+                {
+                    "field": field_name,
+                    "label": str(field.verbose_name).capitalize(),
+                    "required": not field.blank,
+                    "choices": [
+                        {"value": value, "label": label} for value, label in field.choices
+                    ],
+                }
+            )
+        return Response(
+            {
+                "inspection_types": [
+                    {"value": value, "label": label}
+                    for value, label in VehicleInspection.InspectionType.choices
+                ],
+                "results": [
+                    {"value": value, "label": label}
+                    for value, label in VehicleInspection.Result.choices
+                ],
+                "checklist": checklist,
+            }
+        )
+
+
 class VehicleInspectionListView(APIView):
     permission_classes = [StaffAccess]
     http_method_names = ["get", "post", "options"]
@@ -167,10 +225,58 @@ class VehicleInspectionListView(APIView):
     def post(self, request, device_id):
         if not CanEditVehicle().has_permission(request, self):
             self.permission_denied(request)
-        vehicle = self.get_vehicle(device_id)
         serializer = VehicleInspectionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(vehicle=vehicle, inspected_by=request.user)
+        idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+        if len(idempotency_key) > 128:
+            raise serializers.ValidationError(
+                {"idempotency_key": "Must not exceed 128 characters."}
+            )
+        cache_key = None
+        if idempotency_key:
+            digest = sha256(
+                f"{request.user.pk}:{device_id}:{idempotency_key}".encode()
+            ).hexdigest()
+            cache_key = f"fleet:inspection-submission:{digest}"
+            if not cache.add(cache_key, "pending", timeout=300):
+                inspection_id = cache.get(cache_key)
+                if inspection_id != "pending":
+                    inspection = (
+                        VehicleInspection.objects.select_related("inspected_by")
+                        .filter(
+                            pk=inspection_id,
+                            vehicle__device_id=device_id,
+                            inspected_by=request.user,
+                        )
+                        .first()
+                    )
+                    if inspection is not None:
+                        return Response(VehicleInspectionSerializer(inspection).data)
+                    cache.delete(cache_key)
+                    cache.add(cache_key, "pending", timeout=300)
+                else:
+                    return Response(
+                        {"detail": "This inspection submission is already in progress."},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+        try:
+            with transaction.atomic():
+                vehicle = get_object_or_404(
+                    Vehicle.objects.select_for_update(), device_id=device_id
+                )
+                serializer.save(
+                    vehicle=vehicle,
+                    inspected_by=request.user,
+                    inspection_date=serializer.validated_data.get(
+                        "inspection_date", timezone.localdate()
+                    ),
+                )
+        except Exception:
+            if cache_key:
+                cache.delete(cache_key)
+            raise
+        if cache_key:
+            cache.set(cache_key, serializer.instance.pk, timeout=86400)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -199,6 +305,84 @@ class VehicleInspectionDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class VehicleMaintenancePagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class VehicleMaintenanceListView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["get", "post", "options"]
+
+    def get(self, request):
+        allowed = {"vehicle", "status", "page", "page_size"}
+        unknown = set(request.query_params) - allowed
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown filter." for key in unknown})
+        queryset = VehicleMaintenanceRecord.objects.select_related(
+            "vehicle", "inspection", "created_by"
+        )
+        vehicle = request.query_params.get("vehicle")
+        if vehicle:
+            queryset = queryset.filter(vehicle__device_id=vehicle)
+        record_status = request.query_params.get("status")
+        if record_status:
+            if record_status not in VehicleMaintenanceRecord.Status.values:
+                raise serializers.ValidationError({"status": "Invalid maintenance status."})
+            queryset = queryset.filter(status=record_status)
+        paginator = VehicleMaintenancePagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        response = paginator.get_paginated_response(
+            VehicleMaintenanceRecordSerializer(page, many=True).data
+        )
+        response.data["can_manage"] = can_edit(request.user)
+        return response
+
+    def post(self, request):
+        if not CanEditVehicle().has_permission(request, self):
+            self.permission_denied(request)
+        serializer = VehicleMaintenanceRecordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(created_by=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class VehicleMaintenanceDetailView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["get", "options"]
+
+    def get(self, request, record_id):
+        record = get_object_or_404(
+            VehicleMaintenanceRecord.objects.select_related(
+                "vehicle", "inspection", "created_by"
+            ),
+            pk=record_id,
+        )
+        return Response(VehicleMaintenanceRecordSerializer(record).data)
+
+
+class VehicleMaintenanceTransitionView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["post", "options"]
+
+    def post(self, request, record_id):
+        if not CanEditVehicle().has_permission(request, self):
+            self.permission_denied(request)
+        serializer = MaintenanceTransitionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        record = get_object_or_404(VehicleMaintenanceRecord, pk=record_id)
+        updated = transition_maintenance(
+            record.pk,
+            serializer.validated_data["status"],
+            serializer.validated_data.get("scheduled_at"),
+        )
+        updated = VehicleMaintenanceRecord.objects.select_related(
+            "vehicle", "inspection", "created_by"
+        ).get(pk=updated.pk)
+        return Response(VehicleMaintenanceRecordSerializer(updated).data)
 
 
 class VehicleDocumentPagination(PageNumberPagination):

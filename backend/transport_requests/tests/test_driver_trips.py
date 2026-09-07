@@ -41,7 +41,9 @@ class DriverTripApiTests(TestCase):
             passenger_capacity=8,
         )
 
-    def make_request(self, reference, *, status=TransportRequest.Status.APPROVED, hours=2):
+    def make_request(
+        self, reference, *, status=TransportRequest.Status.READY_FOR_DISPATCH, hours=2
+    ):
         return TransportRequest.objects.create(
             source_system=TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
             external_reference=reference,
@@ -94,7 +96,9 @@ class DriverTripApiTests(TestCase):
         later = self.make_request(
             "OWN-READY", status=TransportRequest.Status.READY_FOR_DISPATCH, hours=4
         )
-        earlier = self.make_request("OWN-APPROVED", hours=2)
+        earlier = self.make_request(
+            "OWN-APPROVED", status=TransportRequest.Status.APPROVED, hours=2
+        )
         other = self.make_request("OTHER", hours=1)
         cancelled = self.make_request(
             "CANCELLED", status=TransportRequest.Status.CANCELLED, hours=3
@@ -114,7 +118,11 @@ class DriverTripApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [trip["id"] for trip in response.json()["trips"]],
-            [str(earlier.pk), str(later.pk)],
+            [str(later.pk)],
+        )
+        self.assertEqual(
+            self.client.get(f"/api/v1/driver-trips/{earlier.pk}/").status_code,
+            404,
         )
 
     def test_driver_can_read_own_trip_with_minimal_operational_fields(self):
@@ -139,6 +147,9 @@ class DriverTripApiTests(TestCase):
                 "priority_label",
                 "status",
                 "status_label",
+                "is_accepted",
+                "accepted_at",
+                "assignment_confirmed_at",
                 "scheduled_pickup_at",
                 "estimated_duration_minutes",
                 "passenger_count",
@@ -155,6 +166,8 @@ class DriverTripApiTests(TestCase):
             },
         )
         self.assertEqual(trip["id"], str(item.pk))
+        self.assertFalse(trip["is_accepted"])
+        self.assertIsNone(trip["accepted_at"])
         self.assertEqual(trip["pickup"], {"name": "FTMS Hotel", "address": "Makati City"})
         self.assertEqual(trip["destination"]["address"], "Pasay City")
         self.assertEqual(trip["vehicle"]["plate_number"], "ABC-123")
@@ -169,7 +182,7 @@ class DriverTripApiTests(TestCase):
                 "trip_id": str(item.pk),
                 "status": "ASSIGNED",
                 "status_label": "Assigned",
-                "allowed_actions": ["START_TOWARD_PICKUP"],
+                "allowed_actions": [],
                 "execution_started_at": None,
                 "pickup_arrived_at": None,
                 "pickup_departed_at": None,

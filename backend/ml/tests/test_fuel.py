@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -9,7 +9,15 @@ from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
 from fleet.models import Vehicle
-from ml.fuel import contract, load_model, model_info, operational_readiness, predict_fuel
+from ml.fuel import (
+    VALIDATED_TELEMETRY_SOURCE_MODE,
+    contract,
+    load_model,
+    model_info,
+    operational_readiness,
+    operational_telemetry_inputs,
+    predict_fuel,
+)
 from ml.models import FuelPrediction
 from telemetry.models import TelemetryEvent
 
@@ -174,12 +182,8 @@ class FuelAnalyticsApiTests(TestCase):
 
         readiness = operational_readiness()
         self.assertEqual(readiness["latest_telemetry"]["event_id"], event.event_id)
-        self.assertEqual(
-            readiness["latest_operational_result"]["status"], "prediction_blocked"
-        )
-        self.assertIsNone(
-            readiness["latest_operational_result"]["estimated_fuel_lph"]
-        )
+        self.assertEqual(readiness["latest_operational_result"]["status"], "prediction_blocked")
+        self.assertIsNone(readiness["latest_operational_result"]["estimated_fuel_lph"])
         self.assertIn(
             "Absolute_Load_pct",
             readiness["latest_operational_result"]["missing_features"],
@@ -189,26 +193,62 @@ class FuelAnalyticsApiTests(TestCase):
         )
         self.assertEqual(engine_load["status"], "unverified")
 
-    def test_successful_real_source_prediction_persists_once(self):
+    def test_vehicle_inference_uses_only_authoritative_telemetry_and_blocks(self):
         event = self.create_telemetry()
+        self.assertEqual(
+            operational_telemetry_inputs(event),
+            {
+                "Vehicle_Speed_km_per_h": 38.2,
+                "Engine_RPM_RPM": 1750.0,
+            },
+        )
+
+        supplied = self.client.post(
+            "/api/v1/analytics/fuel/predict/",
+            {
+                **complete_inputs(),
+                "vehicle_id": self.vehicle.pk,
+                "input_timestamp": event.recorded_at.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(supplied.status_code, 400)
+        self.assertIn("derives model inputs", supplied.json()["inputs"])
+
         payload = {
-            **complete_inputs(),
             "vehicle_id": self.vehicle.pk,
             "input_timestamp": event.recorded_at.isoformat(),
         }
-
         first = self.client.post("/api/v1/analytics/fuel/predict/", payload, format="json")
         second = self.client.post("/api/v1/analytics/fuel/predict/", payload, format="json")
 
         self.assertEqual(first.status_code, 200)
-        self.assertTrue(first.json()["history_persisted"])
+        self.assertEqual(first.json()["status"], "prediction_blocked")
+        self.assertEqual(first.json()["input_timestamp"], event.recorded_at.isoformat())
+        self.assertIn("Absolute_Load_pct", first.json()["missing_features"])
+        self.assertFalse(first.json()["history_persisted"])
         self.assertFalse(second.json()["history_persisted"])
-        self.assertEqual(FuelPrediction.objects.count(), 1)
-        prediction = FuelPrediction.objects.get()
-        self.assertEqual(prediction.vehicle, self.vehicle)
-        self.assertEqual(prediction.source_mode, "explicit_validated_api")
-        self.assertEqual(set(prediction.validated_inputs), set(contract()["features"]))
-        self.assertNotIn("MAF_g_per_sec", prediction.validated_inputs)
+        self.assertEqual(FuelPrediction.objects.count(), 0)
+
+    def test_another_vehicles_telemetry_cannot_satisfy_vehicle_inference(self):
+        other = Vehicle.objects.create(
+            device_id="FUEL-OTHER",
+            plate_number="FUEL-OTHER",
+            display_name="Other Fuel Van",
+        )
+        event = self.create_telemetry(other, event_id="fuel-other-source")
+
+        response = self.client.post(
+            "/api/v1/analytics/fuel/predict/",
+            {
+                "vehicle_id": self.vehicle.pk,
+                "input_timestamp": event.recorded_at.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(FuelPrediction.objects.count(), 0)
 
     def test_blocked_or_unverified_source_prediction_is_not_persisted(self):
         event = self.create_telemetry()
@@ -217,7 +257,6 @@ class FuelAnalyticsApiTests(TestCase):
             {
                 "vehicle_id": self.vehicle.pk,
                 "input_timestamp": event.recorded_at.isoformat(),
-                "Vehicle_Speed_km_per_h": 38.2,
             },
             format="json",
         )
@@ -259,6 +298,7 @@ class FuelAnalyticsApiTests(TestCase):
             estimated_fuel_lph=2.5,
             model_name=contract()["model_name"],
             model_version=contract()["model_version"],
+            source_mode=VALIDATED_TELEMETRY_SOURCE_MODE,
             validated_inputs=complete_inputs(),
         )
 
@@ -275,9 +315,7 @@ class FuelAnalyticsApiTests(TestCase):
         self.assertEqual(data["readiness_breakdown"]["no_telemetry"], 1)
         self.assertEqual(len(data["trend"]), 1)
         self.assertEqual(len(data["vehicle_comparison"]), 1)
-        ready_row = next(
-            row for row in data["vehicles"] if row["vehicle_id"] == self.vehicle.pk
-        )
+        ready_row = next(row for row in data["vehicles"] if row["vehicle_id"] == self.vehicle.pk)
         self.assertEqual(ready_row["input_readiness"]["available_count"], 9)
         blocked_row = next(
             row for row in data["vehicles"] if row["vehicle_id"] == blocked_vehicle.pk
@@ -287,11 +325,9 @@ class FuelAnalyticsApiTests(TestCase):
 
         self.create_telemetry(event_id="fuel-readiness-newer")
         stale = self.client.get("/api/v1/analytics/fuel/dashboard/?range=24h").json()
-        stale_row = next(
-            row for row in stale["vehicles"] if row["vehicle_id"] == self.vehicle.pk
-        )
+        stale_row = next(row for row in stale["vehicles"] if row["vehicle_id"] == self.vehicle.pk)
         self.assertEqual(stale_row["prediction_status"], "prediction_blocked")
-        self.assertEqual(len(stale["vehicle_comparison"]), 1)
+        self.assertEqual(len(stale["vehicle_comparison"]), 0)
 
         filtered = self.client.get(
             f"/api/v1/analytics/fuel/dashboard/?range=7d&vehicle={blocked_vehicle.pk}"
@@ -299,6 +335,69 @@ class FuelAnalyticsApiTests(TestCase):
         self.assertEqual(filtered.status_code, 200)
         self.assertEqual(filtered.json()["filters"]["range"], "7d")
         self.assertEqual(filtered.json()["trend"], [])
+
+    def test_dashboard_excludes_unverified_api_history_without_deleting_it(self):
+        event = self.create_telemetry()
+        legacy = FuelPrediction.objects.create(
+            vehicle=self.vehicle,
+            input_timestamp=event.recorded_at,
+            estimated_fuel_lph=8.5,
+            model_name=contract()["model_name"],
+            model_version=contract()["model_version"],
+            source_mode="explicit_validated_api",
+            validated_inputs=complete_inputs(),
+        )
+
+        data = self.client.get("/api/v1/analytics/fuel/dashboard/?range=30d").json()
+
+        self.assertEqual(data["trend"], [])
+        self.assertEqual(data["vehicle_comparison"], [])
+        self.assertEqual(data["summary"]["prediction_ready_count"], 0)
+        self.assertEqual(data["vehicles"][0]["prediction_status"], "prediction_blocked")
+        self.assertEqual(data["vehicles"][0]["prediction_source_label"], "Unverified API Inputs")
+        self.assertEqual(data["vehicles"][0]["latest_prediction_inputs"], [])
+        self.assertTrue(FuelPrediction.objects.filter(pk=legacy.pk).exists())
+
+    def test_dashboard_time_windows_and_vehicle_filter_use_persisted_history(self):
+        now = timezone.now()
+        for age, value in ((2, 1.0), (48, 2.0), (360, 3.0), (960, 4.0)):
+            FuelPrediction.objects.create(
+                vehicle=self.vehicle,
+                input_timestamp=now - timedelta(hours=age),
+                estimated_fuel_lph=value,
+                model_name=contract()["model_name"],
+                model_version=contract()["model_version"],
+                source_mode=VALIDATED_TELEMETRY_SOURCE_MODE,
+                validated_inputs=complete_inputs(),
+            )
+        other = Vehicle.objects.create(
+            device_id="FUEL-FILTER",
+            plate_number="FUEL-FILTER",
+            display_name="Filter Fuel Van",
+        )
+        FuelPrediction.objects.create(
+            vehicle=other,
+            input_timestamp=now - timedelta(hours=1),
+            estimated_fuel_lph=9.0,
+            model_name=contract()["model_name"],
+            model_version=contract()["model_version"],
+            source_mode=VALIDATED_TELEMETRY_SOURCE_MODE,
+            validated_inputs=complete_inputs(),
+        )
+
+        with patch("ml.dashboard.timezone.now", return_value=now):
+            day = self.client.get("/api/v1/analytics/fuel/dashboard/?range=24h").json()
+            week = self.client.get("/api/v1/analytics/fuel/dashboard/?range=7d").json()
+            month = self.client.get("/api/v1/analytics/fuel/dashboard/?range=30d").json()
+            filtered = self.client.get(
+                f"/api/v1/analytics/fuel/dashboard/?range=30d&vehicle={self.vehicle.pk}"
+            ).json()
+
+        self.assertEqual(len(day["trend"]), 2)
+        self.assertEqual(len(week["trend"]), 2)
+        self.assertEqual(len(month["trend"]), 3)
+        self.assertEqual(len(filtered["trend"]), 3)
+        self.assertNotIn(9.0, [point["estimated_fuel_lph"] for point in filtered["trend"]])
 
     def test_dashboard_empty_history_and_invalid_filters(self):
         response = self.client.get("/api/v1/analytics/fuel/dashboard/")
@@ -367,9 +466,7 @@ class FuelAnalyticsApiTests(TestCase):
                 display_name=f"Paged Vehicle {index:02d}",
             )
 
-        response = self.client.get(
-            "/api/v1/analytics/fuel/dashboard/?page=2&page_size=10"
-        )
+        response = self.client.get("/api/v1/analytics/fuel/dashboard/?page=2&page_size=10")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -390,13 +487,9 @@ class FuelAnalyticsApiTests(TestCase):
         self.assertEqual(len(searched_data["vehicles"]), 1)
         self.assertEqual(searched_data["vehicles"][0]["device_id"], "PAGE-011")
         self.assertEqual(searched_data["vehicle_options"][0]["device_id"], "FUEL-001")
-        cleared = self.client.get(
-            "/api/v1/analytics/fuel/dashboard/?search=&page_size=50"
-        )
+        cleared = self.client.get("/api/v1/analytics/fuel/dashboard/?search=&page_size=50")
         self.assertEqual(cleared.json()["vehicle_pagination"]["total_count"], 13)
         self.assertEqual(
-            self.client.get(
-                "/api/v1/analytics/fuel/dashboard/?page_size=501"
-            ).status_code,
+            self.client.get("/api/v1/analytics/fuel/dashboard/?page_size=501").status_code,
             400,
         )

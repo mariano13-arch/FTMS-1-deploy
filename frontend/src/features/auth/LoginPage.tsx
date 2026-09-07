@@ -1,17 +1,19 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Redirect, useHistory, useLocation } from "react-router-dom";
-import { LogIn, Loader2, User, Lock, Eye, EyeOff } from "lucide-react";
+import { LogIn, Loader2, User, Lock, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { safeInternalPath } from "../../services/navigation";
 import AuthLayout from "../../layouts/AuthLayout";
 
 export default function LoginPage() {
-  const { user, signIn } = useAuth();
+  const { user, signIn, completeTwoFactor, sessionMessage } = useAuth();
   const history = useHistory();
   const location = useLocation();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const mounted = useRef(false);
   const inFlight = useRef(false);
 
@@ -32,10 +34,9 @@ export default function LoginPage() {
     setError("");
     const data = new FormData(event.currentTarget);
     try {
-      await signIn(String(data.get("username")), String(data.get("password")));
-      history.replace(
-        safeInternalPath((location.state as { from?: string } | null)?.from),
-      );
+      const result = await signIn(String(data.get("username")), String(data.get("password")));
+      if (result.kind === "two_factor_required") setChallengeToken(result.challengeToken);
+      else history.replace(safeInternalPath((location.state as { from?: string } | null)?.from));
     } catch {
       if (mounted.current)
         setError("Unable to sign in with those credentials.");
@@ -45,21 +46,59 @@ export default function LoginPage() {
     }
   };
 
+  const verifySecondFactor = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!challengeToken || inFlight.current) return;
+    inFlight.current = true; setBusy(true); setError("");
+    try {
+      const data = new FormData(event.currentTarget);
+      await completeTwoFactor(
+        challengeToken, recoveryMode ? "recovery" : "totp", String(data.get("code")),
+      );
+      history.replace(safeInternalPath((location.state as { from?: string } | null)?.from));
+    } catch { if (mounted.current) setError("Unable to verify that security code."); }
+    finally { inFlight.current = false; if (mounted.current) setBusy(false); }
+  };
+
+  const backToSignIn = () => { setChallengeToken(null); setRecoveryMode(false); setError(""); };
+
   return (
     <AuthLayout>
       <h1
         className="text-center fw-semibold mb-2"
         style={{ color: "var(--color-maroon)", fontSize: "1.25rem" }}
       >
-        Sign in to FTMS
+        {challengeToken ? "Two-Factor Authentication" : "Sign in to FTMS"}
       </h1>
       <p
         className="text-center small mb-4"
         style={{ color: "var(--color-taupe)", fontSize: "0.875rem" }}
       >
-        Sign in with the credentials given to you by your administrator.
+        {challengeToken
+          ? "Enter the 6-digit code from your authenticator app."
+          : "Sign in with the credentials given to you by your administrator."}
       </p>
-
+      {!challengeToken && sessionMessage && (
+        <div className="alert alert-warning small" role="status">{sessionMessage}</div>
+      )}
+      {challengeToken ? <form onSubmit={verifySecondFactor} className="d-flex flex-column gap-3" noValidate>
+        <div>
+          <label htmlFor="two-factor-code" className="form-label fw-medium mb-1" style={{ color: "var(--color-charcoal)", fontSize: "0.875rem" }}>
+            {recoveryMode ? "Recovery code" : "Authenticator code"}
+          </label>
+          <div className="position-relative"><ShieldCheck size={17} strokeWidth={2} className="position-absolute top-50 translate-middle-y pointer-events-none" style={{ left: "14px", color: "var(--color-taupe)" }} />
+            <input id="two-factor-code" name="code" required autoFocus autoComplete="one-time-code" inputMode="numeric" className="form-control login-input" style={{ paddingLeft: "40px" }} placeholder={recoveryMode ? "Enter recovery code" : "123456"} />
+          </div>
+        </div>
+        {error && <div className="alert alert-danger small mt-2" role="alert">{error}</div>}
+        <button type="submit" disabled={busy} className="btn login-btn-charcoal mt-2 w-100 py-2 d-flex align-items-center justify-content-center gap-2 fw-medium" style={{ fontSize: "0.875rem" }}>
+          {busy ? <Loader2 size={16} className="login-spinner-icon" /> : <ShieldCheck size={16} />}{busy ? "Verifying…" : "Verify"}
+        </button>
+        <button type="button" className="btn btn-link btn-sm" onClick={() => { setRecoveryMode(!recoveryMode); setError(""); }}>
+          {recoveryMode ? "Use authenticator code" : "Use recovery code"}
+        </button>
+        <button type="button" className="btn btn-link btn-sm" onClick={backToSignIn}>Back to sign in</button>
+      </form> :
       <form onSubmit={submit} className="d-flex flex-column gap-3" noValidate>
         <div>
           <label
@@ -82,7 +121,7 @@ export default function LoginPage() {
               name="username"
               required
               autoComplete="username"
-              placeholder="you@hotelname.com"
+              placeholder="username"
               className="form-control login-input"
               style={{ paddingLeft: "40px", paddingRight: "14px" }}
             />
@@ -145,6 +184,7 @@ export default function LoginPage() {
           {busy ? "Signing in\u2026" : "Sign in"}
         </button>
       </form>
+      }
     </AuthLayout>
   );
 }

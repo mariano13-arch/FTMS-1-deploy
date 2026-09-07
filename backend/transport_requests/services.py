@@ -6,6 +6,8 @@ from rest_framework import serializers
 
 from accounts.models import StaffProfile
 from accounts.roles import SUPER_ADMIN, resolve_role
+from fleet.inspection_readiness import inspection_readiness
+from fleet.maintenance import maintenance_readiness
 from fleet.models import Vehicle
 
 from .models import TransportRequest, TransportRequestEvent
@@ -89,6 +91,9 @@ def allocation_conflicts(request, vehicle):
             status__in=ALLOCATING_STATUSES,
             scheduled_pickup_at__lt=requested_end,
         )
+        .exclude(
+            dispatch_assignment__execution_status="COMPLETED"
+        )
         .exclude(pk=request.pk)
         .order_by("scheduled_pickup_at", "pk")
     )
@@ -98,7 +103,7 @@ def allocation_conflicts(request, vehicle):
     return [item for item in candidates if planning_end(item) > requested_start]
 
 
-def validate_vehicle(request, vehicle):
+def validate_vehicle(request, vehicle, *, require_new_assignment_readiness=True):
     if not vehicle.is_active:
         raise serializers.ValidationError({"vehicle": "Vehicle must be active."})
     if (
@@ -115,6 +120,13 @@ def validate_vehicle(request, vehicle):
     conflicts = allocation_conflicts(request, vehicle)
     if conflicts:
         raise AllocationConflict(vehicle, conflicts)
+    if require_new_assignment_readiness:
+        readiness = inspection_readiness(vehicle)
+        if not readiness.eligible:
+            raise serializers.ValidationError({"vehicle": readiness.reason})
+        maintenance = maintenance_readiness(vehicle)
+        if not maintenance.eligible:
+            raise serializers.ValidationError({"vehicle": maintenance.reason})
 
 
 def lock_relevant_vehicles(*vehicle_ids):
@@ -261,7 +273,7 @@ def prepare_dispatch(request, user, note=""):
     if driver_conflicts(current, assignment.driver, exclude_assignment_id=assignment.pk):
         raise serializers.ValidationError({"driver": "Driver has an overlapping assignment."})
     vehicle = lock_relevant_vehicles(current.assigned_vehicle_id)[current.assigned_vehicle_id]
-    validate_vehicle(current, vehicle)
+    validate_vehicle(current, vehicle, require_new_assignment_readiness=False)
     current.assigned_vehicle = vehicle
     return apply_transition(
         current,

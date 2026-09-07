@@ -45,6 +45,10 @@ class DriverExecutionTransitionSerializer(StrictFieldsMixin, serializers.Seriali
     action = serializers.ChoiceField(choices=DispatchExecutionEvent.Action.choices)
 
 
+class DriverAssignmentAcceptanceSerializer(StrictFieldsMixin, serializers.Serializer):
+    confirmed_at = serializers.DateTimeField()
+
+
 class DriverRouteGeometrySerializer(serializers.Serializer):
     type = serializers.ChoiceField(choices=["LineString"])
     coordinates = serializers.ListField(
@@ -71,6 +75,8 @@ class DriverVehiclePositionSerializer(serializers.Serializer):
 
 
 class DriverTripSerializer(serializers.ModelSerializer):
+    is_accepted = serializers.SerializerMethodField()
+    assignment_confirmed_at = serializers.DateTimeField(source="confirmed_at", read_only=True)
     id = serializers.UUIDField(source="transport_request_id", read_only=True)
     request_number = serializers.CharField(
         source="transport_request.request_number", read_only=True
@@ -144,6 +150,9 @@ class DriverTripSerializer(serializers.ModelSerializer):
             "priority_label",
             "status",
             "status_label",
+            "is_accepted",
+            "accepted_at",
+            "assignment_confirmed_at",
             "scheduled_pickup_at",
             "estimated_duration_minutes",
             "passenger_count",
@@ -162,6 +171,9 @@ class DriverTripSerializer(serializers.ModelSerializer):
     def get_pickup(self, assignment):
         item = assignment.transport_request
         return {"name": item.pickup_name, "address": item.pickup_address}
+
+    def get_is_accepted(self, assignment):
+        return assignment.accepted_at is not None
 
     def get_destination(self, assignment):
         item = assignment.transport_request

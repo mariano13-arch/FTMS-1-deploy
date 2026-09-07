@@ -283,6 +283,10 @@ class DispatchAssignmentSerializer(serializers.ModelSerializer):
     vehicle = AssignedVehicleSerializer(read_only=True)
     driver = DispatchDriverSerializer(read_only=True)
     confirmed_by = serializers.SerializerMethodField()
+    is_accepted = serializers.SerializerMethodField()
+    execution_status_label = serializers.CharField(
+        source="get_execution_status_display", read_only=True
+    )
 
     class Meta:
         model = DispatchAssignment
@@ -297,6 +301,11 @@ class DispatchAssignmentSerializer(serializers.ModelSerializer):
             "override_reason",
             "confirmed_by",
             "confirmed_at",
+            "is_accepted",
+            "accepted_at",
+            "execution_status",
+            "execution_status_label",
+            "completed_at",
             "created_at",
             "updated_at",
         ]
@@ -304,6 +313,9 @@ class DispatchAssignmentSerializer(serializers.ModelSerializer):
     def get_confirmed_by(self, assignment):
         user = assignment.confirmed_by
         return user.get_full_name().strip() or user.username
+
+    def get_is_accepted(self, assignment):
+        return assignment.accepted_at is not None
 
 
 class DispatchConfirmationSerializer(StrictFieldsMixin, serializers.Serializer):

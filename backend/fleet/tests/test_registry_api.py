@@ -1,11 +1,12 @@
 # ruff: noqa: E501
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
 from fleet.models import Vehicle
-from telemetry.models import TelemetryEvent
+from telemetry.models import TelemetryDevice, TelemetryDeviceBinding, TelemetryEvent
 
 
 class VehicleRegistryTests(TestCase):
@@ -50,9 +51,37 @@ class VehicleRegistryTests(TestCase):
 
     def test_dispatcher_reads_but_cannot_write(self):
         self.authenticate(self.user(StaffProfile.Role.DISPATCHER))
-        self.assertEqual(self.client.get("/api/v1/vehicles/").status_code, 200)
+        response = self.client.get("/api/v1/vehicles/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["results"][0]["current_telemetry_device"],
+            {"device_id": "LILYGO-001", "registration_status": "REGISTERED"},
+        )
         self.assertEqual(self.client.post("/api/v1/vehicles/", self.payload(), format="json").status_code, 403)
         self.assertEqual(self.client.patch("/api/v1/vehicles/LILYGO-001/", {"display_name": "No"}, format="json").status_code, 403)
+
+    def test_vehicle_response_uses_current_binding_after_device_replacement(self):
+        old_binding = TelemetryDeviceBinding.objects.get(
+            vehicle=self.vehicle,
+            unpaired_at__isnull=True,
+        )
+        old_binding.unpaired_at = timezone.now()
+        old_binding.save(update_fields=["unpaired_at"])
+        replacement = TelemetryDevice.objects.create(device_id="REPLACEMENT-001")
+        TelemetryDeviceBinding.objects.create(
+            device=replacement,
+            vehicle=self.vehicle,
+            paired_at=timezone.now(),
+        )
+        self.authenticate(self.user(StaffProfile.Role.FLEET_MANAGER))
+
+        response = self.client.get("/api/v1/vehicles/LILYGO-001/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["current_telemetry_device"],
+            {"device_id": "REPLACEMENT-001", "registration_status": "REGISTERED"},
+        )
 
     def test_manager_edits_but_cannot_create_or_change_status(self):
         self.authenticate(self.user(StaffProfile.Role.FLEET_MANAGER))

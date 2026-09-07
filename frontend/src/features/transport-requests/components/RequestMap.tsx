@@ -80,7 +80,13 @@ export type FleetPopupInfo = {
   telemetryState: "live" | "stale" | "offline" | "no_telemetry";
   latitude: number;
   longitude: number;
-  speedKph: number;
+  speedKph: number | null;
+  positionSource?: "GNSS" | "CELLULAR_LBS";
+  positionAccuracyM?: number | null;
+  rpm?: number | null;
+  coolantC?: number | null;
+  engineLoadPct?: number | null;
+  obdSource?: "SIMULATED_TEST" | "PHYSICAL_OBD" | null;
   recordedAt: string;
   ageSeconds: number;
   driverName?: string;
@@ -117,8 +123,10 @@ type MapProps = {
     longitude: number;
     label: string;
     telemetryState: "live" | "stale" | "offline" | "no_telemetry";
+    positionSource?: "GNSS" | "CELLULAR_LBS";
     selected?: boolean;
   }>;
+  focusedVehicleId?: string;
   fleetTrail?: Array<{
     event_id: string;
     latitude: number;
@@ -133,6 +141,7 @@ type MapProps = {
     vehicle_name: string;
   }>;
   onVehicleSelect?: (deviceId: string) => void;
+  onVehicleStatus?: (deviceId: string) => void;
   fleetPopup?: FleetPopupInfo | null;
   onVehiclePopupClose?: () => void;
   onSafetyEventSelect?: (eventId: string) => void;
@@ -241,10 +250,13 @@ function geofenceActivityMarker(
 function fleetVehicleMarker(
   label: string,
   telemetryState: "live" | "stale" | "offline" | "no_telemetry",
+  positionSource: "GNSS" | "CELLULAR_LBS" = "GNSS",
 ) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = `request-map-marker request-map-marker--vehicle request-map-marker--${telemetryState} request-map-fleet-marker`;
+  if (positionSource === "CELLULAR_LBS")
+    element.classList.add("request-map-marker--approximate");
   element.title = `${label} — ${telemetryState === "no_telemetry" ? "No telemetry" : `${telemetryState[0].toUpperCase()}${telemetryState.slice(1)} telemetry`}`;
   element.setAttribute("aria-label", `Open ${label} vehicle details`);
   return element;
@@ -293,6 +305,7 @@ function fleetPopupElement(
     zoom: () => void;
     replay: () => void;
     replayAvailable: boolean;
+    status: () => void;
   },
 ) {
   const card = document.createElement("article");
@@ -322,12 +335,21 @@ function fleetPopupElement(
   const age = document.createElement("strong");
   age.textContent = popupAge(info.ageSeconds);
   const speed = document.createElement("strong");
-  speed.textContent = `Speed: ${info.speedKph} km/h`;
+  speed.textContent = info.speedKph === null ? "Speed unavailable" : `Speed: ${info.speedKph} km/h`;
   const updated = document.createElement("span");
   updated.textContent = `${info.telemetrySource === "demo" ? "Demo snapshot" : "Last update"}: ${new Date(info.recordedAt).toLocaleTimeString()}`;
   const location = document.createElement("span");
   location.textContent = `${info.latitude.toFixed(5)}, ${info.longitude.toFixed(5)}`;
   summary.append(age, speed, updated, location);
+  if (info.positionSource === "CELLULAR_LBS") {
+    const approximate = document.createElement("strong");
+    approximate.textContent = "Approximate cellular location";
+    const accuracy = document.createElement("span");
+    accuracy.textContent = info.positionAccuracyM == null
+      ? "Accuracy unavailable"
+      : `Accuracy ~${Math.round(info.positionAccuracyM)} m`;
+    summary.append(approximate, accuracy);
+  }
   const context = document.createElement("div");
   context.className = "fleet-map-popup-context";
   const contextLine = (label: string, value: string) => {
@@ -347,6 +369,19 @@ function fleetPopupElement(
     info.assignmentStatus ?? "No active dispatch",
   );
   context.append(source, driver, dispatch);
+  const obd = document.createElement("div");
+  obd.className = "fleet-map-popup-obd";
+  if (info.obdSource === "SIMULATED_TEST") {
+    const warning = document.createElement("strong");
+    warning.textContent = "SIMULATED TEST OBD DATA";
+    obd.append(warning);
+  }
+  obd.append(
+    contextLine("Engine RPM", info.rpm == null ? "—" : String(info.rpm)),
+    contextLine("Coolant temperature", info.coolantC == null ? "—" : `${info.coolantC} °C`),
+    contextLine("Engine load", info.engineLoadPct == null ? "—" : `${info.engineLoadPct}%`),
+  );
+  context.append(obd);
   const footer = document.createElement("footer");
   const zoom = document.createElement("button");
   zoom.type = "button";
@@ -360,7 +395,12 @@ function fleetPopupElement(
     ? "Fit recent telemetry trail"
     : "Replay unavailable";
   replay.addEventListener("click", actions.replay);
-  footer.append(zoom, replay);
+  const status = document.createElement("button");
+  status.type = "button";
+  status.className = "btn-filter";
+  status.textContent = "View Vehicle Status";
+  status.addEventListener("click", actions.status);
+  footer.append(zoom, replay, status);
   card.append(header, accent, summary, context, footer);
   return card;
 }
@@ -372,10 +412,12 @@ export default function RequestMap({
   operationalLocation,
   numberedStops,
   fleetLocations,
+  focusedVehicleId,
   fleetTrail,
   fleetPopup,
   safetyEvents,
   onVehicleSelect,
+  onVehicleStatus,
   onVehiclePopupClose,
   onSafetyEventSelect,
   geofenceActivityEvent,
@@ -995,6 +1037,7 @@ export default function RequestMap({
       const element = fleetVehicleMarker(
         location.label,
         location.telemetryState,
+        location.positionSource,
       );
       if (location.selected)
         element.classList.add("request-map-marker--selected");
@@ -1049,6 +1092,7 @@ export default function RequestMap({
                 });
               },
               replayAvailable: replayCoordinates.length >= 2,
+              status: () => onVehicleStatus?.(location.deviceId),
             }),
           )
           .addTo(map);
@@ -1159,7 +1203,28 @@ export default function RequestMap({
             pitch: 0,
           });
       }
-      focusGeofenceActivity();
+      const focusedVehicle = (fleetLocations ?? []).find(
+        (location) => location.deviceId === focusedVehicleId,
+      );
+      if (focusedVehicle) {
+        const focusedCoordinate = validCoordinate(
+          focusedVehicle.latitude,
+          focusedVehicle.longitude,
+        );
+        if (focusedCoordinate)
+          map.jumpTo({
+            center: focusedCoordinate,
+            zoom: 16,
+            bearing: 0,
+            pitch: 0,
+            padding: {
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: Math.min(window.innerWidth * 0.5, 760),
+            },
+          });
+      }
       focusGeofenceActivity();
       return;
     }
@@ -1231,6 +1296,7 @@ export default function RequestMap({
     focusGeofenceActivity();
   }, [
     fleetLocations,
+    focusedVehicleId,
     fleetPopup,
     fleetTrail,
     geofenceActivityEvent,
@@ -1242,6 +1308,7 @@ export default function RequestMap({
     onSafetyEventSelect,
     onVehiclePopupClose,
     onVehicleSelect,
+    onVehicleStatus,
     operationalLocation,
     request,
     route?.geometry?.coordinates,
@@ -1651,10 +1718,12 @@ export default function RequestMap({
             <i className="fleet-legend-route" />
             Active dispatch route
           </span>
-          <span>
-            <i className="fleet-legend-trail" />
-            Recent breadcrumb trail
-          </span>
+          {(fleetTrail?.length ?? 0) >= 2 && (
+            <span>
+              <i className="fleet-legend-trail" />
+              Observed telemetry trail
+            </span>
+          )}
           {(safetyEvents?.length ?? 0) > 0 && (
             <span>
               <i className="fleet-legend-safety" />

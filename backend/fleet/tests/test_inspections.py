@@ -3,6 +3,8 @@ from datetime import date, timedelta
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
@@ -97,6 +99,21 @@ class VehicleInspectionTests(TestCase):
         self.assertEqual(dispatcher.get(url).status_code, 200)
         self.assertEqual(dispatcher.post(url, self.payload(), format="json").status_code, 403)
 
+    def test_authenticated_staff_can_load_authoritative_inspection_definition(self):
+        url = "/api/v1/vehicles/inspection-definition/"
+        self.assertEqual(APIClient().get(url).status_code, 401)
+        response = self.client_for(self.user(StaffProfile.Role.FLEET_MANAGER)).get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["field"] for item in response.json()["checklist"]],
+            list(VehicleInspection.CHECKLIST_FIELDS),
+        )
+        self.assertTrue(all(item["required"] for item in response.json()["checklist"]))
+        self.assertEqual(
+            {choice["value"] for choice in response.json()["results"]},
+            set(VehicleInspection.Result.values),
+        )
+
     def test_manager_and_superadmin_create_with_server_owned_inspector(self):
         url = "/api/v1/vehicles/TEST-001/inspections/"
         for user in (
@@ -113,6 +130,39 @@ class VehicleInspectionTests(TestCase):
             url, self.payload(inspected_by=999), format="json"
         )
         self.assertEqual(rejected.status_code, 400)
+
+    def test_missing_inspection_date_uses_server_date_and_returns_timestamp(self):
+        client = self.client_for(self.user(StaffProfile.Role.FLEET_MANAGER))
+        payload = self.payload()
+        payload.pop("inspection_date")
+        response = client.post(
+            "/api/v1/vehicles/TEST-001/inspections/", payload, format="json"
+        )
+        self.assertEqual(response.status_code, 201)
+        inspection = VehicleInspection.objects.get(pk=response.json()["id"])
+        self.assertEqual(inspection.inspection_date, timezone.localdate())
+        self.assertIsNotNone(inspection.created_at)
+        self.assertEqual(parse_datetime(response.json()["created_at"]), inspection.created_at)
+
+    def test_repeated_idempotent_submission_returns_original_inspection(self):
+        client = self.client_for(self.user(StaffProfile.Role.FLEET_MANAGER))
+        url = "/api/v1/vehicles/TEST-001/inspections/"
+        first = client.post(
+            url,
+            self.payload(),
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="mobile-submit-1",
+        )
+        repeated = client.post(
+            url,
+            self.payload(),
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="mobile-submit-1",
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["id"], first.json()["id"])
+        self.assertEqual(VehicleInspection.objects.filter(vehicle=self.vehicle).count(), 1)
 
     def test_validation_unknown_fields_and_invalid_vehicle(self):
         client = self.client_for(self.user(StaffProfile.Role.FLEET_MANAGER))

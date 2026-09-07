@@ -1,8 +1,11 @@
 from datetime import date
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
 from django.core.cache import cache
 from django.test import TestCase
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APIClient
 
 from accounts.models import StaffProfile
@@ -102,6 +105,66 @@ class DriverAuthenticationTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json(), {"detail": "Invalid credentials."})
+
+    def test_staff_or_superuser_linked_to_a_driver_cannot_use_driver_auth(self):
+        for username, is_superuser in (("staff-driver", False), ("super-driver", True)):
+            with self.subTest(username=username):
+                user = get_user_model().objects.create_user(
+                    username=username,
+                    password=self.password,
+                    is_staff=True,
+                    is_superuser=is_superuser,
+                )
+                if not is_superuser:
+                    StaffProfile.objects.create(
+                        user=user, role=StaffProfile.Role.FLEET_MANAGER
+                    )
+                Driver.objects.create(
+                    driver_code=f"DRV-{username.upper()}",
+                    first_name="Blocked",
+                    last_name="Identity",
+                    linked_user=user,
+                )
+                self.assertEqual(self.login(username=username).status_code, 401)
+                self.client.force_login(user)
+                self.assertEqual(
+                    self.client.get("/api/v1/driver-auth/me/").status_code,
+                    403,
+                )
+                self.client.logout()
+
+    def test_staff_or_superuser_linked_to_driver_cannot_setup_driver_password(self):
+        for username, is_superuser in (("staff-setup", False), ("super-setup", True)):
+            with self.subTest(username=username):
+                user = get_user_model().objects.create_user(
+                    username=username,
+                    is_staff=True,
+                    is_superuser=is_superuser,
+                )
+                user.set_unusable_password()
+                user.save(update_fields=["password"])
+                if not is_superuser:
+                    StaffProfile.objects.create(
+                        user=user, role=StaffProfile.Role.FLEET_MANAGER
+                    )
+                Driver.objects.create(
+                    driver_code=f"DRV-{username.upper()}",
+                    first_name="Blocked",
+                    last_name="Setup",
+                    linked_user=user,
+                )
+                response = self.client.post(
+                    "/api/v1/driver-auth/setup-password/",
+                    {
+                        "uid": urlsafe_base64_encode(force_bytes(user.pk)),
+                        "token": default_token_generator.make_token(user),
+                        "new_password": self.password,
+                        "confirm_password": self.password,
+                    },
+                    format="json",
+                    HTTP_X_CSRFTOKEN=self.token(),
+                )
+                self.assertEqual(response.status_code, 400)
 
     def test_me_returns_linked_driver_identity(self):
         self.assertEqual(self.login().status_code, 200)

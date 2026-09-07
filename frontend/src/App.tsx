@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { Redirect, Route, Switch } from "react-router-dom";
+import { Redirect, Route, Switch, useParams } from "react-router-dom";
 import AppShell from "./layouts/AppShell";
 import LoginPage from "./features/auth/LoginPage";
 import PlannedModule from "./features/auth/PlannedModule";
@@ -28,6 +28,9 @@ const DriversPage = React.lazy(() => import("./features/drivers/DriversPage"));
 const LiveFleetOperationsPage = React.lazy(
   () => import("./features/live-fleet/LiveFleetOperationsPage"),
 );
+const VehicleStatusPage = React.lazy(
+  () => import("./features/live-fleet/VehicleStatusPage"),
+);
 const SetupPasswordPage = React.lazy(
   () => import("./features/driver-account/SetupPasswordPage"),
 );
@@ -50,6 +53,16 @@ const RolesPermissionsPage = React.lazy(
 );
 const UsersPage = React.lazy(() => import("./features/users/UsersPage"));
 const AuditLogsPage = React.lazy(() => import("./features/users/AuditLogsPage"));
+
+function LiveFleetVehicleStatusRoute() {
+  const { deviceId = "" } = useParams<{ deviceId: string }>();
+  return (
+    <>
+      <LiveFleetOperationsPage key={`live-map-${deviceId}`} focusedVehicleId={deviceId} />
+      <VehicleStatusPage key={`vehicle-status-${deviceId}`} />
+    </>
+  );
+}
 
 export default function App() {
   return (
@@ -99,6 +112,9 @@ export default function App() {
                 </Route>
                 <Route path="/dispatch-board" exact>
                   <DispatchBoardPage />
+                </Route>
+                <Route path="/live-map/vehicles/:deviceId/status" exact>
+                  <LiveFleetVehicleStatusRoute />
                 </Route>
                 <Route path="/live-map" exact>
                   <LiveFleetOperationsPage />

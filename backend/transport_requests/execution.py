@@ -47,9 +47,18 @@ TRANSITIONS = {
 
 ACTION_TARGETS = {transition.action: transition.next_status for transition in TRANSITIONS.values()}
 
+ACTIVE_EXECUTION_STATUSES = (
+    DispatchAssignment.ExecutionStatus.EN_ROUTE_TO_PICKUP,
+    DispatchAssignment.ExecutionStatus.AT_PICKUP,
+    DispatchAssignment.ExecutionStatus.IN_TRANSIT,
+    DispatchAssignment.ExecutionStatus.AT_DESTINATION,
+)
+
 
 def allowed_driver_actions(assignment):
-    if assignment.transport_request.status == TransportRequest.Status.CANCELLED:
+    if assignment.transport_request.status != TransportRequest.Status.READY_FOR_DISPATCH:
+        return []
+    if assignment.accepted_at is None:
         return []
     transition = TRANSITIONS.get(assignment.execution_status)
     return [transition.action] if transition else []
@@ -64,6 +73,10 @@ def transition_driver_execution(*, assignment_id, driver, user, action):
     )
     if assignment.transport_request.status == TransportRequest.Status.CANCELLED:
         raise IllegalExecutionTransition("Cancelled trips cannot be advanced by a driver.")
+    if assignment.transport_request.status != TransportRequest.Status.READY_FOR_DISPATCH:
+        raise IllegalExecutionTransition("Only released trips can be advanced.")
+    if assignment.accepted_at is None:
+        raise IllegalExecutionTransition("Accept this trip before advancing it.")
 
     target_status = ACTION_TARGETS[action]
     if assignment.execution_status == target_status:

@@ -36,6 +36,20 @@ class LoginSerializer(StrictFieldsSerializer):
         return super().to_internal_value(data)
 
 
+class TwoFactorCodeSerializer(StrictFieldsSerializer):
+    code = serializers.CharField(trim_whitespace=True, max_length=128)
+
+
+class TwoFactorVerifySerializer(TwoFactorCodeSerializer):
+    challenge_token = serializers.CharField(trim_whitespace=False, max_length=256)
+    method = serializers.ChoiceField(choices=("totp", "recovery"))
+
+
+class TwoFactorDisableSerializer(TwoFactorCodeSerializer):
+    current_password = serializers.CharField(trim_whitespace=False, write_only=True)
+    method = serializers.ChoiceField(choices=("totp", "recovery"))
+
+
 class DriverPasswordSetupSerializer(StrictFieldsSerializer):
     uid = serializers.CharField(trim_whitespace=False)
     token = serializers.CharField(trim_whitespace=False)

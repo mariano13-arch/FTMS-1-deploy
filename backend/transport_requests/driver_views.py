@@ -9,9 +9,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import DriverAccess
+from telemetry.presentation import valid_position
 
 from . import routing
+from .acceptance import InvalidAssignmentAcceptance, accept_driver_assignment
 from .driver_serializers import (
+    DriverAssignmentAcceptanceSerializer,
     DriverExecutionSerializer,
     DriverExecutionTransitionSerializer,
     DriverRouteSerializer,
@@ -21,10 +24,7 @@ from .driver_serializers import (
 from .execution import IllegalExecutionTransition, transition_driver_execution
 from .models import DispatchAssignment, TransportRequest
 
-DRIVER_TRIP_STATUSES = (
-    TransportRequest.Status.APPROVED,
-    TransportRequest.Status.READY_FOR_DISPATCH,
-)
+DRIVER_TRIP_STATUSES = (TransportRequest.Status.READY_FOR_DISPATCH,)
 
 
 def driver_trip_queryset(driver):
@@ -64,6 +64,30 @@ class DriverTripDetailView(APIView):
         return Response({"trip": DriverTripSerializer(assignment).data})
 
 
+class DriverTripAcceptView(APIView):
+    permission_classes = [DriverAccess]
+    http_method_names = ["post", "options"]
+
+    def post(self, request, trip_id):
+        assignment = get_object_or_404(
+            driver_assignment_queryset(request.driver), transport_request_id=trip_id
+        )
+        serializer = DriverAssignmentAcceptanceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            updated, _ = accept_driver_assignment(
+                assignment_id=assignment.pk,
+                driver=request.driver,
+                user=request.user,
+                expected_confirmed_at=serializer.validated_data["confirmed_at"],
+            )
+        except DispatchAssignment.DoesNotExist as error:
+            raise Http404 from error
+        except InvalidAssignmentAcceptance as error:
+            return Response({"detail": str(error)}, status=status.HTTP_409_CONFLICT)
+        return Response({"trip": DriverTripSerializer(updated).data})
+
+
 class DriverTripRouteView(APIView):
     permission_classes = [DriverAccess]
     http_method_names = ["get", "options"]
@@ -101,14 +125,14 @@ class DriverTripVehiclePositionView(APIView):
             driver_trip_queryset(request.driver), transport_request_id=trip_id
         )
         event = assignment.vehicle.telemetry_events.first()
-        if event is None:
+        coordinates = valid_position(event)
+        if event is None or coordinates is None:
             return Response({"vehicle_position": None})
         cutoff = timezone.now() - timedelta(
             seconds=settings.DISPATCH_TELEMETRY_MAX_AGE_SECONDS
         )
         position = {
-            "latitude": event.location.y,
-            "longitude": event.location.x,
+            **coordinates,
             "recorded_at": event.recorded_at,
             "is_stale": event.recorded_at < cutoff,
         }

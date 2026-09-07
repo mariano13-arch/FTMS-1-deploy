@@ -6,6 +6,8 @@ from rest_framework import serializers
 
 from accounts.models import StaffProfile
 from accounts.roles import SUPER_ADMIN, resolve_role
+from fleet.inspection_readiness import inspection_readiness, with_latest_inspection
+from fleet.maintenance import maintenance_readiness, with_maintenance_readiness
 from fleet.models import Driver, Vehicle
 from fleet.serializers import driver_eligibility
 
@@ -37,6 +39,8 @@ def driver_conflicts(request, driver, *, exclude_assignment_id=None):
             TransportRequest.Status.READY_FOR_DISPATCH,
         ),
         transport_request__scheduled_pickup_at__lt=end,
+    ).exclude(
+        execution_status=DispatchAssignment.ExecutionStatus.COMPLETED
     ).select_related("transport_request")
     if exclude_assignment_id:
         candidates = candidates.exclude(pk=exclude_assignment_id)
@@ -135,6 +139,9 @@ def confirm_assignment(
         existing.override_reason = normalized_reason
         existing.updated_by = user
         existing.confirmed_at = timezone.now()
+        if previous_driver.pk != driver.pk or previous_vehicle.pk != vehicle.pk:
+            existing.accepted_at = None
+            existing.accepted_by = None
         existing.save()
         assignment = existing
     else:
@@ -150,6 +157,11 @@ def confirm_assignment(
     request.save(update_fields=["assigned_vehicle", "updated_at"])
     DispatchAssignmentEvent.objects.create(
         assignment=assignment,
+        event_type=(
+            DispatchAssignmentEvent.EventType.ASSIGNMENT_CHANGED
+            if existing
+            else DispatchAssignmentEvent.EventType.ASSIGNMENT_CONFIRMED
+        ),
         previous_driver=previous_driver,
         previous_vehicle=previous_vehicle,
         new_driver=driver,
@@ -215,8 +227,18 @@ def recommendations(request_ids=None):
         requests = [item for item in requests if str(item.pk) in {str(pk) for pk in request_ids}]
     all_drivers = list(Driver.objects.order_by("pk"))
     drivers = [driver for driver in all_drivers if driver_eligibility(driver)[0] == "ELIGIBLE"]
-    all_vehicles = list(Vehicle.objects.order_by("device_id"))
-    vehicles = [vehicle for vehicle in all_vehicles if vehicle.is_active]
+    all_vehicles = list(
+        with_maintenance_readiness(
+            with_latest_inspection(Vehicle.objects.order_by("device_id"))
+        )
+    )
+    vehicles = [
+        vehicle
+        for vehicle in all_vehicles
+        if vehicle.is_active
+        and inspection_readiness(vehicle).eligible
+        and maintenance_readiness(vehicle).eligible
+    ]
     feasible = {}
     for item in requests:
         feasible[item.pk] = {
@@ -301,8 +323,14 @@ def recommendations(request_ids=None):
         for vehicle in all_vehicles:
             reason = ""
             details = []
+            readiness = inspection_readiness(vehicle)
+            maintenance = maintenance_readiness(vehicle)
             if not vehicle.is_active:
                 reason, details = "INACTIVE", ["Vehicle is inactive."]
+            elif not readiness.eligible:
+                reason, details = readiness.result or "INSPECTION_REQUIRED", [readiness.reason]
+            elif not maintenance.eligible:
+                reason, details = "ACTIVE_MAINTENANCE", [maintenance.reason]
             elif (
                 vehicle.passenger_capacity is not None
                 and vehicle.passenger_capacity < item.passenger_count

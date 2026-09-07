@@ -41,23 +41,32 @@ vi.mock("../../services/drivers", async (importOriginal) => ({
 vi.mock("../transport-requests/components/RequestMap", () => ({
   default: ({
     fleetLocations,
-    fleetTrail,
+    fleetTrail = [],
     fleetPopup,
     safetyEvents,
     geofenceActivityEvent,
     onVehicleSelect,
+    onVehicleStatus,
     onVehiclePopupClose,
     onSafetyEventSelect,
     onGeofenceCreateAt,
     routeState,
+    focusedVehicleId,
   }: {
     fleetLocations: Array<{ deviceId: string; label: string }>;
-    fleetTrail: Array<unknown>;
+    fleetTrail?: Array<unknown>;
     fleetPopup: null | {
+      deviceId: string;
       label: string;
       plateNumber: string;
       telemetryState: string;
-      speedKph: number;
+      speedKph: number | null;
+      positionSource: "GNSS" | "CELLULAR_LBS";
+      positionAccuracyM: number | null;
+      rpm?: number | null;
+      coolantC?: number | null;
+      engineLoadPct?: number | null;
+      obdSource?: "SIMULATED_TEST" | "PHYSICAL_OBD" | null;
       driverName?: string;
       assignmentStatus?: string;
       telemetrySource: string;
@@ -68,6 +77,7 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
       eventType: string;
     };
     onVehicleSelect: (id: string) => void;
+    onVehicleStatus: (id: string) => void;
     onVehiclePopupClose: () => void;
     onSafetyEventSelect: (id: string) => void;
     onGeofenceCreateAt: (point: {
@@ -75,11 +85,13 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
       longitude: number;
     }) => void;
     routeState: string;
+    focusedVehicleId?: string;
   }) => (
     <div
       data-testid="fleet-map"
       data-route-state={routeState}
       data-trail-points={fleetTrail.length}
+      data-focused-vehicle={focusedVehicleId ?? ""}
     >
       <button
         onClick={() =>
@@ -116,6 +128,12 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
           <span>{fleetPopup.label}</span>
           <span>{fleetPopup.telemetryState}</span>
           <span>Speed: {fleetPopup.speedKph} km/h</span>
+          {fleetPopup.positionSource === "CELLULAR_LBS" && (
+            <>
+              <span>Approximate cellular location</span>
+              <span>Accuracy ~{Math.round(fleetPopup.positionAccuracyM!)} m</span>
+            </>
+          )}
           <span>
             {fleetPopup.telemetrySource === "demo"
               ? "Demo telemetry"
@@ -123,11 +141,18 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
           </span>
           <span>{fleetPopup.driverName ?? "No active driver"}</span>
           <span>{fleetPopup.assignmentStatus ?? "No active dispatch"}</span>
+          {fleetPopup.obdSource === "SIMULATED_TEST" && (
+            <strong>SIMULATED TEST OBD DATA</strong>
+          )}
+          <span>Engine RPM: {fleetPopup.rpm ?? "—"}</span>
+          <span>Coolant temperature: {fleetPopup.coolantC ?? "—"}</span>
+          <span>Engine load: {fleetPopup.engineLoadPct ?? "—"}</span>
           <button onClick={onVehiclePopupClose}>
             Close vehicle map details
           </button>
           <button>Zoom to</button>
           <button>Replay</button>
+          <button onClick={() => onVehicleStatus(fleetPopup.deviceId)}>View Vehicle Status</button>
         </article>
       )}
     </div>
@@ -174,6 +199,8 @@ const snapshot = {
         latitude: 14.56,
         longitude: 121.02,
         speed_kph: 32,
+        position_source: "GNSS",
+        position_accuracy_m: null,
         recorded_at: "2026-08-21T07:59:50Z",
         age_seconds: 10,
         driving_event: "NORMAL",
@@ -194,6 +221,8 @@ const snapshot = {
         latitude: 14.55,
         longitude: 121.03,
         speed_kph: 0,
+        position_source: "GNSS",
+        position_accuracy_m: null,
         recorded_at: "2026-08-21T07:00:00Z",
         age_seconds: 3600,
         driving_event: "NORMAL",
@@ -323,36 +352,19 @@ test("renders authoritative telemetry states and confirmed assignment context", 
     "Loading fleet operations",
   );
   expect(await screen.findByText("ABC-123 · Van")).toBeInTheDocument();
-  const overview = screen.getByRole("region", {
-    name: "Fleet operations overview",
-  });
   expect(
-    within(overview).getByRole("heading", {
-      name: "Live Fleet Operations Map",
-    }),
-  ).toBeInTheDocument();
+    screen.queryByRole("region", { name: "Fleet operations overview" }),
+  ).not.toBeInTheDocument();
   expect(
-    within(overview).getByText("Total vehicles").previousSibling,
-  ).toHaveTextContent("3");
-  expect(
-    within(overview).getByText("Live telemetry").previousSibling,
-  ).toHaveTextContent("1");
-  expect(
-    within(overview).getByText("Stale / offline").previousSibling,
-  ).toHaveTextContent("1");
-  expect(
-    within(overview).getByText("Active assignments").previousSibling,
-  ).toHaveTextContent("1");
-  expect(
-    within(overview).getByText("No telemetry").previousSibling,
-  ).toHaveTextContent("1");
+    screen.queryByRole("button", { name: /overview/i }),
+  ).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
   const popup = screen.getByRole("article", {
     name: "Hotel Shuttle map details",
   });
   expect(within(popup).getByText("ABC-123")).toBeInTheDocument();
   expect(within(popup).getByText("Ana Santos")).toBeInTheDocument();
-  expect(within(popup).getByText("In Transit")).toBeInTheDocument();
+  expect(within(popup).getByText("TR-HMS-001 · In Transit")).toBeInTheDocument();
   expect(within(popup).queryByText(/Street view/i)).not.toBeInTheDocument();
   expect(screen.getByTitle("No telemetry")).toBeInTheDocument();
   expect(
@@ -364,15 +376,92 @@ test("renders authoritative telemetry states and confirmed assignment context", 
       expect.any(AbortSignal),
     ),
   );
-  await waitFor(() =>
-    expect(screen.getByTestId("fleet-map")).toHaveAttribute(
-      "data-trail-points",
-      "2",
-    ),
+  expect(mocks.getTrail).not.toHaveBeenCalled();
+  expect(screen.getByTestId("fleet-map")).toHaveAttribute(
+    "data-trail-points",
+    "0",
   );
   expect(
     screen.queryByText(/Demo telemetry mode active/),
   ).not.toBeInTheDocument();
+});
+
+test("opens vehicle status instantly from the current snapshot without navigating", async () => {
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
+  fireEvent.click(screen.getByRole("button", { name: "View Vehicle Status" }));
+  expect(screen.getByRole("dialog", { name: "Hotel Shuttle" })).toBeInTheDocument();
+  expect(screen.queryByRole("complementary", { name: "Fleet navigator" })).not.toBeInTheDocument();
+  expect(screen.getByTestId("fleet-map")).toHaveAttribute("data-focused-vehicle", "LIVE-001");
+  expect(mocks.getFleet).toHaveBeenCalledTimes(1);
+});
+
+test("removes completed trip context while preserving its real vehicle marker", async () => {
+  mocks.getFleet.mockResolvedValueOnce({
+    ...snapshot,
+    vehicles: snapshot.vehicles.map((vehicle) =>
+      vehicle.device_id === "LIVE-001"
+        ? { ...vehicle, active_assignment: null }
+        : vehicle,
+    ),
+  });
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+
+  fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
+  const popup = screen.getByRole("article", {
+    name: "Hotel Shuttle map details",
+  });
+  expect(within(popup).getByText("No active driver")).toBeInTheDocument();
+  expect(within(popup).getByText("No active dispatch")).toBeInTheDocument();
+  expect(within(popup).getByText("Real telemetry")).toBeInTheDocument();
+  expect(mocks.getRoute).not.toHaveBeenCalled();
+});
+
+test("labels a cellular LBS marker as approximate and shows its accuracy", async () => {
+  mocks.getFleet.mockResolvedValueOnce({
+    ...snapshot,
+    vehicles: snapshot.vehicles.map((vehicle) =>
+      vehicle.device_id === "LIVE-001" && vehicle.telemetry
+        ? {
+            ...vehicle,
+            telemetry: {
+              ...vehicle.telemetry,
+              speed_kph: null,
+              position_source: "CELLULAR_LBS" as const,
+              position_accuracy_m: 550,
+              rpm: 2345,
+              coolant_c: 91,
+              engine_load_pct: 47,
+              obd_source: "SIMULATED_TEST" as const,
+            },
+          }
+        : vehicle,
+    ),
+  });
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
+  const popup = screen.getByRole("article", { name: "Hotel Shuttle map details" });
+  expect(within(popup).getByText("Approximate cellular location")).toBeInTheDocument();
+  expect(within(popup).getByText("Accuracy ~550 m")).toBeInTheDocument();
+  expect(within(popup).getByText("SIMULATED TEST OBD DATA")).toBeInTheDocument();
+  expect(within(popup).getByText("Engine RPM: 2345")).toBeInTheDocument();
+  expect(within(popup).getByText("Coolant temperature: 91")).toBeInTheDocument();
+  expect(within(popup).getByText("Engine load: 47")).toBeInTheDocument();
+  expect(within(popup).getByText("Real telemetry")).toBeInTheDocument();
+});
+
+test("renders missing OBD readings as unavailable rather than zero", async () => {
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
+  const popup = screen.getByRole("article", { name: "Hotel Shuttle map details" });
+  expect(within(popup).getByText("Engine RPM: —")).toBeInTheDocument();
+  expect(within(popup).getByText("Coolant temperature: —")).toBeInTheDocument();
+  expect(within(popup).getByText("Engine load: —")).toBeInTheDocument();
+  expect(within(popup).queryByText("SIMULATED TEST OBD DATA")).not.toBeInTheDocument();
 });
 
 test("filters the compact vehicle list and supports marker selection", async () => {
@@ -421,12 +510,47 @@ test("keeps the map mounted while the fleet overlay is collapsed", async () => {
   ).toBeInTheDocument();
 });
 
+test("focuses the status vehicle and keeps the fleet navigator collapsed", async () => {
+  render(<LiveFleetOperationsPage focusedVehicleId="LIVE-001" />);
+  await screen.findByRole("button", { name: /Show fleet/ });
+  expect(screen.queryByRole("complementary", { name: "Fleet navigator" })).not.toBeInTheDocument();
+  expect(screen.getByTestId("fleet-map")).toHaveAttribute(
+    "data-focused-vehicle",
+    "LIVE-001",
+  );
+});
+
 test("switches between real vehicle and driver lists and controls marker visibility", async () => {
   render(<LiveFleetOperationsPage />);
   await screen.findByText("ABC-123 · Van");
-  fireEvent.click(
-    screen.getByRole("checkbox", { name: "Show Hotel Shuttle on map" }),
+  const navigatorHeader = screen.getByTestId("fleet-navigator-header");
+  const scrollRegion = screen.getByTestId("fleet-navigator-scroll-region");
+  const navigatorFooter = screen.getByTestId("fleet-navigator-footer");
+  expect(within(scrollRegion).getByText("Hotel Shuttle")).toBeInTheDocument();
+  expect(
+    within(navigatorHeader).getByRole("textbox", {
+      name: "Search fleet vehicles",
+    }),
+  ).toBeInTheDocument();
+  expect(
+    within(navigatorHeader).getByRole("button", { name: "All" }),
+  ).toBeInTheDocument();
+  expect(scrollRegion).not.toContainElement(navigatorHeader);
+  expect(scrollRegion).not.toContainElement(navigatorFooter);
+  expect(navigatorFooter).toHaveTextContent("hidden from map");
+  const visibilityCheckbox = screen.getByRole("checkbox", {
+    name: "Show Hotel Shuttle on map",
+  });
+  scrollRegion.scrollTop = 24;
+  fireEvent.click(visibilityCheckbox);
+  expect(screen.getByTestId("fleet-navigator-header")).toBe(navigatorHeader);
+  expect(screen.getByTestId("fleet-navigator-scroll-region")).toBe(
+    scrollRegion,
   );
+  expect(screen.getByTestId("fleet-navigator-footer")).toBe(navigatorFooter);
+  expect(scrollRegion.scrollTop).toBe(24);
+  expect(visibilityCheckbox).not.toBeChecked();
+  expect(navigatorFooter).toHaveTextContent("1 hidden from map");
   expect(
     screen.queryByRole("button", { name: "Marker Hotel Shuttle" }),
   ).not.toBeInTheDocument();

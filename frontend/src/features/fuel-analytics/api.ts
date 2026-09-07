@@ -43,7 +43,7 @@ export type FuelPredictionInputDetail = {
   feature: string;
   value: number;
   unit: string | null;
-  source: "Actual persisted telemetry" | "Demo/Test Input" | "Validated API Input";
+  source: "Actual persisted telemetry" | "Demo/Test Input" | "Validated vehicle telemetry";
 };
 export type FuelVehicleReadiness = {
   available_count: number;

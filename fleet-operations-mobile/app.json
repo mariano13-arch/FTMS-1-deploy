@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "FTMS Fleet Operations",
+    "slug": "ftms-fleet-operations",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "ftms-fleet-operations",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ftms.fleetoperations"
+    },
+    "android": {
+      "package": "com.ftms.fleetoperations",
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow FTMS Fleet Operations to scan telemetry device QR codes.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

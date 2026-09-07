@@ -6,7 +6,7 @@ import { AppButton } from '@/components/AppButton';
 import { AppScreen } from '@/components/AppScreen';
 import { EmptyState } from '@/components/EmptyState';
 import { ApiError } from '@/services/api';
-import { getDriverTrip } from '@/services/driverTrips';
+import { acceptDriverTrip, getDriverTrip } from '@/services/driverTrips';
 import { colors, spacing } from '@/theme';
 import type { DriverTrip } from '@/types';
 
@@ -51,7 +51,9 @@ export default function TripDetailsScreen() {
   const tripId = Array.isArray(params.tripId) ? params.tripId[0] : params.tripId;
   const [trip, setTrip] = useState<DriverTrip | null>(null);
   const [isLoading, setIsLoading] = useState(Boolean(tripId));
+  const [isAccepting, setIsAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
 
   const loadTrip = useCallback(
     async (signal?: AbortSignal) => {
@@ -62,6 +64,7 @@ export default function TripDetailsScreen() {
       }
       setIsLoading(true);
       setError(null);
+      setAcceptanceError(null);
       try {
         setTrip(await getDriverTrip(tripId, signal));
       } catch (loadError) {
@@ -84,6 +87,21 @@ export default function TripDetailsScreen() {
     void loadTrip(controller.signal);
     return () => controller.abort();
   }, [loadTrip]);
+
+  const acceptTrip = useCallback(async () => {
+    if (!tripId || !trip || isAccepting) {
+      return;
+    }
+    setIsAccepting(true);
+    setAcceptanceError(null);
+    try {
+      setTrip(await acceptDriverTrip(tripId, trip.assignmentConfirmedAt));
+    } catch (acceptError) {
+      setAcceptanceError(detailErrorMessage(acceptError));
+    } finally {
+      setIsAccepting(false);
+    }
+  }, [isAccepting, trip, tripId]);
 
   return (
     <AppScreen
@@ -159,6 +177,10 @@ export default function TripDetailsScreen() {
               ) : null}
               <Fact label="Priority" value={trip.priorityLabel} />
               <Fact label="Execution" value={trip.execution.statusLabel} />
+              <Fact
+                label="Driver acknowledgement"
+                value={trip.isAccepted ? 'Accepted' : 'Awaiting acceptance'}
+              />
             </View>
           </View>
 
@@ -190,7 +212,27 @@ export default function TripDetailsScreen() {
             </View>
           ) : null}
 
-          {trip.execution.status !== 'COMPLETED' &&
+          {acceptanceError ? (
+            <View style={styles.inlineError}>
+              <Text style={styles.inlineErrorText}>{acceptanceError}</Text>
+              <AppButton
+                label="Reload Assignment"
+                variant="secondary"
+                onPress={() => void loadTrip()}
+              />
+            </View>
+          ) : null}
+
+          {!trip.isAccepted && trip.status === 'READY_FOR_DISPATCH' ? (
+            <AppButton
+              label={isAccepting ? 'Accepting…' : 'Accept Trip'}
+              disabled={isAccepting}
+              onPress={() => void acceptTrip()}
+            />
+          ) : null}
+
+          {trip.isAccepted &&
+          trip.execution.status !== 'COMPLETED' &&
           trip.execution.allowedActions.length > 0 ? (
             <AppButton
               label="Open Active Trip"
@@ -302,4 +344,12 @@ const styles = StyleSheet.create({
   factValue: { color: colors.ink, fontSize: 14, fontWeight: '700', lineHeight: 19 },
   instructionBlock: { gap: spacing.xs },
   bodyText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
+  inlineError: {
+    padding: spacing.md,
+    backgroundColor: '#fff0f0',
+    borderColor: colors.burgundy,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  inlineErrorText: { color: colors.burgundy, fontSize: 13, lineHeight: 18 },
 });

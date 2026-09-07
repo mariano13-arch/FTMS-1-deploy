@@ -1,6 +1,8 @@
 import { api } from "../../services/api";
 
 export type TelemetryState = "live" | "stale" | "offline" | "no_telemetry";
+export type PositionSource = "GNSS" | "CELLULAR_LBS";
+export type ObdSource = "SIMULATED_TEST" | "PHYSICAL_OBD";
 
 export type FleetAssignment = {
   assignment_id: number;
@@ -41,10 +43,16 @@ export type FleetLiveVehicle = {
   telemetry: null | {
     latitude: number;
     longitude: number;
-    speed_kph: number;
+    speed_kph: number | null;
+    position_source?: PositionSource;
+    position_accuracy_m?: number | null;
     recorded_at: string;
     age_seconds: number;
-    driving_event: string;
+    driving_event: string | null;
+    rpm?: number | null;
+    coolant_c?: number | null;
+    engine_load_pct?: number | null;
+    obd_source?: ObdSource | null;
     telemetry_source: "real" | "demo";
     is_demo_telemetry: boolean;
   };

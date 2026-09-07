@@ -3,7 +3,7 @@ import SettingsLayout, { SettingsStatus } from "./SettingsLayout";
 import "./SettingsPage.css";
 
 const categories = [
-  { to: "/settings/security", name: "Security", description: "Sign-in protection, passwords, and staff sessions.", status: "Planned" as const },
+  { to: "/settings/security", name: "Security", description: "Sign-in protection, passwords, and staff sessions.", status: "Available" as const },
   { to: "/settings/operational-rules", name: "Operational Rules", description: "Dispatch, routing, and geofence rule controls.", status: "Planned" as const },
   { to: "/settings/integrations", name: "Integrations", description: "Subsystem connection and status visibility.", status: "Status unavailable" as const },
   { to: "/settings/ai-models", name: "AI / ML Models", description: "Technical model identity, inputs, semantics, and readiness.", status: "Available" as const },

@@ -3,8 +3,9 @@ from io import StringIO
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
-from fleet.models import Driver, Vehicle
+from fleet.models import Driver, Vehicle, VehicleInspection
 from fleet.serializers import driver_eligibility
 from telemetry.models import TelemetryEvent
 from transport_requests.models import DispatchAssignment, TransportRequest
@@ -22,6 +23,20 @@ class SeedDispatchDemoTests(TestCase):
             vehicle_type=Vehicle.VehicleType.VAN,
             passenger_capacity=12,
         )
+        VehicleInspection.objects.create(
+            vehicle=self.vehicle,
+            inspection_date=timezone.localdate(),
+            inspection_type=VehicleInspection.InspectionType.PRE_TRIP,
+            result=VehicleInspection.Result.PASSED,
+            exterior_condition=VehicleInspection.Condition.OK,
+            interior_condition=VehicleInspection.Condition.OK,
+            tires_condition=VehicleInspection.Condition.OK,
+            lights_condition=VehicleInspection.Condition.OK,
+            brakes_condition=VehicleInspection.Condition.OK,
+            fluids_condition=VehicleInspection.Condition.OK,
+            safety_equipment_condition=VehicleInspection.Condition.OK,
+            inspected_by=self.operator,
+        )
 
     def seed(self):
         output = StringIO()
@@ -34,9 +49,7 @@ class SeedDispatchDemoTests(TestCase):
         )
         output = self.seed()
         drivers = Driver.objects.filter(driver_code__startswith="DEV-DRV-")
-        requests = TransportRequest.objects.filter(
-            external_reference__startswith="DEV-DISPATCH-"
-        )
+        requests = TransportRequest.objects.filter(external_reference__startswith="DEV-DISPATCH-")
 
         self.assertEqual(drivers.count(), 4)
         self.assertEqual(
@@ -62,9 +75,7 @@ class SeedDispatchDemoTests(TestCase):
 
         self.assertEqual(Driver.objects.filter(driver_code__startswith="DEV-DRV-").count(), 4)
         self.assertEqual(
-            TransportRequest.objects.filter(
-                external_reference__startswith="DEV-DISPATCH-"
-            ).count(),
+            TransportRequest.objects.filter(external_reference__startswith="DEV-DISPATCH-").count(),
             5,
         )
         self.assertEqual(DispatchAssignment.objects.count(), 1)

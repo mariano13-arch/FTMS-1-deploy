@@ -65,7 +65,14 @@ class VehicleStatusWebSocketTests(TransactionTestCase):
 
     async def test_connected_vehicle_receives_rest_shaped_update(self):
         vehicle = await self.create_vehicle()
-        event = await self.create_event(vehicle)
+        event = await self.create_event(
+            vehicle,
+            schema_version="1.2",
+            rpm=2345,
+            coolant_c=Decimal("91.00"),
+            engine_load_pct=Decimal("47.00"),
+            obd_source=TelemetryEvent.ObdSource.SIMULATED_TEST,
+        )
         expected = await database_sync_to_async(latest_status_data)(vehicle)
         communicator = await self.communicator("/ws/v1/vehicles/LILYGO-001/status/")
         connected, _ = await communicator.connect()
@@ -81,6 +88,10 @@ class VehicleStatusWebSocketTests(TransactionTestCase):
         self.assertTrue(connected)
         self.assertEqual(received, message)
         self.assertEqual(received["data"]["latest"]["event_id"], event.event_id)
+        self.assertEqual(received["data"]["latest"]["rpm"], 2345)
+        self.assertEqual(received["data"]["latest"]["coolant_c"], 91.0)
+        self.assertEqual(received["data"]["latest"]["engine_load_pct"], 47.0)
+        self.assertEqual(received["data"]["latest"]["obd_source"], "SIMULATED_TEST")
         await communicator.disconnect()
 
     async def test_unknown_vehicle_closes_with_4404(self):

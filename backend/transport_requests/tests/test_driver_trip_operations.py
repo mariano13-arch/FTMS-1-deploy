@@ -65,7 +65,7 @@ class DriverTripOperationalApiTests(TestCase):
             estimated_duration_minutes=60,
             required_vehicle_type=Vehicle.VehicleType.VAN,
             passenger_count=4,
-            status=TransportRequest.Status.APPROVED,
+            status=TransportRequest.Status.READY_FOR_DISPATCH,
             assigned_vehicle=self.vehicle,
             created_by=self.operator,
         )
@@ -192,3 +192,14 @@ class DriverTripOperationalApiTests(TestCase):
             response = self.client.get(self.position_url)
 
         self.assertFalse(response.json()["vehicle_position"]["is_stale"])
+
+    def test_invalid_vehicle_coordinates_are_not_exposed(self):
+        event = self.create_event(recorded_at=timezone.now())
+        event.location = Point(181, 91, srid=4326)
+        event.save(update_fields=["location"])
+        self.client.force_login(self.driver_user)
+
+        response = self.client.get(self.position_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"vehicle_position": None})

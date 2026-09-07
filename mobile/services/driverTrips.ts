@@ -32,6 +32,9 @@ type DriverTripPayload = {
   priority_label: string;
   status: string;
   status_label: string;
+  is_accepted: boolean;
+  accepted_at: string | null;
+  assignment_confirmed_at: string;
   scheduled_pickup_at: string;
   estimated_duration_minutes: number;
   passenger_count: number;
@@ -100,6 +103,9 @@ function mapDriverTrip(payload: DriverTripPayload): DriverTrip {
     priorityLabel: payload.priority_label,
     status: payload.status,
     statusLabel: payload.status_label,
+    isAccepted: payload.is_accepted,
+    acceptedAt: payload.accepted_at,
+    assignmentConfirmedAt: payload.assignment_confirmed_at,
     scheduledPickupAt: payload.scheduled_pickup_at,
     estimatedDurationMinutes: payload.estimated_duration_minutes,
     passengerCount: payload.passenger_count,
@@ -136,6 +142,17 @@ export async function getDriverTrip(
   const response = await api<{ trip: DriverTripPayload }>(
     `/api/v1/driver-trips/${encodeURIComponent(tripId)}/`,
     { signal },
+  );
+  return mapDriverTrip(response.trip);
+}
+
+export async function acceptDriverTrip(
+  tripId: string,
+  confirmedAt: string,
+): Promise<DriverTrip> {
+  const response = await api<{ trip: DriverTripPayload }>(
+    `/api/v1/driver-trips/${encodeURIComponent(tripId)}/accept/`,
+    { method: 'POST', body: JSON.stringify({ confirmed_at: confirmedAt }) },
   );
   return mapDriverTrip(response.trip);
 }

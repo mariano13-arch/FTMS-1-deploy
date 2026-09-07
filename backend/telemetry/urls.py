@@ -8,11 +8,35 @@ from telemetry.views import (
     GeofenceEventListView,
     GeofenceListCreateView,
     LatestVehicleStatusView,
+    TelemetryDeviceCreateView,
+    TelemetryDeviceDetailView,
+    TelemetryDevicePairView,
+    TelemetryDeviceUnpairView,
     TelemetryEventCreateView,
 )
 
 urlpatterns = [
     path("telemetry/", TelemetryEventCreateView.as_view(), name="telemetry-create"),
+    path(
+        "telemetry-devices/",
+        TelemetryDeviceCreateView.as_view(),
+        name="telemetry-device-create",
+    ),
+    path(
+        "telemetry-devices/<str:device_id>/",
+        TelemetryDeviceDetailView.as_view(),
+        name="telemetry-device-detail",
+    ),
+    path(
+        "telemetry-devices/<str:device_id>/pair/",
+        TelemetryDevicePairView.as_view(),
+        name="telemetry-device-pair",
+    ),
+    path(
+        "telemetry-devices/<str:device_id>/unpair/",
+        TelemetryDeviceUnpairView.as_view(),
+        name="telemetry-device-unpair",
+    ),
     path("fleet-live/vehicles/", FleetLiveVehicleListView.as_view(), name="fleet-live-vehicles"),
     path(
         "fleet-live/vehicles/<int:vehicle_id>/trail/",

@@ -70,6 +70,9 @@ export type DriverTrip = {
   priorityLabel: string;
   status: string;
   statusLabel: string;
+  isAccepted: boolean;
+  acceptedAt: string | null;
+  assignmentConfirmedAt: string;
   scheduledPickupAt: string;
   estimatedDurationMinutes: number;
   passengerCount: number;
