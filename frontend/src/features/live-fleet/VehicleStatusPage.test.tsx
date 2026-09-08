@@ -16,6 +16,7 @@ const vehicle: FleetLiveVehicle = {
   display_name: "Operations Shuttle",
   plate_number: "ABC-123",
   vehicle_type: "VAN",
+  photo_url: null,
   is_active: true,
   telemetry_state: "live" as const,
   telemetry: {
@@ -59,7 +60,8 @@ test("renders populated telemetry, simulated provenance, zeroes, and LBS semanti
   expect(await screen.findByRole("heading", { name: "Operations Shuttle" })).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Operations Shuttle" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Close vehicle status" })).toHaveAttribute("href", "/live-map");
-  expect(screen.getByText("ABC-123 · LILYGO-002")).toBeInTheDocument();
+  expect(screen.getByText(/ABC-123/)).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "No photo available for Operations Shuttle" })).toBeInTheDocument();
   expect(screen.getByText("Approximate cellular location")).toBeInTheDocument();
   expect(screen.getByText("~550 m")).toBeInTheDocument();
   expect(screen.getByText("SIMULATED TEST OBD DATA")).toBeInTheDocument();
@@ -72,6 +74,14 @@ test("renders populated telemetry, simulated provenance, zeroes, and LBS semanti
   expect(within(engine).getByText("0%", { selector: "dd" })).toBeInTheDocument();
   expect(within(engine).getByText("91 °C")).toBeInTheDocument();
   expect(screen.getByText("Simulated test")).toBeInTheDocument();
+});
+
+test("renders the vehicle's saved photo", async () => {
+  mocks.getFleet.mockResolvedValueOnce(response([{ ...vehicle, photo_url: "/api/v1/vehicles/LILYGO-002/photo/" }]));
+  renderPage();
+  expect(await screen.findByRole("img", { name: "Operations Shuttle vehicle" })).toHaveAttribute(
+    "src", "http://localhost:8000/api/v1/vehicles/LILYGO-002/photo/",
+  );
 });
 
 test("renders missing readings as unavailable without fabricating zeroes", async () => {

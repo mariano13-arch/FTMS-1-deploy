@@ -284,6 +284,11 @@ class FleetLiveVehicleListView(APIView):
                     "display_name": vehicle.display_name,
                     "plate_number": vehicle.plate_number,
                     "vehicle_type": vehicle.vehicle_type,
+                    "photo_url": (
+                        f"/api/v1/vehicles/{vehicle.device_id}/photo/"
+                        if vehicle.photo
+                        else None
+                    ),
                     "is_active": vehicle.is_active,
                     "telemetry_state": telemetry_state,
                     "telemetry": telemetry,

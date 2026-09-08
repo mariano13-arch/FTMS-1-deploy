@@ -84,6 +84,7 @@ class Vehicle(models.Model):
     warranty_expiry_date = models.DateField(null=True, blank=True)
     registration_expiry_date = models.DateField(null=True, blank=True)
     insurance_expiry_date = models.DateField(null=True, blank=True)
+    photo = models.FileField(upload_to="vehicle_photos/%Y/%m/", null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

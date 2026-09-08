@@ -199,11 +199,31 @@ function InspectionDetail({ vehicle, inspection, onBack }: { vehicle: Vehicle; i
   const conditions = [["Exterior", inspection.exterior_condition], ["Interior", inspection.interior_condition], ["Tires", inspection.tires_condition], ["Lights", inspection.lights_condition], ["Brakes", inspection.brakes_condition], ["Fluids", inspection.fluids_condition], ["Safety Equipment", inspection.safety_equipment_condition]];
   return <div className="inspection-detail"><button type="button" className="inspection-back" onClick={onBack}>← Inspection history</button><header><div><span className={`inspection-result inspection-result--${inspection.result.toLowerCase()}`}>{humanize(inspection.result)}</span><strong>{new Date(`${inspection.inspection_date}T00:00:00`).toLocaleDateString()}</strong><small>{humanize(inspection.inspection_type)}</small></div></header><section><h3>Vehicle</h3><dl><div><dt>Display Name</dt><dd>{vehicle.display_name}</dd></div><div><dt>Plate</dt><dd>{vehicle.plate_number}</dd></div><div className="wide"><dt>Device ID</dt><dd>{vehicle.device_id}</dd></div></dl></section><section><h3>Inspection Details</h3><dl><div><dt>Odometer</dt><dd>{inspection.odometer_km === null ? "Unavailable" : `${inspection.odometer_km.toLocaleString()} km`}</dd></div><div><dt>Fuel Level</dt><dd>{value(inspection.fuel_level_percent, "%")}</dd></div><div className="wide"><dt>Inspector</dt><dd>{inspection.inspector_name}</dd></div>{conditions.map(([label, condition]) => <div key={label}><dt>{label}</dt><dd>{humanize(condition)}</dd></div>)}{inspection.issues_found && <div className="wide"><dt>Issues Found</dt><dd>{inspection.issues_found}</dd></div>}{inspection.notes && <div className="wide"><dt>Notes</dt><dd>{inspection.notes}</dd></div>}</dl></section><section><h3>Record</h3><dl><div><dt>Created At</dt><dd>{new Date(inspection.created_at).toLocaleString()}</dd></div><div><dt>Updated At</dt><dd>{new Date(inspection.updated_at).toLocaleString()}</dd></div></dl></section></div>;
 }
-function VehicleForm({ editing = false, embedded = false, initialVehicle = null, targetDeviceId, onSaved, onCancel }: { editing?: boolean; embedded?: boolean; initialVehicle?: Vehicle | null; targetDeviceId?: string; onSaved?: (vehicle: Vehicle) => void; onCancel?: () => void }) {
+
+const vehicleErrorSections = [
+  ["Identity", ["device_id", "display_name", "plate_number", "vin", "engine_number", "chassis_number", "photo"]],
+  ["Vehicle Specifications", ["vehicle_type", "manufacturer", "model", "model_year", "color", "fuel_type", "transmission_type", "passenger_capacity", "payload_capacity_kg", "gvwr_kg"]],
+  ["Ownership & Acquisition", ["ownership_type", "supplier_name", "purchase_order_number", "acquisition_date", "purchase_price", "purchase_currency", "warranty_expiry_date"]],
+  ["Registration & Insurance", ["registration_expiry_date", "insurance_expiry_date"]],
+] as const;
+const inlineVehicleErrorFields = new Set(["device_id", "display_name", "plate_number", "photo"]);
+
+function VehicleFormErrors({ errors }: { errors: Record<string, string> }) {
+  const knownFields = new Set<string>(vehicleErrorSections.flatMap(([, fields]) => fields));
+  const sections = vehicleErrorSections.map(([title, fields]) => ({
+    title,
+    errors: fields.flatMap(field => errors[field] && !inlineVehicleErrorFields.has(field) ? [[humanize(field), errors[field]]] : []),
+  }));
+  const general = Object.entries(errors).filter(([field]) => !knownFields.has(field));
+  if (!sections.some(section => section.errors.length) && !general.length) return null;
+  return <div className="vehicle-form-error-grid" aria-label="Vehicle validation errors">{sections.map(section => section.errors.length ? <section key={section.title} className="vehicle-form-section-error" role="alert"><strong>{section.title}</strong><ul>{section.errors.map(([field, message]) => <li key={field}><span>{field}:</span> {message}</li>)}</ul></section> : null)}{general.length > 0 && <section className="vehicle-form-section-error" role="alert"><strong>Vehicle record</strong><ul>{general.map(([field, message]) => <li key={field}>{message}</li>)}</ul></section>}</div>;
+}
+export function VehicleForm({ editing = false, embedded = false, initialVehicle = null, targetDeviceId, onSaved, onCancel }: { editing?: boolean; embedded?: boolean; initialVehicle?: Vehicle | null; targetDeviceId?: string; onSaved?: (vehicle: Vehicle) => void; onCancel?: () => void }) {
   const { user } = useAuth(); const { deviceId: routeDeviceId = "" } = useParams<{ deviceId: string }>(); const history = useHistory(); const deviceId = targetDeviceId ?? routeDeviceId;
   const [vehicle, setVehicle] = useState<Vehicle | null>(initialVehicle); const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const mounted = useRef(true);
   const submitInFlight = useRef(false);
   const submitController = useRef<AbortController | null>(null);
@@ -235,12 +255,16 @@ function VehicleForm({ editing = false, embedded = false, initialVehicle = null,
     for (const key of ["device_id", "plate_number", "display_name", "vehicle_type", "manufacturer", "model", "vin", "engine_number", "chassis_number", "color", "fuel_type", "transmission_type", "ownership_type", "supplier_name", "purchase_order_number", "purchase_currency"]) if (!editing || key !== "device_id") payload[key] = String(data.get(key) ?? "");
     for (const key of ["model_year", "passenger_capacity"]) { const value = String(data.get(key) ?? ""); payload[key] = value ? Number(value) : null; }
     for (const key of ["payload_capacity_kg", "gvwr_kg", "acquisition_date", "warranty_expiry_date", "registration_expiry_date", "insurance_expiry_date", "purchase_price"]) { const value = String(data.get(key) ?? ""); payload[key] = value || null; }
+    const body = new FormData();
+    for (const [key, item] of Object.entries(payload)) body.append(key, item == null ? "" : String(item));
+    const photo = data.get("photo");
+    if (photo instanceof File && photo.size) body.append("photo", photo);
     setBusy(true);
     const controller = new AbortController(); submitController.current = controller;
     try {
       const saved = editing
-        ? await editVehicle(deviceId, payload, controller.signal)
-        : await createVehicle(payload, controller.signal);
+        ? await editVehicle(deviceId, body, controller.signal)
+        : await createVehicle(body, controller.signal);
       if (mounted.current) {
         if (onSaved) onSaved(saved);
         else history.push(`/vehicles/${encodeURIComponent(saved.device_id)}`);
@@ -254,7 +278,7 @@ function VehicleForm({ editing = false, embedded = false, initialVehicle = null,
             key, Array.isArray(value) ? String(value[0]) : String(value),
           ]),
         );
-        setFieldErrors(safe); setError("Please correct the vehicle information.");
+        setFieldErrors(safe); setError("");
       } else if (!(reason instanceof DOMException && reason.name === "AbortError")) {
         setError("Unable to save vehicle.");
       }
@@ -267,11 +291,11 @@ function VehicleForm({ editing = false, embedded = false, initialVehicle = null,
     }
   };
   return <>{!embedded && <h1>{editing ? "Edit vehicle" : "Create vehicle"}</h1>}<form key={editing ? deviceId : "create"} className="vehicle-form vehicle-asset-form" onSubmit={submit}>
-    <fieldset><legend>Identity</legend><label>Device ID<input name="device_id" required={!editing} disabled={editing} defaultValue={vehicle?.device_id} pattern="[A-Z0-9][A-Z0-9._-]{0,63}" aria-describedby="device_id-error" />{fieldErrors.device_id && <span id="device_id-error" role="alert">{fieldErrors.device_id}</span>}</label><label>Display name<input name="display_name" required defaultValue={vehicle?.display_name} aria-describedby="display_name-error" />{fieldErrors.display_name && <span id="display_name-error" role="alert">{fieldErrors.display_name}</span>}</label><label>Plate number<input name="plate_number" required defaultValue={vehicle?.plate_number} aria-describedby="plate_number-error" />{fieldErrors.plate_number && <span id="plate_number-error" role="alert">{fieldErrors.plate_number}</span>}</label><label>VIN<input name="vin" defaultValue={vehicle?.vin} /></label><label>Engine Number<input name="engine_number" defaultValue={vehicle?.engine_number} /></label><label>Chassis Number<input name="chassis_number" defaultValue={vehicle?.chassis_number} /></label></fieldset>
+    <fieldset><legend>Identity</legend><label>Device ID<input name="device_id" required={!editing} disabled={editing} defaultValue={vehicle?.device_id} pattern="[A-Z0-9][A-Z0-9._-]{0,63}" aria-describedby="device_id-error" />{fieldErrors.device_id && <span id="device_id-error" role="alert">{fieldErrors.device_id}</span>}</label><label>Display name<input name="display_name" required defaultValue={vehicle?.display_name} aria-describedby="display_name-error" />{fieldErrors.display_name && <span id="display_name-error" role="alert">{fieldErrors.display_name}</span>}</label><label>Plate number<input name="plate_number" required defaultValue={vehicle?.plate_number} aria-describedby="plate_number-error" />{fieldErrors.plate_number && <span id="plate_number-error" role="alert">{fieldErrors.plate_number}</span>}</label><label>VIN<input name="vin" defaultValue={vehicle?.vin} /></label><label>Engine Number<input name="engine_number" defaultValue={vehicle?.engine_number} /></label><label>Chassis Number<input name="chassis_number" defaultValue={vehicle?.chassis_number} /></label><label className="vehicle-photo-field">Vehicle photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-describedby="photo-help photo-error" onChange={event => { if (photoPreview) URL.revokeObjectURL(photoPreview); const file = event.currentTarget.files?.[0]; setPhotoPreview(file ? URL.createObjectURL(file) : null); }} /><small id="photo-help">Optional JPG, PNG, or WebP up to 5 MB.</small>{fieldErrors.photo && <span id="photo-error" role="alert">{fieldErrors.photo}</span>}{(photoPreview || vehicle?.photo_url) && <img src={photoPreview ?? `${apiBaseUrl}${vehicle?.photo_url}`} alt={`${vehicle?.display_name ?? "Vehicle"} preview`} />}</label></fieldset>
     <fieldset><legend>Vehicle Specifications</legend><label>Vehicle type<select name="vehicle_type" defaultValue={vehicle?.vehicle_type ?? "OTHER"}>{vehicleTypes.map(v => <option key={v} value={v}>{humanize(v)}</option>)}</select></label><label>Manufacturer<input name="manufacturer" defaultValue={vehicle?.manufacturer} /></label><label>Model<input name="model" defaultValue={vehicle?.model} /></label><label>Model year<input name="model_year" type="number" min="1980" max={new Date().getUTCFullYear() + 1} defaultValue={vehicle?.model_year ?? ""} /></label><label>Color<input name="color" defaultValue={vehicle?.color} /></label><label>Fuel Type<select name="fuel_type" defaultValue={vehicle?.fuel_type ?? ""}><option value="">Not recorded</option>{fuelTypes.map(value => <option key={value} value={value}>{humanize(value)}</option>)}</select></label><label>Transmission<select name="transmission_type" defaultValue={vehicle?.transmission_type ?? ""}><option value="">Not recorded</option>{transmissionTypes.map(value => <option key={value} value={value}>{humanize(value)}</option>)}</select></label><label>Passenger Capacity<input name="passenger_capacity" type="number" min="1" max="100" defaultValue={vehicle?.passenger_capacity ?? ""} /></label><label>Payload Capacity (kg)<input name="payload_capacity_kg" type="number" min="0" step="0.01" defaultValue={vehicle?.payload_capacity_kg ?? ""} /></label><label>GVWR (kg)<input name="gvwr_kg" type="number" min="0" step="0.01" defaultValue={vehicle?.gvwr_kg ?? ""} /></label></fieldset>
     <fieldset><legend>Ownership &amp; Acquisition</legend><label>Ownership Type<select name="ownership_type" defaultValue={vehicle?.ownership_type ?? ""}><option value="">Not recorded</option>{ownershipTypes.map(value => <option key={value} value={value}>{humanize(value)}</option>)}</select></label><label>Supplier Name<input name="supplier_name" defaultValue={vehicle?.supplier_name} /></label><label>Purchase Order Number<input name="purchase_order_number" defaultValue={vehicle?.purchase_order_number} /></label><label>Acquisition Date<input name="acquisition_date" type="date" defaultValue={vehicle?.acquisition_date ?? ""} /></label><label>Purchase Price<input name="purchase_price" type="number" min="0" step="0.01" defaultValue={vehicle?.purchase_price ?? ""} /></label><label>Currency<input name="purchase_currency" maxLength={3} defaultValue={vehicle?.purchase_currency} /></label><label>Warranty Expiry<input name="warranty_expiry_date" type="date" defaultValue={vehicle?.warranty_expiry_date ?? ""} /></label></fieldset>
     <fieldset><legend>Registration &amp; Insurance</legend><label>Registration Expiry<input name="registration_expiry_date" type="date" defaultValue={vehicle?.registration_expiry_date ?? ""} /></label><label>Insurance Expiry<input name="insurance_expiry_date" type="date" defaultValue={vehicle?.insurance_expiry_date ?? ""} /></label></fieldset>
-    {error && <p role="alert" className="message message--error">{error}</p>}<div className="vehicle-form-actions">{embedded && <button type="button" className="btn-cancel" onClick={onCancel}>Cancel</button>}<button className="btn-confirm" disabled={busy}>{busy ? "Saving…" : "Save vehicle"}</button></div>
+    <VehicleFormErrors errors={fieldErrors} />{error && <p role="alert" className="message message--error">{error}</p>}<div className="vehicle-form-actions">{embedded && <button type="button" className="btn-cancel" onClick={onCancel}>Cancel</button>}<button className="btn-confirm" disabled={busy}>{busy ? "Saving…" : "Save vehicle"}</button></div>
   </form></>;
 }
 function LiveStatus({ deviceId }: { deviceId: string }) {

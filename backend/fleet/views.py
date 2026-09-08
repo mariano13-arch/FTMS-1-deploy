@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -72,6 +72,7 @@ class VehiclePagination(PageNumberPagination):
 
 class VehicleListView(APIView):
     permission_classes = [StaffAccess]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     http_method_names = ["get", "post", "options"]
 
     def get(self, request):
@@ -116,7 +117,7 @@ class VehicleListView(APIView):
 
     def post(self, request):
         self.check_permissions_for(request, [CanCreateVehicle()])
-        serializer = VehicleSerializer(data=request.data)
+        serializer = VehicleSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -129,6 +130,7 @@ class VehicleListView(APIView):
 
 class VehicleDetailView(APIView):
     permission_classes = [StaffAccess]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     http_method_names = ["get", "patch", "options"]
 
     def get_object(self, device_id):
@@ -140,10 +142,27 @@ class VehicleDetailView(APIView):
     def patch(self, request, device_id):
         if not CanEditVehicle().has_permission(request, self):
             self.permission_denied(request)
-        serializer = VehicleSerializer(self.get_object(device_id), data=request.data, partial=True)
+        serializer = VehicleSerializer(
+            self.get_object(device_id),
+            data=request.data,
+            partial=True,
+            context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class VehiclePhotoView(APIView):
+    permission_classes = [StaffAccess]
+    http_method_names = ["get", "options"]
+
+    def get(self, request, device_id):
+        vehicle = get_object_or_404(Vehicle, device_id=device_id)
+        if not vehicle.photo:
+            raise Http404
+        content_type = mimetypes.guess_type(vehicle.photo.name)[0] or "application/octet-stream"
+        return FileResponse(vehicle.photo.open("rb"), content_type=content_type)
 
 
 class VehicleStatusActionView(APIView):

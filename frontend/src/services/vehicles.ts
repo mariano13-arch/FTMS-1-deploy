@@ -18,6 +18,7 @@ export type Vehicle = {
   purchase_currency: string; warranty_expiry_date: string | null;
   registration_expiry_date: string | null; insurance_expiry_date: string | null;
   is_active: boolean; created_at: string; updated_at: string;
+  photo_url: string | null;
   latest_inspection: VehicleInspectionSummary | null; document_count: number;
   document_health: "CURRENT" | "EXPIRING_SOON" | "EXPIRED" | "INCOMPLETE";
 };
@@ -49,10 +50,10 @@ export const getVehicles = (query: string, signal?: AbortSignal) =>
   api<VehiclePage>(`/api/v1/vehicles/${query ? `?${query}` : ""}`, { signal });
 export const getVehicle = (id: string, signal?: AbortSignal) =>
   api<Vehicle>(`/api/v1/vehicles/${encodeURIComponent(id)}/`, { signal });
-export const createVehicle = (body: unknown, signal?: AbortSignal) =>
-  api<Vehicle>("/api/v1/vehicles/", { method: "POST", body: JSON.stringify(body), signal });
-export const editVehicle = (id: string, body: unknown, signal?: AbortSignal) =>
-  api<Vehicle>(`/api/v1/vehicles/${encodeURIComponent(id)}/`, { method: "PATCH", body: JSON.stringify(body), signal });
+export const createVehicle = (body: FormData, signal?: AbortSignal) =>
+  api<Vehicle>("/api/v1/vehicles/", { method: "POST", body, signal });
+export const editVehicle = (id: string, body: FormData, signal?: AbortSignal) =>
+  api<Vehicle>(`/api/v1/vehicles/${encodeURIComponent(id)}/`, { method: "PATCH", body, signal });
 export const changeVehicleStatus = (id: string, active: boolean, signal?: AbortSignal) =>
   api<Vehicle>(`/api/v1/vehicles/${encodeURIComponent(id)}/${active ? "reactivate" : "deactivate"}/`, { method: "POST", body: "{}", signal });
 export const getVehicleInspections = (id: string, query = "", signal?: AbortSignal) =>

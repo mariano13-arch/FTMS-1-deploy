@@ -5018,6 +5018,24 @@ html:has(.vehicle-registry-page--workspace) {
   font-size: 0.66rem;
 }
 
+.vehicle-asset-form .vehicle-photo-field {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 2fr;
+  align-items: center;
+  gap: 0.35rem 0.7rem;
+}
+
+.vehicle-photo-field > input { padding: 0.25rem; }
+.vehicle-photo-field > small, .vehicle-photo-field > span { grid-column: 1; }
+.vehicle-photo-field > img { grid-column: 2; grid-row: 1 / span 3; width: 100%; height: 96px; border: 1px solid var(--border); border-radius: 0.4rem; background: #fff; object-fit: contain; }
+
+.vehicle-form-error-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; }
+.vehicle-form-section-error { padding: 0.65rem 0.75rem; border: 1px solid #dc9a9a; border-radius: 0.4rem; color: #9f252f; background: #fff4f4; }
+.vehicle-form-section-error strong { display: block; margin-bottom: 0.3rem; font-size: 0.68rem; }
+.vehicle-form-section-error ul { display: grid; gap: 0.2rem; margin: 0; padding-left: 1rem; font-size: 0.64rem; }
+.vehicle-form-section-error li span { font-weight: 700; }
+
 .vehicle-asset-form > button,
 .vehicle-asset-form > [role="alert"] {
   grid-column: 1/-1;

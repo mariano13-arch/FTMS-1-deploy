@@ -38,6 +38,7 @@ export type FleetLiveVehicle = {
   display_name: string;
   plate_number: string;
   vehicle_type: string;
+  photo_url: string | null;
   is_active: boolean;
   telemetry_state: TelemetryState;
   telemetry: null | {

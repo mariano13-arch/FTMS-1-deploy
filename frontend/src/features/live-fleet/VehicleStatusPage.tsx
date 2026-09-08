@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import LoadingIndicator from "../../components/common/LoadingIndicator";
+import { apiBaseUrl } from "../../services/api";
 import { getFleetLiveVehicles, type FleetLiveVehicle } from "./api";
 import "./VehicleStatusPage.css";
 
@@ -57,18 +58,26 @@ export function VehicleStatusDrawer({
   return (
     <div className="vehicle-status-backdrop">
     <aside className="vehicle-status-page" role="dialog" aria-modal="true" aria-labelledby="vehicle-status-title">
-      <header>
-        <div>
-          <small>Fleet Operations</small>
-          <h1 id="vehicle-status-title">{vehicle.display_name}</h1>
-          <span>{vehicle.plate_number} · {vehicle.device_id}</span>
-        </div>
+      <header className="vehicle-status-toolbar">
+        <div><small>FTMS</small><strong>Vehicle Status</strong><span>Real-time vehicle information and system status</span></div>
         {onClose ? (
           <button type="button" className="vehicle-status-close" onClick={onClose} aria-label="Close vehicle status">×</button>
         ) : (
           <Link className="vehicle-status-close" to="/live-map" aria-label="Close vehicle status">×</Link>
         )}
       </header>
+
+      <section className="vehicle-status-hero">
+        <div className="vehicle-status-photo">
+          {vehicle.photo_url ? <img src={`${apiBaseUrl}${vehicle.photo_url}`} alt={`${vehicle.display_name} vehicle`} /> : <div role="img" aria-label={`No photo available for ${vehicle.display_name}`}><span aria-hidden="true">▰</span><small>No vehicle photo</small></div>}
+        </div>
+        <div className="vehicle-status-identity">
+          <span className={`vehicle-status-pill vehicle-status-pill--${vehicle.telemetry_state}`}>● {words(vehicle.telemetry_state)}</span>
+          <h1 id="vehicle-status-title">{vehicle.display_name}</h1>
+          <strong>{vehicle.plate_number} <span>·</span> {vehicle.device_id}</strong>
+          <p><span>Latest update</span>{telemetry ? new Date(telemetry.recorded_at).toLocaleString() : unavailable}</p>
+        </div>
+      </section>
 
       <section className="vehicle-status-summary" aria-label="Telemetry status">
         <div><span>Telemetry state</span><strong>{words(vehicle.telemetry_state)}</strong></div>

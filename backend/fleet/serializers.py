@@ -38,6 +38,7 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
     document_count = serializers.SerializerMethodField()
     document_health = serializers.SerializerMethodField()
     current_telemetry_device = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Vehicle
@@ -68,6 +69,8 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
             "warranty_expiry_date",
             "registration_expiry_date",
             "insurance_expiry_date",
+            "photo",
+            "photo_url",
             "is_active",
             "created_at",
             "updated_at",
@@ -84,7 +87,29 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
             "document_count",
             "document_health",
             "current_telemetry_device",
+            "photo_url",
         ]
+        extra_kwargs = {"photo": {"write_only": True, "required": False}}
+
+    def get_photo_url(self, obj):
+        return f"/api/v1/vehicles/{obj.device_id}/photo/" if obj.photo else None
+
+    def validate_photo(self, value):
+        allowed_types = {"image/jpeg", "image/png", "image/webp"}
+        allowed_extensions = {"jpg", "jpeg", "png", "webp"}
+        extension = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if value.content_type not in allowed_types or extension not in allowed_extensions:
+            raise serializers.ValidationError("Only JPG, JPEG, PNG, and WebP files are allowed.")
+        if value.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("Photo must not exceed 5 MB.")
+        return value
+
+    def update(self, instance, validated_data):
+        old_photo = instance.photo if "photo" in validated_data else None
+        updated = super().update(instance, validated_data)
+        if old_photo and old_photo.name != updated.photo.name:
+            old_photo.delete(save=False)
+        return updated
 
     def get_current_telemetry_device(self, obj):
         bindings = getattr(obj, "current_telemetry_device_bindings", None)
@@ -196,6 +221,7 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
             "document_count",
             "document_health",
             "current_telemetry_device",
+            "photo_url",
         ):
             if field in self.initial_data:
                 errors[field] = "This field is not accepted."
@@ -217,20 +243,32 @@ class VehicleSerializer(StrictFieldsMixin, serializers.ModelSerializer):
             "purchase_order_number",
             "purchase_currency",
         )
+        request = self.context.get("request")
+        enforce_json_types = request is None or request.content_type == "application/json"
         for field in string_fields:
-            if field in self.initial_data and not isinstance(self.initial_data[field], str):
+            if (
+                enforce_json_types
+                and field in self.initial_data
+                and not isinstance(self.initial_data[field], str)
+            ):
                 errors[field] = "Must be a string."
         for field in ("model_year", "passenger_capacity"):
             value = self.initial_data.get(field)
             if (
-                field in self.initial_data
+                enforce_json_types
+                and field in self.initial_data
                 and value is not None
                 and (not isinstance(value, int) or isinstance(value, bool))
             ):
                 errors[field] = "Must be an integer or null."
         for field in ("payload_capacity_kg", "gvwr_kg"):
             value = self.initial_data.get(field)
-            if field in self.initial_data and value is not None and isinstance(value, bool):
+            if (
+                enforce_json_types
+                and field in self.initial_data
+                and value is not None
+                and isinstance(value, bool)
+            ):
                 errors[field] = "Must be a decimal number or null."
         if self.instance is None and "is_active" in self.initial_data:
             errors["is_active"] = "This field is not accepted."
