@@ -7,11 +7,12 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["maplibre-gl"],
   },
-  server: {
-    port: 5173,
-    host: "0.0.0.0",
-    hmr: { host: "localhost", port: 5173 },
-  },
+ server: {
+  port: 5173,
+  host: "0.0.0.0",
+  allowedHosts: ["ftms.oxfordsuitesmakati.io"],
+  hmr: { host: "localhost", port: 5173 },
+},
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
