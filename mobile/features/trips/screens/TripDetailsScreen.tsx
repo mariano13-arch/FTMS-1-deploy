@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import type { Href } from 'expo-router';
 
 import { AppButton } from '@/components/AppButton';
 import { AppScreen } from '@/components/AppScreen';
 import { EmptyState } from '@/components/EmptyState';
+import TripRouteMap from '@/features/trips/components/TripRouteMap';
 import { ApiError } from '@/services/api';
-import { acceptDriverTrip, getDriverTrip } from '@/services/driverTrips';
+import { acceptDriverTrip, getDriverTrip, getDriverTripRoute } from '@/services/driverTrips';
 import { colors, spacing } from '@/theme';
-import type { DriverTrip } from '@/types';
+import type { DriverTrip, DriverTripRoute } from '@/types';
 
 function formatSchedule(value: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -20,6 +22,9 @@ function formatSchedule(value: string) {
     minute: '2-digit',
   }).format(new Date(value));
 }
+
+const formatDistance = (meters: number) => meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`;
+const formatDuration = (seconds: number) => `${Math.max(1, Math.round(seconds / 60))} min`;
 
 function detailErrorMessage(error: unknown) {
   if (error instanceof ApiError && error.status === 404) {
@@ -54,6 +59,8 @@ export default function TripDetailsScreen() {
   const [isAccepting, setIsAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
+  const [route, setRoute] = useState<DriverTripRoute | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
 
   const loadTrip = useCallback(
     async (signal?: AbortSignal) => {
@@ -87,6 +94,22 @@ export default function TripDetailsScreen() {
     void loadTrip(controller.signal);
     return () => controller.abort();
   }, [loadTrip]);
+
+  useEffect(() => {
+    if (!tripId || !trip?.isAccepted) {
+      setRoute(null);
+      return;
+    }
+    const controller = new AbortController();
+    setRouteLoading(true);
+    void getDriverTripRoute(tripId, controller.signal)
+      .then(setRoute)
+      .catch((routeError) => {
+        if (!(routeError instanceof Error && routeError.name === 'AbortError')) setRoute(null);
+      })
+      .finally(() => { if (!controller.signal.aborted) setRouteLoading(false); });
+    return () => controller.abort();
+  }, [trip?.execution.status, trip?.isAccepted, tripId]);
 
   const acceptTrip = useCallback(async () => {
     if (!tripId || !trip || isAccepting) {
@@ -170,7 +193,11 @@ export default function TripDetailsScreen() {
                 label="Vehicle"
                 value={`${trip.vehicle.displayName} · ${trip.vehicle.plateNumber}`}
               />
-              <Fact label="Passengers" value={String(trip.passengerCount)} />
+              {trip.requestCategory === 'DELIVERY_LOGISTICS' ? (
+                <Fact label="Load" value={trip.loadDescription || 'Description unavailable'} />
+              ) : (
+                <Fact label="Guests / passengers" value={String(trip.passengerCount)} />
+              )}
               <Fact label="Est. duration" value={`${trip.estimatedDurationMinutes} min`} />
               {trip.luggageCount > 0 ? (
                 <Fact label="Luggage" value={String(trip.luggageCount)} />
@@ -181,8 +208,40 @@ export default function TripDetailsScreen() {
                 label="Driver acknowledgement"
                 value={trip.isAccepted ? 'Accepted' : 'Awaiting acceptance'}
               />
+              {trip.requestCategory === 'DELIVERY_LOGISTICS' ? (
+                <Fact label="Payload check" value={trip.capacityCompatibility?.message ?? 'Not evaluated'} />
+              ) : null}
             </View>
           </View>
+
+          {trip.isAccepted ? <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Active trip route</Text>
+            {trip.execution.status === 'COMPLETED' ? (
+              <Text style={styles.bodyText}>Trip completed. Active navigation has ended.</Text>
+            ) : routeLoading ? <Text style={styles.bodyText}>Loading active route…</Text> : route ? <>
+              <TripRouteMap activeRoute={route} />
+              {route.route ? <View style={styles.factsGrid}>
+                <Fact label={route.phase === 'TO_PICKUP' ? 'To Pickup' : 'To Destination'} value={formatDistance(route.route.distanceMeters)} />
+                <Fact label="TomTom travel time" value={formatDuration(route.route.durationSeconds)} />
+              </View> : null}
+            </> : <Text style={styles.bodyText}>Route temporarily unavailable</Text>}
+          </View> : null}
+
+          {trip.requestType === 'AIRPORT_PICKUP' ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Passenger / flight context</Text>
+              {trip.flightContext ? (
+                <>
+                  <Fact label="Flight" value={trip.flightContext.flightNumber} />
+                  <Fact label="Terminal" value={trip.flightContext.terminal || 'Unavailable'} />
+                  <Fact label="Flight status" value={trip.flightContext.providerFlightStatus || trip.flightContext.refreshStatus} />
+                  <Fact label="Provider note" value={trip.flightContext.refreshMessage || 'Flight data has not been refreshed.'} />
+                </>
+              ) : (
+                <Text style={styles.bodyText}>Flight data unavailable. Contact dispatch if flight details are required.</Text>
+              )}
+            </View>
+          ) : null}
 
           {trip.handlingInstructions ||
           trip.loadDescription ||
@@ -238,6 +297,19 @@ export default function TripDetailsScreen() {
               label="Open Active Trip"
               onPress={() =>
                 router.push({ pathname: '/active-trip', params: { tripId: trip.id } })
+              }
+            />
+          ) : null}
+
+          {trip.isAccepted ? (
+            <AppButton
+              label="Trip Receipts"
+              variant="secondary"
+              onPress={() =>
+                router.push({
+                  pathname: '/trip-receipts',
+                  params: { tripId: trip.id, requestNumber: trip.requestNumber },
+                } as unknown as Href)
               }
             />
           ) : null}

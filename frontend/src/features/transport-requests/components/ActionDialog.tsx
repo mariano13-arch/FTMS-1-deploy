@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type ActionDialogState = {
   action: string;
@@ -7,6 +8,7 @@ export type ActionDialogState = {
   confirmLabel: string;
   note: "required" | "optional" | "hidden";
   context?: string;
+  dismissLabel?: string;
 };
 
 export default function ActionDialog({
@@ -28,7 +30,8 @@ export default function ActionDialog({
     event.preventDefault();
     if (!busy && (!needsNote || note.trim())) void confirm(note.trim());
   };
-  return (
+  const portalRoot = document.querySelector<HTMLElement>(".app-layout") ?? document.body;
+  return createPortal(
     <div
       className="dialog-backdrop"
       role="presentation"
@@ -91,7 +94,7 @@ export default function ActionDialog({
               disabled={busy}
               onClick={close}
             >
-              Back
+              {dialog.dismissLabel ?? "Back"}
             </button>
             <button
               className="btn-confirm"
@@ -102,6 +105,7 @@ export default function ActionDialog({
           </footer>
         </form>
       </section>
-    </div>
+    </div>,
+    portalRoot,
   );
 }

@@ -1,9 +1,11 @@
 .maintenance-page {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   width: 100%;
   min-width: 0;
   margin: 0 auto;
+  padding: var(--module-page-top) var(--module-page-inline) 1rem;
   color: #302a26;
 }
 

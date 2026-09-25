@@ -92,6 +92,16 @@ def event_payload(event):
         "geofence_id": event.geofence_id,
         "geofence_name": event.geofence.name,
         "geofence_category": event.geofence.category,
+        "geofence_shape_type": event.geofence.shape_type,
+        "geofence_radius_meters": event.geofence.radius_meters,
+        "telemetry_event_id": event.telemetry_event.event_id,
+        "telemetry_position_source": event.telemetry_event.position_source,
+        "telemetry_recorded_at": event.telemetry_event.recorded_at,
+        "created_at": event.created_at,
+        "is_restricted_entry": (
+            event.event_type == GeofenceEvent.EventType.ENTER
+            and event.geofence.category == Geofence.Category.RESTRICTED
+        ),
     }
 
 

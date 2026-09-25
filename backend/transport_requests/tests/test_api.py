@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -141,12 +140,10 @@ class TransportRequestApiTests(TestCase):
         )
         self.assertEqual(invalid.status_code, 400)
         self.login(self.dispatcher)
-        assigned = self.client.post(
-            f"/api/v1/transport-requests/{request_id}/assign-vehicle/",
-            {"vehicle_device_id": self.vehicle.device_id},
-            format="json",
+        ready = self.client.post(
+            f"/api/v1/transport-requests/{request_id}/prepare-dispatch/", {}, format="json"
         )
-        self.assertEqual(assigned.status_code, 200)
+        self.assertEqual(ready.status_code, 200)
         driver = Driver.objects.create(
             driver_code="DRV-DISPATCH",
             first_name="Juan",
@@ -167,12 +164,8 @@ class TransportRequestApiTests(TestCase):
             format="json",
         )
         self.assertEqual(confirmed.status_code, 201)
-        ready = self.client.post(
-            f"/api/v1/transport-requests/{request_id}/prepare-dispatch/", {}, format="json"
-        )
-        self.assertEqual(ready.status_code, 200)
         self.assertEqual(ready.json()["status"], "READY_FOR_DISPATCH")
-        self.assertEqual(TransportRequestEvent.objects.filter(request_id=request_id).count(), 4)
+        self.assertEqual(TransportRequestEvent.objects.filter(request_id=request_id).count(), 3)
 
     def test_assignment_rejects_inactive_and_undersized_vehicles(self):
         request_id = self.create_request().pk
@@ -282,11 +275,11 @@ class TransportRequestApiTests(TestCase):
             edited_events,
         )
 
-    def test_super_admin_cannot_bypass_stale_edit_after_transition(self):
+    def test_fleet_admin_cannot_bypass_stale_edit_after_transition(self):
         request_id = self.create_request(external="STALE-SUPER").pk
         self.client.post(f"/api/v1/transport-requests/{request_id}/approve/", {}, format="json")
-        super_admin = self.make_user("super-admin", superuser=True)
-        self.login(super_admin)
+        fleet_admin = self.make_user("fleet-admin", StaffProfile.Role.FLEET_ADMIN)
+        self.login(fleet_admin)
         response = self.client.patch(
             f"/api/v1/transport-requests/{request_id}/",
             {"requester_name": "Stale overwrite"},
@@ -437,7 +430,7 @@ class TransportRequestApiTests(TestCase):
         prepare = self.client.post(
             f"/api/v1/transport-requests/{first_id}/prepare-dispatch/", {}, format="json"
         )
-        self.assertEqual(prepare.status_code, 400)
+        self.assertEqual(prepare.status_code, 200)
 
     def test_calendar_validation_conflicts_and_ready_constraint(self):
         first_id = self.create_request(external="CAL-1").pk
@@ -468,11 +461,13 @@ class TransportRequestApiTests(TestCase):
                 self.client.get(f"/api/v1/transport-requests/calendar/?{query}").status_code,
                 400,
             )
-        third_id = self.create_request(external="INVALID-READY").pk
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            TransportRequest.objects.filter(pk=third_id).update(
-                status=TransportRequest.Status.READY_FOR_DISPATCH
-            )
+        third_id = self.create_request(external="VALID-UNASSIGNED-READY").pk
+        TransportRequest.objects.filter(pk=third_id).update(
+            status=TransportRequest.Status.READY_FOR_DISPATCH
+        )
+        self.assertIsNone(
+            TransportRequest.objects.get(pk=third_id).assigned_vehicle_id
+        )
 
     def test_seed_is_idempotent_and_never_leaves_invalid_ready_request(self):
         output = StringIO()

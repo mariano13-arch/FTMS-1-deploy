@@ -86,17 +86,27 @@ export function VehicleStatusDrawer({
         <div><span>OBD source</span><strong>{telemetry?.obd_source ? words(telemetry.obd_source) : unavailable}</strong></div>
       </section>
 
+      {vehicle.emergency_sos && (
+        <section className="vehicle-status-emergency" aria-label="Emergency SOS">
+          <div><strong>EMERGENCY SOS</strong><span>Active</span></div>
+          <dl>
+            <div><dt>Activated</dt><dd>{new Date(vehicle.emergency_sos.activated_at).toLocaleString()}</dd></div>
+            <div><dt>Source</dt><dd>Physical emergency button</dd></div>
+          </dl>
+        </section>
+      )}
+
       {!telemetry ? (
         <section className="vehicle-status-empty"><h2>No telemetry received</h2><p>Current position and vehicle readings are unavailable.</p></section>
       ) : (
         <div className="vehicle-status-grid">
           <section>
-            <header><h2>Position</h2>{telemetry.position_source === "CELLULAR_LBS" && <strong>Approximate cellular location</strong>}</header>
+            <header><h2>Position</h2>{telemetry.position_source === "CELLULAR_LBS" && <strong>Approximate cellular location</strong>}{telemetry.position_source === "SIMULATED_TEST" && <strong className="vehicle-status-simulated">SIMULATED TEST POSITION DATA</strong>}</header>
             <dl>
               <div><dt>Latitude</dt><dd>{value(telemetry.latitude)}</dd></div>
               <div><dt>Longitude</dt><dd>{value(telemetry.longitude)}</dd></div>
-              <div><dt>GNSS speed</dt><dd>{value(telemetry.speed_kph, " km/h")}</dd></div>
-              <div><dt>Position source</dt><dd>{telemetry.position_source ? words(telemetry.position_source) : unavailable}</dd></div>
+              <div><dt>GNSS speed</dt><dd>{telemetry.position_source === "GNSS" ? value(telemetry.speed_kph, " km/h") : unavailable}</dd></div>
+              <div><dt>Position source</dt><dd>{telemetry.position_source === "SIMULATED_TEST" ? "SIMULATED TEST DATA" : telemetry.position_source ? words(telemetry.position_source) : unavailable}</dd></div>
               <div><dt>Position accuracy</dt><dd>{telemetry.position_accuracy_m == null ? unavailable : `~${telemetry.position_accuracy_m} m`}</dd></div>
             </dl>
           </section>

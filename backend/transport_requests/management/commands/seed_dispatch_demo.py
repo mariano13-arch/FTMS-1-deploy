@@ -50,7 +50,7 @@ class Command(BaseCommand):
         )
         if not operator:
             raise CommandError(
-                "Create an active Super Admin or Fleet Manager before seeding dispatch demo data."
+                "Create an active Fleet Admin or Fleet Manager before seeding dispatch demo data."
             )
 
         today = timezone.localdate()
@@ -133,8 +133,18 @@ class Command(BaseCommand):
             device_id="DEV-PAX-006", is_active=True
         ).first()
         if (
+            assignment_request.status == TransportRequest.Status.APPROVED
+            and not DispatchAssignment.objects.filter(
+                transport_request=assignment_request
+            ).exists()
+        ):
+            services.prepare_dispatch(
+                assignment_request, operator, "Prepared deterministic dispatch demo request."
+            )
+            assignment_request.refresh_from_db()
+        if (
             assignment_vehicle
-            and assignment_request.status == TransportRequest.Status.APPROVED
+            and assignment_request.status == TransportRequest.Status.READY_FOR_DISPATCH
             and not DispatchAssignment.objects.filter(
                 transport_request=assignment_request
             ).exists()

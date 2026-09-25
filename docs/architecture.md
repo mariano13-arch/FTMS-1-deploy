@@ -36,12 +36,13 @@ Planned, not implemented:
 - Driver, dispatch, route, and device-authentication features
 - Celery business jobs and ETL workflows
 - OR-Tools dispatch optimization and XGBoost predictive analytics
-- LILYGO edge firmware and TensorFlow Lite Micro classification
+
+Repository firmware now contains LILYGO TensorFlow Lite Micro driver-behavior inference.
+Its source presence does not verify the flash state of any physical board.
 
 Leaflet/OpenStreetMap is the bounded Sprint 2 live-location presentation layer. Google
 Maps/Routes routing and OR-Tools dispatch optimization remain explicitly planned work.
-Celery business jobs, physical LILYGO integration, and TensorFlow Lite Micro remain future
-work.
+Celery business jobs and verified physical LILYGO deployment remain future work.
 
 REST/MQTT ingestion remains anonymous and local-development-only; WebSocket reads require
 an authorized staff session. The

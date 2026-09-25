@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
@@ -14,7 +14,10 @@ from transport_requests import routing
 from transport_requests.models import DispatchAssignment, TransportRequest
 
 
-@override_settings(DISPATCH_TELEMETRY_MAX_AGE_SECONDS=300)
+@override_settings(
+    DISPATCH_TELEMETRY_MAX_AGE_SECONDS=300,
+    DISPATCH_SIMULATED_TELEMETRY_MAX_AGE_SECONDS=86400,
+)
 class DriverTripOperationalApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -76,6 +79,8 @@ class DriverTripOperationalApiTests(TestCase):
             selection_mode=DispatchAssignment.SelectionMode.MANUAL,
             override_reason="Controlled operations test",
             confirmed_by=self.operator,
+            accepted_at=timezone.now(),
+            accepted_by=self.driver_user,
         )
         self.route_url = f"/api/v1/driver-trips/{self.trip.pk}/route/"
         self.position_url = f"/api/v1/driver-trips/{self.trip.pk}/vehicle-position/"
@@ -108,16 +113,37 @@ class DriverTripOperationalApiTests(TestCase):
             driving_event=TelemetryEvent.DrivingEvent.NORMAL,
         )
 
-    @patch("transport_requests.driver_views.routing.get_route")
-    def test_own_route_uses_authorized_request_and_safe_fields(self, get_route_mock):
+    @patch("transport_requests.driver_views.routing.get_route_between")
+    def test_own_route_uses_assigned_vehicle_position_to_pickup(self, get_route_mock):
         get_route_mock.return_value = self.route_result()
+        event = self.create_event(recorded_at=timezone.now())
         self.client.force_login(self.driver_user)
 
         response = self.client.get(f"{self.route_url}?origin=0,0&destination=1,1")
 
         self.assertEqual(response.status_code, 200)
-        get_route_mock.assert_called_once_with(self.trip)
-        route = response.json()["route"]
+        self.assertEqual(
+            get_route_mock.call_args_list,
+            [
+                call(
+                    str(self.trip.pk),
+                    [121.0286, 14.5652],
+                    [121.0198, 14.5086],
+                ),
+                call(
+                    f"driver:{self.assignment.pk}:TO_PICKUP:{event.pk}",
+                    [121.021, 14.55],
+                    [121.0286, 14.5652],
+                ),
+            ],
+        )
+        payload = response.json()["route"]
+        self.assertEqual(payload["phase"], "TO_PICKUP")
+        self.assertEqual(payload["execution_status"], "ASSIGNED")
+        self.assertEqual(payload["vehicle_position"]["source"], "GNSS")
+        self.assertEqual(payload["planned_route_status"], "AVAILABLE")
+        self.assertEqual(payload["planned_route"]["distance_meters"], 12400)
+        route = payload["route"]
         self.assertEqual(route["geometry"]["type"], "LineString")
         self.assertEqual(route["distance_meters"], 12400)
         self.assertEqual(route["duration_seconds"], 1860)
@@ -133,18 +159,17 @@ class DriverTripOperationalApiTests(TestCase):
         self.assertEqual(self.client.get(self.route_url).status_code, 404)
         self.assertEqual(self.client.get(self.position_url).status_code, 404)
 
-    @patch(
-        "transport_requests.driver_views.routing.get_route",
-        side_effect=routing.RouteServiceError,
-    )
+    @patch("transport_requests.driver_views.routing.get_route_between", side_effect=routing.RouteServiceError)
     def test_route_provider_failure_is_controlled_without_fallback(self, _get_route_mock):
+        self.create_event(recorded_at=timezone.now())
         self.client.force_login(self.driver_user)
 
         response = self.client.get(self.route_url)
 
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.json(), {"detail": "Route currently unavailable."})
-        self.assertNotIn("geometry", response.json())
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["route"]
+        self.assertEqual(payload["route_status"], "TEMPORARILY_UNAVAILABLE")
+        self.assertIsNone(payload["route"])
 
     def test_missing_vehicle_telemetry_is_clean(self):
         self.client.force_login(self.driver_user)
@@ -153,6 +178,60 @@ class DriverTripOperationalApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"vehicle_position": None})
+
+        route = self.client.get(self.route_url).json()["route"]
+        self.assertEqual(route["route_status"], "POSITION_UNAVAILABLE")
+        self.assertIsNone(route["vehicle_position"])
+        self.assertIsNone(route["route"])
+
+    @patch("transport_requests.driver_views.routing.get_route_between")
+    def test_pickup_and_destination_phases_use_authoritative_endpoints(self, route_mock):
+        route_mock.return_value = self.route_result()
+        event = self.create_event(recorded_at=timezone.now())
+        self.client.force_login(self.driver_user)
+
+        self.assignment.execution_status = DispatchAssignment.ExecutionStatus.AT_PICKUP
+        self.assignment.save(update_fields=["execution_status"])
+        response = self.client.get(self.route_url)
+        self.assertEqual(response.json()["route"]["phase"], "TO_DESTINATION")
+        route_mock.assert_called_with(
+            f"driver:{self.assignment.pk}:TO_DESTINATION:pickup",
+            [121.0286, 14.5652],
+            [121.0198, 14.5086],
+        )
+
+        self.assignment.execution_status = DispatchAssignment.ExecutionStatus.IN_TRANSIT
+        self.assignment.save(update_fields=["execution_status"])
+        response = self.client.get(self.route_url)
+        self.assertEqual(response.json()["route"]["phase"], "TO_DESTINATION")
+        route_mock.assert_called_with(
+            f"driver:{self.assignment.pk}:TO_DESTINATION:{event.pk}",
+            [121.021, 14.55],
+            [121.0198, 14.5086],
+        )
+
+    def test_arrived_and_completed_have_no_active_route_and_do_not_mutate_request(self):
+        self.create_event(recorded_at=timezone.now())
+        self.client.force_login(self.driver_user)
+        for execution_status, phase in (
+            (DispatchAssignment.ExecutionStatus.AT_DESTINATION, "ARRIVED"),
+            (DispatchAssignment.ExecutionStatus.COMPLETED, "COMPLETED"),
+        ):
+            self.assignment.execution_status = execution_status
+            self.assignment.save(update_fields=["execution_status"])
+            payload = self.client.get(self.route_url).json()["route"]
+            self.assertEqual(payload["phase"], phase)
+            self.assertEqual(payload["route_status"], "NOT_ACTIVE")
+            self.assertIsNone(payload["route"])
+        self.trip.refresh_from_db()
+        self.assertEqual(self.trip.status, TransportRequest.Status.READY_FOR_DISPATCH)
+
+    def test_unaccepted_assignment_cannot_request_active_route(self):
+        self.assignment.accepted_at = None
+        self.assignment.accepted_by = None
+        self.assignment.save(update_fields=["accepted_at", "accepted_by"])
+        self.client.force_login(self.driver_user)
+        self.assertEqual(self.client.get(self.route_url).status_code, 409)
 
     def test_vehicle_position_preserves_timestamp_and_existing_freshness_rule(self):
         now = datetime(2026, 8, 18, 4, 0, tzinfo=UTC)
@@ -165,7 +244,7 @@ class DriverTripOperationalApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         position = response.json()["vehicle_position"]
         self.assertEqual(
-            set(position), {"latitude", "longitude", "recorded_at", "is_stale"}
+            set(position), {"latitude", "longitude", "recorded_at", "is_stale", "source"}
         )
         self.assertEqual(
             datetime.fromisoformat(position["recorded_at"].replace("Z", "+00:00")),
@@ -174,6 +253,14 @@ class DriverTripOperationalApiTests(TestCase):
         self.assertTrue(position["is_stale"])
         self.assertAlmostEqual(position["latitude"], 14.55)
         self.assertAlmostEqual(position["longitude"], 121.021)
+        with patch(
+            "transport_requests.routing.get_route_between", return_value=self.route_result()
+        ):
+            route = self.client.get(self.route_url).json()["route"]
+        self.assertEqual(route["route_status"], "AVAILABLE")
+        self.assertEqual(route["position_state"], "STALE")
+        self.assertEqual(route["route_basis"], "LAST_KNOWN_VEHICLE_POSITION")
+        self.assertTrue(route["vehicle_position"]["is_stale"])
         for private_field in (
             "device_id",
             "event_id",

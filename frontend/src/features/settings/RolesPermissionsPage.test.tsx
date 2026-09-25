@@ -5,7 +5,7 @@ import RolesPermissionsPage from "./RolesPermissionsPage";
 import type { PermissionMatrix } from "./permissionsApi";
 
 const mocks = vi.hoisted(() => ({
-  role: "SUPER_ADMIN",
+  role: "FLEET_ADMIN",
   getRolePermissions: vi.fn(),
   replaceRolePermissions: vi.fn(),
 }));
@@ -21,8 +21,20 @@ vi.mock("./permissionsApi", () => ({
 
 const matrix: PermissionMatrix = {
   definitions: {
-    TRANSPORT_REQUESTS: ["VIEW", "EDIT", "APPROVE", "CANCEL"],
+    DASHBOARD: ["VIEW"],
+    TRANSPORT_REQUESTS: ["VIEW", "EDIT", "APPROVE", "REJECT", "REQUEST_MORE_DETAILS", "PREPARE_DISPATCH", "CANCEL"],
+    DISPATCH_BOARD: ["VIEW", "GENERATE_RECOMMENDATION", "ASSIGN", "DISPATCH", "OVERRIDE"],
     LIVE_MAP: ["VIEW", "MANAGE_GEOFENCES"],
+    DRIVERS: ["VIEW", "CREATE", "EDIT", "MANAGE_DOCUMENTS"],
+    DRIVER_SAFETY: ["VIEW"],
+    VEHICLES: ["VIEW", "CREATE", "EDIT", "CHANGE_STATUS", "MANAGE_DOCUMENTS"],
+    INSPECTIONS: ["VIEW", "CREATE", "CORRECT"],
+    ALERTS_SOS: ["VIEW"],
+    FUEL_ANALYTICS: ["VIEW"],
+    MAINTENANCE: ["VIEW", "CREATE", "SCHEDULE", "START", "COMPLETE", "CANCEL"],
+    REPORTS: ["VIEW", "EXPORT"],
+    DEVICES: ["VIEW", "REGISTER", "PAIR", "REPLACE", "UNPAIR"],
+    SYSTEM_SETTINGS: ["VIEW", "MANAGE_NUMBER_CODING", "MANAGE_PRICES"],
     USERS_ACCESS: ["VIEW_USERS", "CREATE_USER"],
     SPECIAL_MODULE: ["DO_THING"],
   },
@@ -35,6 +47,12 @@ const matrix: PermissionMatrix = {
     },
     DISPATCHER: {
       TRANSPORT_REQUESTS: ["VIEW", "EDIT"],
+      LIVE_MAP: ["VIEW"],
+      USERS_ACCESS: [],
+      SPECIAL_MODULE: [],
+    },
+    FLEET_STAFF: {
+      TRANSPORT_REQUESTS: ["VIEW"],
       LIVE_MAP: ["VIEW"],
       USERS_ACCESS: [],
       SPECIAL_MODULE: [],
@@ -52,7 +70,7 @@ const loadPage = async () => {
 
 describe("RolesPermissionsPage", () => {
   beforeEach(() => {
-    mocks.role = "SUPER_ADMIN";
+    mocks.role = "FLEET_ADMIN";
     mocks.getRolePermissions.mockReset().mockResolvedValue(cloneMatrix());
     mocks.replaceRolePermissions.mockReset();
   });
@@ -63,9 +81,20 @@ describe("RolesPermissionsPage", () => {
     expect(screen.getByRole("checkbox", { name: "Special Module: Do Thing" })).toBeChecked();
     expect(screen.queryByRole("checkbox", { name: "Transport Requests: Create" })).not.toBeInTheDocument();
     const selector = screen.getByLabelText("Role / User Type");
-    expect(within(selector).getAllByRole("option").map((option) => option.textContent)).toEqual(["Fleet Manager", "Dispatcher"]);
-    expect(screen.getByText(/Super Admin has system-level access/)).toBeInTheDocument();
+    expect(within(selector).getAllByRole("option").map((option) => option.textContent)).toEqual(["Fleet Manager", "Dispatcher", "Fleet Staff"]);
+    expect(screen.getByText(/Fleet Admin has full administrative access within FTMS/)).toBeInTheDocument();
     expect(mocks.replaceRolePermissions).not.toHaveBeenCalled();
+  });
+
+  test("renders every P2-A row with professional action labels", async () => {
+    await loadPage();
+    for (const name of ["Dashboard", "Transport Requests", "Dispatch Board", "Live Map", "Drivers", "Driver Safety", "Vehicles", "Inspections", "Alerts & SOS", "Fleet Fuel Analytics", "Maintenance & Predictions", "Reports", "Devices", "System Rules & Settings", "Users & Access"]) {
+      expect(screen.getByText(name)).toBeInTheDocument();
+    }
+    expect(screen.getByRole("checkbox", { name: "Dispatch Board: Generate Recommendation" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Transport Requests: Request More Details" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "System Rules & Settings: Manage Fuel Prices" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Vehicles: Inspect" })).not.toBeInTheDocument();
   });
 
   test("loads each role's current grants and keeps role drafts isolated", async () => {
@@ -155,10 +184,11 @@ describe("RolesPermissionsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be loaded");
   });
 
-  test("denies non-Super Admin users without requesting policy data", () => {
+  test("denies non-Fleet Admin users without requesting policy data", () => {
     mocks.role = "FLEET_MANAGER";
     renderPage();
     expect(screen.getByRole("heading", { name: "Access denied" })).toBeInTheDocument();
+    expect(screen.getByText("Only a Fleet Admin can manage role permissions.")).toBeInTheDocument();
     expect(mocks.getRolePermissions).not.toHaveBeenCalled();
   });
 });

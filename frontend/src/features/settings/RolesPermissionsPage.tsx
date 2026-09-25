@@ -11,21 +11,32 @@ import "./RolesPermissionsPage.css";
 const roleLabels: Record<ManagedRole, string> = {
   FLEET_MANAGER: "Fleet Manager",
   DISPATCHER: "Dispatcher",
+  FLEET_STAFF: "Fleet Staff",
 };
 const moduleLabels: Record<string, string> = {
+  DASHBOARD: "Dashboard",
   TRANSPORT_REQUESTS: "Transport Requests",
   DISPATCH_BOARD: "Dispatch Board",
   LIVE_MAP: "Live Map",
   DRIVERS: "Drivers",
+  DRIVER_SAFETY: "Driver Safety",
   VEHICLES: "Vehicles",
+  INSPECTIONS: "Inspections",
+  ALERTS_SOS: "Alerts & SOS",
   FUEL_ANALYTICS: "Fleet Fuel Analytics",
   MAINTENANCE: "Maintenance & Predictions",
+  REPORTS: "Reports",
+  DEVICES: "Devices",
   SYSTEM_SETTINGS: "System Rules & Settings",
   USERS_ACCESS: "Users & Access",
 };
 
 const keyOf = (module: string, action: string) => `${module}:${action}`;
-const labelOf = (identifier: string) => identifier.toLowerCase().split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
+const actionLabels: Record<string, string> = {
+  MANAGE_PRICES: "Manage Fuel Prices",
+};
+const labelOf = (identifier: string) => actionLabels[identifier]
+  ?? identifier.toLowerCase().split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
 const grantsFor = (matrix: PermissionMatrix, role: ManagedRole) => new Set(
   Object.entries(matrix.roles[role] ?? {}).flatMap(([module, actions]) => actions.map((action) => keyOf(module, action))),
 );
@@ -112,10 +123,10 @@ function MatrixManager() {
   if (state === "error" || !matrix) return <div className="permissions-page"><div className="permissions-state permissions-state--error" role="alert">Roles and permissions could not be loaded.</div></div>;
 
   return <div className="permissions-page">
-    <header><div><h2>Roles &amp; Permissions</h2><p>Configure managed-role permission policies using supported FTMS actions.</p></div></header>
+    <header><div><h2>Roles &amp; Permissions</h2></div></header>
       <section className="permissions-workspace">
-        <div className="permissions-toolbar"><label>Role / User Type<select value={role} onChange={(event) => void switchRole(event.target.value as ManagedRole)}><option value="FLEET_MANAGER">Fleet Manager</option><option value="DISPATCHER">Dispatcher</option></select></label><p>Super Admin has system-level access and is not managed through this matrix.</p></div>
-        <div className="permissions-info">Permission policies are configured here. Module-by-module enforcement is being applied separately.</div>
+        <div className="permissions-toolbar"><label>Role / User Type<select value={role} onChange={(event) => void switchRole(event.target.value as ManagedRole)}><option value="FLEET_MANAGER">Fleet Manager</option><option value="DISPATCHER">Dispatcher</option><option value="FLEET_STAFF">Fleet Staff</option></select></label><p>Fleet Admin has full administrative access within FTMS and is not managed through this matrix.</p></div>
+        <div className="permissions-info">Permission policies configured here are enforced by protected backend modules and actions.</div>
         {notice && <div className={`permissions-notice permissions-notice--${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>{notice.text}</div>}
         <div className="permissions-matrix" role="table" aria-label={`${roleLabels[role]} permission matrix`}>
           <div className="permissions-matrix-head" role="row"><span role="columnheader">Module</span><span role="columnheader">Valid actions</span><span role="columnheader">Master</span></div>
@@ -136,6 +147,6 @@ function MatrixManager() {
 
 export default function RolesPermissionsPage() {
   const { user } = useAuth();
-  if (user?.role !== "SUPER_ADMIN") return <main className="permissions-page permissions-denied"><ShieldAlert size={28} /><h1>Access denied</h1><p>Only a Super Admin can manage role permissions.</p></main>;
+  if (user?.role !== "FLEET_ADMIN") return <main className="permissions-page permissions-denied"><ShieldAlert size={28} /><h1>Access denied</h1><p>Only a Fleet Admin can manage role permissions.</p></main>;
   return <UsersAccessLayout><MatrixManager /></UsersAccessLayout>;
 }

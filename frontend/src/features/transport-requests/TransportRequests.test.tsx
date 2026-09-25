@@ -201,6 +201,7 @@ vi.mock("maplibre-gl", () => {
     getLayer(id: string) {
       return this.layers.find((layer) => layer.id === id);
     }
+    moveLayer = vi.fn();
     setLayoutProperty(id: string, _property: string, value: string) {
       this.layout.set(id, value);
     }
@@ -280,6 +281,8 @@ const summary = {
   ready_for_dispatch: 0,
   scheduled_today: 1,
   high_priority: 1,
+  active_trips: 0,
+  completed_trips: 0,
 };
 const json = (body: unknown) =>
   Promise.resolve(
@@ -343,6 +346,8 @@ beforeEach(() => {
         ],
       });
     if (url.includes("/vehicles/"))
+      return json({ count: 0, next: null, previous: null, results: [] });
+    if (url.includes("dispatch-assignments/"))
       return json({ count: 0, next: null, previous: null, results: [] });
     if (url.endsWith(`${request.id}/`)) return json(request);
     return json({ count: 1, next: null, previous: null, results: [request] });
@@ -647,7 +652,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
   test("Edit preserves unchanged saved addresses and coordinates without searching", async () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     renderAt(`/transport-requests/${request.id}/edit`);
-    await screen.findByRole("heading", { name: "Edit Transport Request" });
+    await screen.findByRole("button", { name: "Save Changes" });
     expect(screen.getByLabelText("Pickup address")).toHaveValue(
       request.pickup_address,
     );
@@ -804,6 +809,8 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(map.layers.map((layer) => layer.id)).toEqual([
       "tomtom-traffic-layer",
       "tomtom-incidents-layer",
+      "request-planned-route-casing",
+      "request-planned-route-line",
       "request-route-casing",
       "request-route-line",
     ]);
@@ -1249,7 +1256,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
           }),
         );
     });
-    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+    const fetchMock = vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("summary/"))
         return json({
@@ -1329,14 +1336,13 @@ describe("Sprint 4 Transport Requests corrections", () => {
       await screen.findByRole("heading", { name: "Sign in to FTMS" }),
     ).toBeInTheDocument();
   });
-  test("redirects the legacy standalone Active Trips bookmark", async () => {
+  test("redirects the legacy standalone Active Trips bookmark to canonical requests", async () => {
     renderAt("/active-trips");
     expect(
       await screen.findByRole("heading", { name: "Transport Requests" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("tab", { name: "Active Trips" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /All Requests/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Active Trips/ })).toBeInTheDocument();
   });
   test("renders API data and all records on the page", async () => {
     const rows = Array.from({ length: 8 }, (_, index) => ({
@@ -1383,10 +1389,10 @@ describe("Sprint 4 Transport Requests corrections", () => {
       ),
     ).toBe(true);
     expect(screen.getByText("Normal")).toBeInTheDocument();
-    expect(screen.getByText("Awaiting Decision")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
     expect(screen.getByText("Ready for Dispatch")).toBeInTheDocument();
   });
-  test("opens and closes the request details drawer without resetting list state", async () => {
+  test("opens the All Requests workspace drawer in read-only mode", async () => {
     renderAt("/transport-requests");
     await screen.findByLabelText("Search requests");
     const search = screen.getByLabelText("Search requests");
@@ -1394,10 +1400,6 @@ describe("Sprint 4 Transport Requests corrections", () => {
     const requestButton = await screen.findByRole("button", {
       name: new RegExp(request.request_number),
     });
-    fireEvent.click(requestButton);
-    expect(
-      screen.queryByRole("dialog", { name: request.request_number }),
-    ).not.toBeInTheDocument();
     const actionsButton = within(requestButton.parentElement!).getByRole(
       "button",
       { name: "More options" },
@@ -1407,133 +1409,12 @@ describe("Sprint 4 Transport Requests corrections", () => {
     const drawer = await screen.findByRole("dialog", {
       name: request.request_number,
     });
-    const queue = screen.getByLabelText("Request queue");
-    const mapWorkspace = screen.getByLabelText("Request map");
-    const rightWorkspace = screen.getByLabelText("Request workspace");
-    const pageHeader = document.querySelector(".app-navbar");
-    const overview = within(rightWorkspace)
-      .getByRole("heading", { name: "Selected Request Overview" })
-      .closest(".selected-request-overview") as HTMLElement;
-    expect(within(overview).getByText("Passenger summary")).toBeInTheDocument();
-    expect(
-      within(overview).getByText("Passengers").nextElementSibling,
-    ).toHaveTextContent("2");
-    expect(
-      within(overview).getByText("Luggage items").nextElementSibling,
-    ).toHaveTextContent("1");
-    expect(queue).toBeInTheDocument();
-    expect(queue.parentElement).toHaveClass(
-      "request-workspace",
-      "request-workspace--fixed",
-      "request-workspace--drawer-open",
-    );
-    expect(queue.nextElementSibling).toBe(rightWorkspace);
-    expect(rightWorkspace).toContainElement(drawer);
-    expect(rightWorkspace).toContainElement(mapWorkspace);
-    expect(rightWorkspace).toContainElement(
-      screen.getByRole("heading", { name: "Selected Request Overview" }),
-    );
-    expect(mapWorkspace).not.toContainElement(drawer);
-    expect(queue).not.toContainElement(drawer);
-    expect(rightWorkspace).toContainElement(
-      screen.getByTestId("request-workspace-backdrop"),
-    );
-    expect(pageHeader).not.toContainElement(drawer);
-    expect(
-      within(requestButton).getByText(request.request_number),
-    ).toBeInTheDocument();
-    expect(
-      within(requestButton).getByText("Airport Pickup"),
-    ).toBeInTheDocument();
-    expect(within(requestButton).getByText(/Front Desk/)).toHaveTextContent(
-      "Hotel Management System",
-    );
-    expect(
-      within(requestButton).getByText(/NAIA Terminal 3 → Oxford Suites Makati/),
-    ).toBeInTheDocument();
-    expect(within(requestButton).queryByText("High")).not.toBeInTheDocument();
-    expect(
-      within(requestButton)
-        .getByText("Awaiting Decision")
-        .closest("[data-indicator]")
-        ?.querySelector(".status-badge"),
-    ).toBeTruthy();
-    expect(within(drawer).getByText("Passenger details")).toBeInTheDocument();
-    expect(
-      within(drawer).getByText("Passengers").nextElementSibling,
-    ).toHaveTextContent("2");
-    expect(
-      within(drawer).getByText("Luggage items").nextElementSibling,
-    ).toHaveTextContent("1");
-    expect(
-      within(drawer).queryByRole("link", { name: "Open full request" }),
-    ).not.toBeInTheDocument();
-    expect(within(drawer).getByText("Audit timeline")).toBeInTheDocument();
-    expect(within(drawer).getByText("Created")).toBeInTheDocument();
-    expect(
-      within(drawer).getByText("Hotel Management System"),
-    ).toBeInTheDocument();
-    expect(
-      within(drawer)
-        .getAllByText("High")
-        .some((item) => item.classList.contains("priority-chip")),
-    ).toBe(true);
-    expect(
-      within(drawer)
-        .getAllByText("Awaiting Decision")
-        .every(
-          (item) =>
-            item.closest("[data-indicator]")?.querySelector(".status-badge") !==
-            null,
-        ),
-    ).toBe(true);
-    expect(
-      within(drawer).getByRole("link", { name: "Edit request" }),
-    ).toHaveAttribute("href", `/transport-requests/${request.id}/edit`);
-    expect(
-      within(drawer).queryByRole("button", { name: "Cancel Request" }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(drawer).queryByRole("button", { name: "Approve" }),
-    ).not.toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByTestId("request-workspace-backdrop"));
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(
-      screen.getByRole("dialog", { name: request.request_number }),
-    ).toBeInTheDocument();
-    fireEvent.click(
-      within(drawer).getByRole("button", { name: "Close request details" }),
-    );
-    expect(
-      screen.queryByRole("dialog", { name: request.request_number }),
-    ).not.toBeInTheDocument();
-    expect(queue.parentElement).not.toHaveClass(
-      "request-workspace--drawer-open",
-    );
-    expect(within(mapWorkspace).getByTestId("request-map")).toBeInTheDocument();
-    expect(
-      within(rightWorkspace).getByRole("heading", {
-        name: "Selected Request Overview",
-      }),
-    ).toBeInTheDocument();
-    expect(search).toHaveValue("TR");
-    await waitFor(() => expect(actionsButton).toHaveFocus());
-    fireEvent.click(
-      within(rightWorkspace).getByRole("button", { name: "View Details" }),
-    );
-    await screen.findByRole("dialog", { name: request.request_number });
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(
-      screen.getByRole("dialog", { name: request.request_number }),
-    ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Close request details" }),
-    );
-    expect(
-      screen.queryByRole("dialog", { name: request.request_number }),
-    ).not.toBeInTheDocument();
+    expect(drawer).toBeInTheDocument();
+    for (const action of ["Edit request", "Approve Request", "Reject", "Cancel Request", "Prepare for Dispatch"]) {
+      expect(within(drawer).queryByRole("button", { name: action })).not.toBeInTheDocument();
+    }
   });
-  test("shows delivery semantics in the request details drawer without luggage cargo", async () => {
+  test("shows delivery semantics in the details drawer without luggage cargo", async () => {
     const delivery = {
       ...request,
       request_category: "DELIVERY_LOGISTICS",
@@ -1576,28 +1457,85 @@ describe("Sprint 4 Transport Requests corrections", () => {
       }),
     );
     fireEvent.click(screen.getByRole("menuitem", { name: "View details" }));
-    const drawer = await screen.findByRole("dialog", {
+    const details = await screen.findByRole("dialog", {
       name: delivery.request_number,
     });
-    expect(within(drawer).getByText("Delivery details")).toBeInTheDocument();
+    expect(within(details).getByText("Delivery details")).toBeInTheDocument();
     expect(
-      within(drawer).getByText("Load description").nextElementSibling,
+      within(details).getByText("Load description").nextElementSibling,
     ).toHaveTextContent("Prepared meal trays");
     expect(
-      within(drawer).getByText("Quantity").nextElementSibling,
+      within(details).getByText("Quantity").nextElementSibling,
     ).toHaveTextContent("12");
     expect(
-      within(drawer).getByText("Estimated weight").nextElementSibling,
+      within(details).getByText("Estimated weight").nextElementSibling,
     ).toHaveTextContent("42.50 kg");
     expect(
-      within(drawer).getByText("Handling instructions").nextElementSibling,
+      within(details).getByText("Handling instructions").nextElementSibling,
     ).toHaveTextContent("Keep upright");
     expect(
-      within(drawer).getByText("Temperature requirement").nextElementSibling,
+      within(details).getByText("Temperature requirement").nextElementSibling,
     ).toHaveTextContent("Keep warm");
-    expect(within(drawer).queryByText(/luggage/i)).not.toBeInTheDocument();
+    expect(within(details).queryByText(/luggage/i)).not.toBeInTheDocument();
   });
-  test("shows review actions without cancellation in the For Approval drawer", async () => {
+  test("renders truthful airport flight availability and canonical supply context", async () => {
+    const unavailableView = renderAt(`/transport-requests/${request.id}`);
+    expect(
+      await screen.findByText("Flight data unavailable. No flight reference was supplied."),
+    ).toBeInTheDocument();
+    unavailableView.unmount();
+
+    const airport = {
+      ...request,
+      flight_context: {
+        provider: "FLIGHTRADAR24",
+        flight_number: "PR 123",
+        flight_date: "2026-08-06",
+        origin_airport: "CEB",
+        arrival_airport: "MNL",
+        terminal: "2",
+        scheduled_arrival_at: "2026-08-06T08:00:00Z",
+        estimated_arrival_at: "2026-08-06T08:15:00Z",
+        actual_arrival_at: null,
+        provider_flight_status: "Delayed",
+        refresh_status: "AVAILABLE",
+        last_refresh_attempt_at: "2026-08-06T07:00:00Z",
+        last_successful_refresh_at: "2026-08-06T07:00:00Z",
+        refresh_message: "Provider data available.",
+      },
+    };
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/vehicles/"))
+        return json({ count: 0, next: null, previous: null, results: [] });
+      return url.endsWith(`${request.id}/`) ? json(airport) : json([]);
+    });
+    const airportView = renderAt(`/transport-requests/${request.id}`);
+    await screen.findByRole("heading", { name: "Passenger / flight context" });
+    expect(screen.getByText("PR 123")).toBeInTheDocument();
+    expect(screen.getByText("Delayed")).toBeInTheDocument();
+    airportView.unmount();
+
+    const supply = {
+      ...request,
+      request_type: "SUPPLIER_PICKUP",
+      request_category: "DELIVERY_LOGISTICS",
+      source_system: "SUPPLY_CHAIN_MANAGEMENT_SYSTEM",
+      passenger_count: 0,
+      load_description: "Guest room supplies",
+      load_quantity: 24,
+      estimated_weight_kg: "400.00",
+    };
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("summary/")) return json(summary);
+      if (url.endsWith(`${supply.id}/`)) return json(supply);
+      return json({ count: 1, next: null, previous: null, results: [supply] });
+    });
+    renderAt("/transport-requests");
+    expect(await screen.findByText("Supply / load summary")).toBeInTheDocument();
+  });
+  test("opens review actions in the workspace details drawer", async () => {
     renderAt("/transport-requests");
     await screen.findAllByText(request.request_number);
     fireEvent.click(screen.getByRole("tab", { name: /For Approval/ }));
@@ -1619,17 +1557,59 @@ describe("Sprint 4 Transport Requests corrections", () => {
       within(drawer).getByRole("button", { name: "Reject" }),
     ).toBeInTheDocument();
     expect(
-      within(drawer).getByRole("link", { name: "Edit request" }),
+      within(drawer).getByRole("button", { name: "Edit request" }),
     ).toBeInTheDocument();
     expect(
-      within(drawer).queryByRole("button", { name: "Cancel Request" }),
-    ).not.toBeInTheDocument();
+      within(drawer).getByRole("button", { name: "Cancel Request" }),
+    ).toBeInTheDocument();
   });
-  test("keeps correction, accepted, and terminal action eligibility status-specific", () => {
+  test("closes the For Approval drawer after the request is approved", async () => {
+    let approved = false;
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("summary/")) return json(summary);
+      if (url.endsWith(`${request.id}/approve/`) && init?.method === "POST") {
+        approved = true;
+        return json({ ...request, status: "APPROVED" });
+      }
+      if (url.endsWith(`${request.id}/`)) return json(request);
+      return json({
+        count: approved ? 0 : 1,
+        next: null,
+        previous: null,
+        results: approved ? [] : [request],
+      });
+    });
+    renderAt("/transport-requests");
+    await screen.findAllByText(request.request_number);
+    fireEvent.click(screen.getByRole("tab", { name: /For Approval/ }));
+    const queue = await screen.findByLabelText("Request queue");
+    fireEvent.click(within(queue).getByRole("button", { name: "More options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View details" }));
+    const drawer = await screen.findByRole("dialog", {
+      name: request.request_number,
+    });
+    fireEvent.click(
+      within(drawer).getByRole("button", { name: "Approve Request" }),
+    );
+    const approvalDialog = screen.getByRole("dialog", {
+      name: "Approve request",
+    });
+    fireEvent.click(
+      within(approvalDialog).getByRole("button", { name: "Approve Request" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: request.request_number }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+  test("keeps correction, dispatch, and terminal action eligibility status-specific", () => {
     const role = "FLEET_MANAGER";
     expect(canEditRequest("NEEDS_MORE_DETAILS", role)).toBe(true);
     expect(canResubmitRequest("NEEDS_MORE_DETAILS", role)).toBe(true);
-    expect(canCancelRequest("NEEDS_MORE_DETAILS", role)).toBe(false);
+    expect(canCancelRequest("NEEDS_MORE_DETAILS", role)).toBe(true);
+    expect(canCancelRequest("FOR_APPROVAL", role)).toBe(true);
     for (const status of ["APPROVED", "READY_FOR_DISPATCH"] as const) {
       expect(canEditRequest(status, role)).toBe(false);
       expect(canResubmitRequest(status, role)).toBe(false);
@@ -1697,30 +1677,10 @@ describe("Sprint 4 Transport Requests corrections", () => {
       screen.getByText("No recorded request activity is available yet."),
     ).toBeInTheDocument();
   });
-  test("opens temporary Add Request in the vehicle-sized right drawer", async () => {
+  test("does not expose manual Add Request intake", async () => {
     renderAt("/transport-requests");
     await screen.findAllByText(request.request_number);
-    const add = screen.getByRole("button", { name: /Add Request/i });
-    expect(add).toHaveAttribute(
-      "title",
-      "Temporary development/testing intake",
-    );
-    fireEvent.click(add);
-    const drawer = screen.getByRole("dialog", {
-      name: "Add Transport Request",
-    });
-    expect(drawer).toHaveClass("request-create-drawer");
-    expect(
-      within(drawer).getByRole("button", { name: "Create Request" }),
-    ).toBeInTheDocument();
-    fireEvent.click(
-      within(drawer).getByRole("button", {
-        name: "Close Add Transport Request",
-      }),
-    );
-    expect(
-      screen.queryByRole("dialog", { name: "Add Transport Request" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Add Request/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
     const selectedSummary = document.querySelector(
       ".selected-summary",
@@ -1766,13 +1726,13 @@ describe("Sprint 4 Transport Requests corrections", () => {
     });
     renderAt(`/transport-requests/${request.id}`);
     const details = (
-      await screen.findByRole("heading", { name: "Request details" })
-    ).closest(".detail-card") as HTMLElement;
+      await screen.findByRole("heading", { name: "Delivery details" })
+    ).closest("section") as HTMLElement;
     expect(
       within(details).getByText("Load description").nextElementSibling,
     ).toHaveTextContent("Twelve banquet meal trays");
     expect(
-      within(details).getByText("Load quantity").nextElementSibling,
+      within(details).getByText("Quantity").nextElementSibling,
     ).toHaveTextContent("12");
     expect(
       within(details).getByText("Estimated weight").nextElementSibling,
@@ -1817,16 +1777,17 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(
       screen.getByLabelText("Request queue").closest(".request-workspace"),
     ).toHaveClass("request-workspace--fixed");
-    expect(screen.getByText("Scheduled today")).toBeInTheDocument();
-    const scheduledKpi = screen
-      .getByText("Scheduled today")
-      .closest(".kpi-card") as HTMLElement;
-    expect(scheduledKpi).toHaveClass("kpi-card--schedule");
-    expect(scheduledKpi.firstElementChild?.tagName).toBe("STRONG");
-    expect(scheduledKpi).not.toHaveTextContent("Real pickup date");
+    const workflowRegion = screen.getByRole("region", {
+      name: "Overall Workflow",
+    });
     expect(screen.getByLabelText("Request workspace")).toContainElement(
-      scheduledKpi.closest(".kpi-grid"),
+      workflowRegion,
     );
+    expect(queue).not.toContainElement(workflowRegion);
+    const workflow = screen.getByLabelText("Global transport request status summary");
+    for (const label of ["Awaiting decision", "Needs details", "Dispatch queue", "Unassigned", "Vehicle assigned", "Ready for dispatch", "Scheduled today", "High priority"]) {
+      expect(within(workflow).getByText(label)).toBeInTheDocument();
+    }
     const overview = screen
       .getByRole("heading", { name: "Selected Request Overview" })
       .closest(".selected-request-overview") as HTMLElement;
@@ -1837,7 +1798,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     expect(
       screen.queryByRole("table", { name: "Operational requests" }),
     ).not.toBeInTheDocument();
-    expect(queue).toHaveTextContent("0 requests");
+    expect(queue).toHaveTextContent("0 matching requests");
     expect(
       screen.queryByRole("button", { name: "Previous page" }),
     ).not.toBeInTheDocument();
@@ -1963,7 +1924,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
           ([input]) =>
             String(input).includes("search=hotel") &&
             String(input).includes("priority=HIGH") &&
-            !String(input).includes("page="),
+            String(input).includes("page=1"),
         ),
       ).toBe(true),
     );
@@ -1985,7 +1946,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     });
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).includes("page_size=100"),
+        String(input).includes("page_size=15"),
       ),
     ).toBe(false);
     fireEvent.change(search, { target: { value: "TR" } });
@@ -1994,7 +1955,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     });
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).includes("page_size=100"),
+        String(input).includes("page_size=15"),
       ),
     ).toBe(false);
     await act(async () => {
@@ -2005,7 +1966,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       fetchMock.mock.calls.some(
         ([input]) =>
           String(input).includes("search=TR") &&
-          String(input).includes("page_size=100"),
+          String(input).includes("page_size=15"),
       ),
     ).toBe(true);
   });
@@ -2013,7 +1974,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("summary/")) return json(summary);
-      if (url.includes("page_size=100") && url.includes("search=ZZ"))
+      if (url.includes("page_size=15") && url.includes("search=ZZ"))
         return json({ count: 0, next: null, previous: null, results: [] });
       return json({ count: 1, next: null, previous: null, results: [request] });
     });
@@ -2066,7 +2027,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
         fetchMock.mock.calls.some(
           ([input]) =>
             String(input).includes("search=TR-SUGGESTED") &&
-            !String(input).includes("page="),
+            String(input).includes("page=1"),
         ),
       ).toBe(true),
     );
@@ -2137,7 +2098,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       fetchMock.mock.calls.some(
         ([input]) =>
           String(input).includes("ordering=scheduled_pickup_at") &&
-          !String(input).includes("page="),
+          String(input).includes("page=1"),
       ),
     ).toBe(true);
   });
@@ -2156,8 +2117,8 @@ describe("Sprint 4 Transport Requests corrections", () => {
   });
   test("uses the same rigid workspace and selected overview across operational tabs", async () => {
     renderAt("/transport-requests");
-    for (const name of ["Requests", "For Approval", "Dispatch Queue"]) {
-      if (name !== "Requests")
+    for (const name of ["All Requests", "For Approval", "Dispatch Queue"]) {
+      if (name !== "All Requests")
         fireEvent.click(screen.getByRole("tab", { name: new RegExp(name) }));
       const queue = await screen.findByLabelText("Request queue");
       const workspace = queue.closest(".request-workspace");
@@ -2173,31 +2134,22 @@ describe("Sprint 4 Transport Requests corrections", () => {
       expect(
         screen.queryByRole("table", { name: "Operational requests" }),
       ).not.toBeInTheDocument();
-      expect(within(queue).getByText(/^\d+ requests?$/)).toHaveClass(
+      expect(within(queue).getByText(/^\d+ matching requests?$/)).toHaveClass(
         "queue-count",
       );
       expect(
-        within(queue).queryByLabelText("Request pages"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("navigation", { name: "Request pages" }),
-      ).not.toBeInTheDocument();
+        screen.getByRole("navigation", { name: "Request pages" }),
+      ).toBeInTheDocument();
     }
   });
-  test("manager action visibility and required-note dialog", async () => {
+  test("standalone request details remain read-only", async () => {
     renderAt(`/transport-requests/${request.id}`);
     expect(
-      await screen.findByRole("button", { name: "Approve" }),
+      await screen.findByRole("heading", { name: request.request_number }),
     ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Request More Details" }),
-    );
-    const confirm = screen.getByRole("button", { name: "Request Details" });
-    expect(confirm).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Reason (required)"), {
-      target: { value: "Confirm passenger names" },
-    });
-    expect(confirm).toBeEnabled();
+    for (const action of ["Approve Request", "Request More Details", "Reject", "Cancel Request"]) {
+      expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument();
+    }
   });
   test("dispatcher can resubmit but cannot approve or reject", async () => {
     auth.user = {
@@ -2207,17 +2159,25 @@ describe("Sprint 4 Transport Requests corrections", () => {
       role: "DISPATCHER",
     };
     const needsDetails = { ...request, status: "NEEDS_MORE_DETAILS" };
-    vi.mocked(globalThis.fetch).mockImplementation((input) =>
-      String(input).includes("/vehicles/")
-        ? json({ count: 0, next: null, previous: null, results: [] })
-        : json(needsDetails),
-    );
-    renderAt(`/transport-requests/${request.id}`);
+    vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/vehicles/"))
+        return json({ count: 0, next: null, previous: null, results: [] });
+      if (url.endsWith("summary/")) return json(summary);
+      if (url.endsWith(`${request.id}/`)) return json(needsDetails);
+      return json({ count: 1, next: null, previous: null, results: [needsDetails] });
+    });
+    renderAt("/transport-requests");
+    await screen.findAllByText(request.request_number);
+    fireEvent.click(screen.getByRole("tab", { name: /For Approval/ }));
+    const queue = await screen.findByLabelText("Request queue");
+    fireEvent.click(within(queue).getByRole("button", { name: "More options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View details" }));
     expect(
       await screen.findByRole("button", { name: "Resubmit for Approval" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Approve" }),
+      screen.queryByRole("button", { name: "Approve Request" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Reject" }),
@@ -2236,10 +2196,8 @@ describe("Sprint 4 Transport Requests corrections", () => {
       ).toBe(true),
     );
     expect(
-      screen.getByText(
-        "Approved requests ready for dispatch planning. Assignment and optimization are handled in Dispatch Board.",
-      ),
-    ).toBeInTheDocument();
+      screen.queryByText(/Approved requests ready for dispatch planning/i),
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Manual vehicle")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
@@ -2254,11 +2212,10 @@ describe("Sprint 4 Transport Requests corrections", () => {
       screen.getByRole("heading", { name: "Selected Request Overview" }),
     ).toBeInTheDocument();
   });
-  test("Calendar hides KPIs and preserves its full-height scroll structure across views", async () => {
+  test("Calendar preserves its full-height scroll structure across views", async () => {
     renderAt("/transport-requests");
     await screen.findAllByText("TR-20260806-A1B2C3");
-    expect(screen.getByText("Scheduled today")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Calendar View" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Calendar" }));
     expect(
       await screen.findByRole("button", { name: "Daily" }),
     ).toBeInTheDocument();
@@ -2266,7 +2223,6 @@ describe("Sprint 4 Transport Requests corrections", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.queryByText("Scheduled today")).not.toBeInTheDocument();
     expect(document.querySelector(".transport-page")).toHaveClass(
       "transport-page--calendar",
     );
@@ -2304,24 +2260,19 @@ describe("Sprint 4 Transport Requests corrections", () => {
       ).toHaveClass("calendar-scroll-region--monthly"),
     );
   });
-  test("all tabs retain one full-width panel and planned tabs stay honest", async () => {
+  test("shows only canonical tabs and retains one full-width panel", async () => {
     renderAt("/transport-requests");
     await screen.findAllByText("TR-20260806-A1B2C3");
     expect(
-      screen.getByRole("tab", { name: /Requests/ }).querySelector(".tab-count"),
+      screen.getByRole("tab", { name: /All Requests/ }).querySelector(".tab-count"),
     ).toHaveTextContent("1");
-    for (const name of ["Active Trips", "Completed", "Calendar View"]) {
-      expect(
-        screen.getByRole("tab", { name }).querySelector(".tab-count"),
-      ).toBeNull();
-    }
     for (const name of [
-      "Requests",
+      "All Requests",
       "For Approval",
       "Dispatch Queue",
       "Active Trips",
       "Completed",
-      "Calendar View",
+      "Calendar",
     ]) {
       fireEvent.click(screen.getByRole("tab", { name: new RegExp(name) }));
       expect(document.querySelectorAll(".transport-tab-panel")).toHaveLength(1);
@@ -2329,37 +2280,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
         `transport-tab-panel--${name.toLowerCase().replaceAll(" ", "-")}`,
       );
     }
-    fireEvent.click(screen.getByRole("tab", { name: "Active Trips" }));
-    expect(
-      screen.getByText("Active trip execution is not available yet"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Active trip execution will appear here once driver assignment and trip lifecycle functionality are available.",
-      ),
-    ).toBeInTheDocument();
-    expect(document.querySelector(".transport-page")).toHaveClass(
-      "transport-page--workspace",
-      "transport-page--planned",
-    );
-    fireEvent.click(screen.getByRole("tab", { name: "Completed" }));
-    expect(
-      screen.getByText("Completed trip history is not available yet"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Completed lifecycle records will appear here once real trip completion functionality is available. No completed trips are fabricated.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen
-        .getByText("Completed trip history is not available yet")
-        .closest(".transport-tab-panel"),
-    ).toHaveClass("transport-tab-panel--completed");
-    expect(
-      screen.queryByText(/completed trip #|proof uploaded|final cost/i),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Calendar View" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Calendar" }));
     expect(await screen.findByTestId("calendar-scroll-region")).toHaveClass(
       "calendar-scroll-region--monthly",
     );
@@ -2369,7 +2290,68 @@ describe("Sprint 4 Transport Requests corrections", () => {
         .closest(".transport-tab-panel"),
     ).not.toBeNull();
   });
-  test("Dispatch Queue is a read-only lifecycle handoff without assignment controls", async () => {
+  test("renders authoritative active and completed assignment views", async () => {
+    const assignment = {
+      id: 41, plan_id: null, transport_request_id: request.id,
+      request_number: request.request_number,
+      vehicle: { id: 7, device_id: "VAN-01", plate_number: "ABC-123", display_name: "Guest Van", vehicle_type: "VAN", passenger_capacity: 8, is_active: true },
+      driver: { id: 8, driver_code: "DRV-008", full_name: "Maria Santos", eligibility_status: "ELIGIBLE" },
+      selection_mode: "OPTIMIZED", override_reason: "", confirmed_by: "Fleet Manager",
+      confirmed_at: "2026-08-06T06:00:00Z", is_accepted: true,
+      accepted_at: "2026-08-06T06:05:00Z", execution_status: "IN_TRANSIT",
+      execution_status_label: "In transit", completed_at: null,
+      created_at: "2026-08-06T06:00:00Z", updated_at: "2026-08-06T07:00:00Z",
+      transport_request: request,
+    };
+    const fetchMock = vi.mocked(globalThis.fetch).mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("summary/"))
+        return json({ ...summary, active_trips: 1, completed_trips: 1 });
+      if (url.includes("dispatch-assignments/")) {
+        const completed = url.includes("scope=completed");
+        return json({ count: 1, next: null, previous: null, results: [{
+          ...assignment,
+          execution_status: completed ? "COMPLETED" : "IN_TRANSIT",
+          execution_status_label: completed ? "Completed" : "In transit",
+          completed_at: completed ? "2026-08-06T09:00:00Z" : null,
+        }] });
+      }
+      if (url.endsWith("fleet-live/assignments/41/route/")) {
+        const leg = { traffic_mode: "live", distance_meters: 1000, duration_seconds: 600, traffic_delay_seconds: 0, departure_time: request.scheduled_pickup_at, arrival_time: request.scheduled_pickup_at, geometry: { type: "LineString", coordinates: [[121, 14.5], [121.1, 14.6]] } };
+        return json({ route: { phase: "TO_DESTINATION", execution_status: "IN_TRANSIT", route_status: "AVAILABLE", position_state: "STALE", position_recorded_at: "2026-08-06T06:55:00Z", position_age_seconds: 300, route_basis: "LAST_KNOWN_VEHICLE_POSITION", vehicle_position: { latitude: 14.5, longitude: 121, recorded_at: "2026-08-06T06:55:00Z", is_stale: true, source: "GNSS" }, pickup: { name: request.pickup_name, latitude: 14.5, longitude: 121 }, destination: { name: request.destination_name, latitude: 14.6, longitude: 121.1 }, route: leg, planned_route_status: "NOT_APPLICABLE", planned_route: null } });
+      }
+      if (url.endsWith(`${request.id}/`)) return json(request);
+      return json({ count: 1, next: null, previous: null, results: [request] });
+    });
+    renderAt("/transport-requests");
+    fireEvent.click(await screen.findByRole("tab", { name: /Active Trips/ }));
+    expect(await screen.findAllByText("In transit")).not.toHaveLength(0);
+    expect(screen.getByText(/Maria Santos · Guest Van/)).toBeInTheDocument();
+    expect(await screen.findByText(/Last-known position:/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("fleet-live/assignments/41/route/"))).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+    const activeDrawer = await screen.findByRole("dialog", { name: request.request_number });
+    expect(activeDrawer.closest(".request-workspace")).toHaveClass("request-workspace--drawer-open");
+    fireEvent.click(within(activeDrawer).getByRole("button", { name: "Close request details" }));
+    fireEvent.click(screen.getByRole("tab", { name: /Completed/ }));
+    expect(await screen.findAllByText("Completed")).not.toHaveLength(0);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("fleet-live/assignments/41/route/"))).toHaveLength(1);
+    expect(screen.getByText(/Completed 8\/6\/2026/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View Details" }));
+    const completedDrawer = await screen.findByRole("dialog", { name: request.request_number });
+    expect(completedDrawer.closest(".request-workspace")).toHaveClass("request-workspace--drawer-open");
+    expect(screen.queryByRole("button", { name: "Prepare for Dispatch" })).not.toBeInTheDocument();
+  });
+  test("calendar selection opens the shared read-only request details", async () => {
+    renderAt("/transport-requests");
+    fireEvent.click(await screen.findByRole("tab", { name: "Calendar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Daily" }));
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(request.request_number) }));
+    const details = await screen.findByRole("dialog", { name: request.request_number });
+    expect(details).toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Approve Request" })).not.toBeInTheDocument();
+  });
+  test("Dispatch Queue exposes Prepare without preliminary assignment controls", async () => {
     const assignedVehicle = {
       device_id: "VAN-01",
       plate_number: "VAN-01",
@@ -2418,8 +2400,12 @@ describe("Sprint 4 Transport Requests corrections", () => {
     renderAt("/transport-requests");
     await screen.findAllByText("TR-ASSIGNED");
     fireEvent.click(screen.getByRole("tab", { name: /Dispatch Queue/ }));
-    await screen.findByText(
-      "Approved requests ready for dispatch planning. Assignment and optimization are handled in Dispatch Board.",
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("button")
+          .some((button) => button.textContent?.includes("TR-UNASSIGNED")),
+      ).toBe(true),
     );
     expect(screen.queryByLabelText("Manual vehicle")).not.toBeInTheDocument();
     expect(
@@ -2437,8 +2423,85 @@ describe("Sprint 4 Transport Requests corrections", () => {
       expect(screen.queryByLabelText("Manual vehicle")).not.toBeInTheDocument(),
     );
     expect(
-      screen.getAllByText("Awaiting dispatch planning").length,
-    ).toBeGreaterThan(0);
+      screen.queryByRole("button", { name: "Prepare for Dispatch" }),
+    ).not.toBeInTheDocument();
+  });
+  test("uses server pagination and resets to page one when filters change", async () => {
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("summary/")) return json({ ...summary, total: 20 });
+      const second = url.includes("page=2");
+      return json({
+        count: 20,
+        next: second ? null : "?page=2",
+        previous: second ? "?page=1" : null,
+        results: [{
+          ...request,
+          id: second ? "page-two" : "page-one",
+          request_number: second ? "TR-PAGE-TWO" : "TR-PAGE-ONE",
+        }],
+      });
+    });
+    renderAt("/transport-requests");
+    await screen.findAllByText("TR-PAGE-ONE");
+    expect(screen.getByText("Showing 1–15 of 20")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("page=1") && String(input).includes("page_size=15"))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findAllByText("TR-PAGE-TWO")).not.toHaveLength(0);
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search requests"), { target: { value: "hotel" } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("search=hotel") && String(input).includes("page=1"))).toBe(true));
+  });
+  test("offers only canonical operational source and request-type filters", async () => {
+    renderAt("/transport-requests");
+    await screen.findAllByText(request.request_number);
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const source = screen.getByLabelText("Source");
+    expect(within(source).getByRole("option", { name: "HOTEL_MANAGEMENT_SYSTEM" })).toBeInTheDocument();
+    expect(within(source).getByRole("option", { name: "SUPPLY_CHAIN_MANAGEMENT_SYSTEM" })).toBeInTheDocument();
+    expect(within(source).queryByRole("option", { name: "RESTAURANT_MANAGEMENT_SYSTEM" })).not.toBeInTheDocument();
+    expect(within(source).queryByRole("option", { name: "MANUAL_STAFF_ENTRY" })).not.toBeInTheDocument();
+    expect(within(source).queryByRole("option", { name: "OTHER_SUBSYSTEM" })).not.toBeInTheDocument();
+    const type = screen.getByLabelText("Type");
+    expect(within(type).getAllByRole("option").map((item) => item.textContent)).toEqual([
+      "All types", "AIRPORT_PICKUP", "AIRPORT_DROPOFF", "GUEST_TRANSFER", "SUPPLIER_PICKUP", "BRANCH_TRANSFER",
+    ]);
+  });
+  test("prepares an approved request without vehicle assignment and refreshes the queue", async () => {
+    const approved = { ...request, status: "APPROVED", assigned_vehicle: null };
+    let prepared = false;
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("summary/")) return json({ ...summary, dispatch_queue: prepared ? 0 : 1, ready_for_dispatch: prepared ? 1 : 0 });
+      if (url.endsWith(`${request.id}/prepare-dispatch/`) && init?.method === "POST") {
+        prepared = true;
+        return json({ ...approved, status: "READY_FOR_DISPATCH" });
+      }
+      if (url.endsWith(`${request.id}/`)) return json(approved);
+      return json({ count: prepared ? 0 : 1, next: null, previous: null, results: prepared ? [] : [approved] });
+    });
+    renderAt("/transport-requests");
+    await screen.findAllByText(request.request_number);
+    fireEvent.click(screen.getByRole("tab", { name: /Dispatch Queue/ }));
+    await screen.findAllByText(request.request_number);
+    fireEvent.click(screen.getByRole("button", { name: "More options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Prepare for Dispatch" }));
+    const confirmationDialog = screen
+      .getByRole("heading", { name: "Prepare for Dispatch" })
+      .closest('[role="dialog"]');
+    expect(confirmationDialog).not.toBeNull();
+    fireEvent.click(
+      within(confirmationDialog as HTMLElement).getByRole("button", {
+        name: "Prepare for Dispatch",
+      }),
+    );
+    expect(await screen.findByText("Request prepared for dispatch and is now available on the Dispatch Board.")).toBeInTheDocument();
+    expect(screen.queryByText(request.request_number)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Dispatch Board" })).toHaveAttribute("href", "/dispatch-board");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("dispatch-board/confirm"))).toBe(false);
   });
   test("uses the full-width responsive layout for Edit Transport Request", async () => {
     renderAt(`/transport-requests/${request.id}/edit`);
@@ -2461,7 +2524,7 @@ describe("Sprint 4 Transport Requests corrections", () => {
       "form-section--notes",
     );
     expect(
-      within(form as HTMLElement).getByRole("link", { name: "Cancel" }),
+      within(form as HTMLElement).getByRole("link", { name: "Discard Changes" }),
     ).toBeInTheDocument();
   });
   test("renders backend field and non-field errors without discarding form values", async () => {

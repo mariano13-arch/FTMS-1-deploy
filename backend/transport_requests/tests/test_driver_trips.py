@@ -162,6 +162,8 @@ class DriverTripApiTests(TestCase):
                 "load_quantity",
                 "estimated_weight_kg",
                 "temperature_requirement",
+                "flight_context",
+                "capacity_compatibility",
                 "execution",
             },
         )
@@ -172,6 +174,8 @@ class DriverTripApiTests(TestCase):
         self.assertEqual(trip["destination"]["address"], "Pasay City")
         self.assertEqual(trip["vehicle"]["plate_number"], "ABC-123")
         self.assertEqual(trip["passenger_count"], 4)
+        self.assertIsNone(trip["flight_context"])
+        self.assertEqual(trip["capacity_compatibility"]["status"], "NOT_APPLICABLE")
         self.assertEqual(trip["handling_instructions"], "Meet at the main entrance.")
         self.assertEqual(
             trip["execution"],

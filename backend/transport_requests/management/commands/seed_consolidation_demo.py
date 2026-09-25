@@ -67,7 +67,7 @@ class Command(BaseCommand):
         )
         if not operator:
             raise CommandError(
-                "Create an active Super Admin or Fleet Manager before seeding "
+                "Create an active Fleet Admin or Fleet Manager before seeding "
                 "consolidation demo data."
             )
 

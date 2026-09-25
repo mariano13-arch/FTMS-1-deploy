@@ -1,4 +1,4 @@
-export type StaffRole = 'DISPATCHER' | 'FLEET_MANAGER' | 'SUPER_ADMIN';
+export type StaffRole = 'FLEET_ADMIN' | 'FLEET_MANAGER' | 'FLEET_STAFF';
 
 export type StaffIdentity = {
   id: number;

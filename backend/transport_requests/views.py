@@ -1,7 +1,15 @@
 from datetime import date, datetime, time, timedelta
 
 from django.db import transaction
-from django.db.models import Case, IntegerField, OuterRef, Q, Subquery, Value, When
+from django.db.models import (
+    Case,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Value,
+    When,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -9,14 +17,17 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import StaffProfile
-from accounts.permissions import StaffAccess
-from accounts.roles import SUPER_ADMIN, resolve_role
+from accounts.permissions import ModuleActionAccess, StaffAccess
+from accounts.roles import has_module_permission
 from fleet.inspection_readiness import inspection_readiness, with_latest_inspection
 from fleet.maintenance import maintenance_readiness, with_maintenance_readiness
 from fleet.models import Driver, Vehicle
+from fleet.number_coding import evaluate_vehicle_number_coding
 
-from . import consolidation, dispatch, matrix, places, routing, services
+from . import consolidation, dispatch, flight_tracking, matrix, places, routing, services
+from .active_routes import recommendation_route
+from .domain import is_supply_request
+from .driver_serializers import DriverActiveRouteSerializer
 from .models import (
     DispatchAssignment,
     DispatchAssignmentEvent,
@@ -31,6 +42,7 @@ from .serializers import (
     DispatchDriverSerializer,
     DispatchPlanSerializer,
     NoteSerializer,
+    OperationalAssignmentSerializer,
     TransportRequestDetailSerializer,
     TransportRequestListSerializer,
     VehicleAssignmentSerializer,
@@ -43,12 +55,67 @@ class TransportRequestPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class DispatchAssignmentListView(APIView):
+    """Read-only staff view of authoritative active or completed executions."""
+
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "VIEW"
+    http_method_names = ["get", "options"]
+
+    def get(self, request):
+        allowed = {"scope", "search", "page", "page_size"}
+        unknown = set(request.query_params) - allowed
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown filter." for key in unknown})
+        scope = request.query_params.get("scope", "active")
+        if scope not in {"active", "completed"}:
+            raise serializers.ValidationError({"scope": "Must be active or completed."})
+        queryset = DispatchAssignment.objects.select_related(
+            "transport_request",
+            "transport_request__assigned_vehicle",
+            "transport_request__created_by",
+            "transport_request__approved_by",
+            "vehicle",
+            "driver",
+            "confirmed_by",
+        )
+        if scope == "completed":
+            queryset = queryset.filter(
+                execution_status=DispatchAssignment.ExecutionStatus.COMPLETED
+            ).order_by("-completed_at", "-pk")
+        else:
+            queryset = queryset.exclude(
+                execution_status=DispatchAssignment.ExecutionStatus.COMPLETED
+            ).order_by("transport_request__scheduled_pickup_at", "pk")
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(transport_request__request_number__icontains=search)
+                | Q(transport_request__requester_name__icontains=search)
+                | Q(transport_request__pickup_name__icontains=search)
+                | Q(transport_request__destination_name__icontains=search)
+                | Q(driver__driver_code__icontains=search)
+                | Q(driver__first_name__icontains=search)
+                | Q(driver__last_name__icontains=search)
+                | Q(vehicle__device_id__icontains=search)
+                | Q(vehicle__plate_number__icontains=search)
+            )
+        paginator = TransportRequestPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        return paginator.get_paginated_response(
+            OperationalAssignmentSerializer(page, many=True).data
+        )
+
+
 def detail_response(item, request):
     return Response(TransportRequestDetailSerializer(item, context={"request": request}).data)
 
 
 class TransportRequestListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "VIEW"
     http_method_names = ["get", "post", "options"]
 
     def get(self, request):
@@ -154,14 +221,16 @@ class TransportRequestListView(APIView):
         self.permission_denied(
             request,
             message=(
-                "Transport Request creation requires a trusted HMS/RMS "
+                "Transport Request creation requires a trusted HMS, RMS, or supply-chain "
                 "integration identity."
             ),
         )
 
 
 class TransportRequestDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_actions = {"GET": "VIEW", "PATCH": "EDIT"}
     http_method_names = ["get", "patch", "options"]
 
     def get_object(self, request_id):
@@ -176,16 +245,6 @@ class TransportRequestDetailView(APIView):
         return detail_response(self.get_object(request_id), request)
 
     def patch(self, request, request_id):
-        role = resolve_role(request.user)
-        if role not in {
-            SUPER_ADMIN,
-            StaffProfile.Role.FLEET_MANAGER,
-            StaffProfile.Role.DISPATCHER,
-        }:
-            self.permission_denied(
-                request,
-                message="Your role cannot edit transport requests.",
-            )
         with transaction.atomic():
             item = get_object_or_404(
                 TransportRequest.objects.select_for_update(),
@@ -214,7 +273,9 @@ class TransportRequestDetailView(APIView):
 
 
 class TransportRequestRouteView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "VIEW"
     http_method_names = ["get", "options"]
 
     def get(self, request, request_id):
@@ -238,6 +299,35 @@ class TransportRequestRouteView(APIView):
             )
 
 
+class FlightRefreshView(APIView):
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "EDIT"
+    http_method_names = ["post", "options"]
+
+    def post(self, request, request_id):
+        try:
+            services.require_role(request.user, services.OPERATORS)
+        except PermissionError:
+            self.permission_denied(request, message="Your role cannot refresh flight data.")
+        item = get_object_or_404(
+            TransportRequest.objects.select_related("flight_context"), pk=request_id
+        )
+        if item.request_type != TransportRequest.RequestType.AIRPORT_PICKUP:
+            raise serializers.ValidationError(
+                {"request_type": "Flight refresh is only available for airport pickups."}
+            )
+        if not hasattr(item, "flight_context"):
+            raise serializers.ValidationError(
+                {"flight_context": "Add a flight number before refreshing flight data."}
+            )
+        flight_tracking.refresh_flight_context(item.flight_context)
+        return Response(
+            TransportRequestDetailSerializer(item, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
 def _places_error_response(error):
     if isinstance(error, places.PlacesConfigurationError):
         return Response(
@@ -255,7 +345,9 @@ def _places_error_response(error):
 
 
 class PlaceSuggestView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "VIEW"
     http_method_names = ["post", "options"]
 
     def post(self, request):
@@ -274,7 +366,9 @@ class PlaceSuggestView(APIView):
 
 
 class PlaceDetailsView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "VIEW"
     http_method_names = ["get", "options"]
 
     def get(self, request, place_type, place_id):
@@ -292,7 +386,9 @@ class PlaceDetailsView(APIView):
 
 
 class DispatchMatrixView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "VIEW"
     http_method_names = ["post", "options"]
 
     def post(self, request):
@@ -336,25 +432,29 @@ class DispatchMatrixView(APIView):
 
 
 class DispatchBoardView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "VIEW"
 
-    def get(self, request):
+    @staticmethod
+    def payload(request):
         requests = list(
             TransportRequest.objects.filter(
-                status__in=(
-                    TransportRequest.Status.APPROVED,
-                    TransportRequest.Status.READY_FOR_DISPATCH,
-                )
+                status=TransportRequest.Status.READY_FOR_DISPATCH,
+                dispatch_assignment__isnull=True,
             )
-            .select_related("assigned_vehicle", "created_by", "approved_by")
+            .select_related("assigned_vehicle", "created_by", "approved_by", "flight_context")
             .order_by("scheduled_pickup_at", "pk")
         )
-        assignments = list(DispatchAssignment.objects.filter(
-            transport_request__in=requests
-        ).select_related("transport_request", "vehicle", "driver", "confirmed_by"))
-        assignment_by_request = {
-            assignment.transport_request_id: assignment for assignment in assignments
-        }
+        assignments = list(
+            DispatchAssignment.objects.filter(
+                transport_request__status=TransportRequest.Status.READY_FOR_DISPATCH
+            )
+            .select_related("transport_request", "vehicle", "driver", "confirmed_by")
+            .order_by("transport_request__scheduled_pickup_at", "pk")
+        )
+        assigned_requests = [assignment.transport_request for assignment in assignments]
+        board_context_requests = [*requests, *assigned_requests]
         drivers = [
             driver
             for driver in Driver.objects.all()
@@ -376,13 +476,49 @@ class DispatchBoardView(APIView):
                 [vehicle.device_id for vehicle in vehicles]
             )
         }
-        approved = [item for item in requests if item.status == TransportRequest.Status.APPROVED]
-        confirmed_count = sum(item.pk in assignment_by_request for item in approved)
-        awaiting = [item for item in approved if item.pk not in assignment_by_request]
-        optimizer_eligible = sum(
-            any(
-                vehicle.device_id in located_vehicle_ids
-                and not services.allocation_conflicts(item, vehicle)
+        approved_count = TransportRequest.objects.filter(
+            status=TransportRequest.Status.APPROVED,
+            dispatch_assignment__isnull=True,
+        ).count()
+        confirmed_count = len(assignments)
+        awaiting = requests
+        busy_drivers = {}
+        for assignment in DispatchAssignment.objects.filter(
+            transport_request__status__in=(
+                TransportRequest.Status.APPROVED, TransportRequest.Status.READY_FOR_DISPATCH
+            )
+        ).exclude(
+            execution_status=DispatchAssignment.ExecutionStatus.COMPLETED
+        ).select_related("transport_request"):
+            busy_drivers.setdefault(assignment.driver_id, []).append(assignment.transport_request)
+        busy_vehicles = {}
+        for occupied in TransportRequest.objects.filter(
+            assigned_vehicle__isnull=False, status__in=services.ALLOCATING_STATUSES
+        ).exclude(dispatch_assignment__execution_status="COMPLETED"):
+            busy_vehicles.setdefault(occupied.assigned_vehicle_id, []).append(occupied)
+
+        def overlaps(item, other):
+            return (
+                other.scheduled_pickup_at < services.planning_end(item)
+                and services.planning_end(other) > item.scheduled_pickup_at
+            )
+
+        def available_drivers(item):
+            return [
+                driver for driver in drivers
+                if dispatch.evaluate_driver_schedule(
+                    driver, item.scheduled_pickup_at
+                ).status == "ON_SHIFT"
+                and not any(overlaps(item, other) for other in busy_drivers.get(driver.pk, ()))
+            ]
+
+        def available_vehicles(item):
+            return [
+                vehicle for vehicle in vehicles
+                if not any(
+                    other.pk != item.pk and overlaps(item, other)
+                    for other in busy_vehicles.get(vehicle.pk, ())
+                )
                 and (
                     vehicle.passenger_capacity is None
                     or vehicle.passenger_capacity >= item.passenger_count
@@ -391,34 +527,42 @@ class DispatchBoardView(APIView):
                     not item.required_vehicle_type
                     or vehicle.vehicle_type == item.required_vehicle_type
                 )
-                for vehicle in vehicles
+            ]
+
+        candidates = {
+            item.pk: (available_drivers(item), available_vehicles(item)) for item in awaiting
+        }
+        coding = {
+            item.pk: {
+                vehicle.pk: evaluate_vehicle_number_coding(vehicle, item.scheduled_pickup_at)
+                for vehicle in candidate_vehicles
+            }
+            for item, (_, candidate_vehicles) in (
+                (item, candidates[item.pk]) for item in awaiting
             )
-            and any(not dispatch.driver_conflicts(item, driver) for driver in drivers)
+        }
+        optimizer_eligible = sum(
+            bool(candidate_drivers) and any(
+                vehicle.device_id in located_vehicle_ids
+                and coding[item.pk][vehicle.pk].eligible
+                for vehicle in candidate_vehicles
+            )
             for item in awaiting
+            for candidate_drivers, candidate_vehicles in [candidates[item.pk]]
         )
         no_eligible_driver = schedule_conflict = no_gis_vehicle = 0
         for item in awaiting:
             if not drivers:
                 no_eligible_driver += 1
                 continue
-            available_drivers = [
-                driver for driver in drivers if not dispatch.driver_conflicts(item, driver)
-            ]
-            if not available_drivers:
+            candidate_drivers, candidate_vehicles = candidates[item.pk]
+            if not candidate_drivers:
                 schedule_conflict += 1
                 continue
             has_gis_vehicle = any(
                 vehicle.device_id in located_vehicle_ids
-                and not services.allocation_conflicts(item, vehicle)
-                and (
-                    vehicle.passenger_capacity is None
-                    or vehicle.passenger_capacity >= item.passenger_count
-                )
-                and (
-                    not item.required_vehicle_type
-                    or vehicle.vehicle_type == item.required_vehicle_type
-                )
-                for vehicle in vehicles
+                and coding[item.pk][vehicle.pk].eligible
+                for vehicle in candidate_vehicles
             )
             if not has_gis_vehicle:
                 no_gis_vehicle += 1
@@ -428,7 +572,7 @@ class DispatchBoardView(APIView):
             "assignment__transport_request", "new_driver", "new_vehicle", "performed_by",
             "previous_driver", "previous_vehicle",
         )
-        audit_by_request = {str(item.pk): [] for item in requests}
+        audit_by_request = {str(item.pk): [] for item in board_context_requests}
         for event in assignment_events:
             audit_by_request[str(event.assignment.transport_request_id)].append(
                 {
@@ -453,7 +597,7 @@ class DispatchBoardView(APIView):
                 }
             )
         prepare_events = TransportRequestEvent.objects.filter(
-            request__in=requests, event_type="PREPARED_FOR_DISPATCH"
+            request__in=board_context_requests, event_type="PREPARED_FOR_DISPATCH"
         ).select_related("performed_by")
         for event in prepare_events:
             audit_by_request[str(event.request_id)].append(
@@ -470,62 +614,49 @@ class DispatchBoardView(APIView):
         for events in audit_by_request.values():
             events.sort(key=lambda item: item["timestamp"])
         manual_candidates = {}
-        for item in approved:
-            existing_id = (
-                assignment_by_request[item.pk].pk
-                if item.pk in assignment_by_request
-                else None
-            )
+        for item in awaiting:
+            candidate_drivers, candidate_vehicles = candidates[item.pk]
             manual_candidates[str(item.pk)] = {
-                "drivers": DispatchDriverSerializer(
-                    [
-                        driver
-                        for driver in drivers
-                        if not dispatch.driver_conflicts(
-                            item, driver, exclude_assignment_id=existing_id
-                        )
-                    ],
-                    many=True,
-                ).data,
+                "drivers": DispatchDriverSerializer(candidate_drivers, many=True).data,
                 "vehicles": [
                     {
                         **AssignedVehicleSerializer(vehicle).data,
                         "current_location_available": (
                             vehicle.device_id in located_vehicle_ids
                         ),
+                        "number_coding": coding[item.pk][vehicle.pk].as_dict(),
                     }
-                    for vehicle in vehicles
-                    if not services.allocation_conflicts(item, vehicle)
-                    and (
-                        vehicle.passenger_capacity is None
-                        or vehicle.passenger_capacity >= item.passenger_count
-                    )
-                    and (
-                        not item.required_vehicle_type
-                        or vehicle.vehicle_type == item.required_vehicle_type
+                    for vehicle in candidate_vehicles
+                    if (
+                        not is_supply_request(item)
+                        or item.estimated_weight_kg is None
+                        or (
+                            vehicle.payload_capacity_kg is not None
+                            and vehicle.payload_capacity_kg >= item.estimated_weight_kg
+                        )
                     )
                 ],
             }
-        return Response(
-            {
+        return {
                 "summary": {
-                    "approved_requests": len(approved),
+                    "approved_requests": approved_count,
                     "awaiting_assignment": len(awaiting),
                     "confirmed_assignments": confirmed_count,
-                    "ready_for_dispatch": sum(
-                        item.status == TransportRequest.Status.READY_FOR_DISPATCH
-                        and (
-                            item.pk not in assignment_by_request
-                            or assignment_by_request[item.pk].execution_status
-                            != DispatchAssignment.ExecutionStatus.COMPLETED
-                        )
-                        for item in requests
+                    "ready_for_dispatch": len(awaiting) + sum(
+                        assignment.execution_status
+                        != DispatchAssignment.ExecutionStatus.COMPLETED
+                        for assignment in assignments
                     ),
                     "optimizer_eligible": optimizer_eligible,
                     "needs_attention": len(awaiting) - optimizer_eligible,
                     "no_eligible_driver": no_eligible_driver,
                     "no_gis_vehicle": no_gis_vehicle,
                     "schedule_conflict": schedule_conflict,
+                    "number_coding_blocked": sum(
+                        evaluation.status in {"RESTRICTED", "UNKNOWN"}
+                        for evaluations in coding.values()
+                        for evaluation in evaluations.values()
+                    ),
                 },
                 "requests": TransportRequestListSerializer(
                     requests, many=True, context={"request": request}
@@ -541,12 +672,22 @@ class DispatchBoardView(APIView):
                 ],
                 "manual_candidates": manual_candidates,
                 "assignment_audit": audit_by_request,
+                "recommendation_fingerprints": dispatch.planning_fingerprints(awaiting),
             }
-        )
+
+    def get(self, request):
+        return Response(self.payload(request))
+
+
+def dispatch_board_summary(request):
+    """Return dashboard-safe dispatch counts without invoking another view lifecycle."""
+    return DispatchBoardView.payload(request)["summary"]
 
 
 class DispatchRecommendationView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "GENERATE_RECOMMENDATION"
 
     def post(self, request):
         request_ids = request.data.get("request_ids") if isinstance(request.data, dict) else None
@@ -581,9 +722,12 @@ class DispatchRecommendationView(APIView):
                     "distance_meters": item["distance_meters"],
                     "traffic_delay_seconds": item["traffic_delay_seconds"],
                     "recommendation_token": item["recommendation_token"],
+                    "planning_fingerprint": item["planning_fingerprint"],
+                    "fuel_estimate": item["fuel_estimate"],
                     "explanation": item["explanation"],
                     "schedule_context": item["schedule_context"],
                     "gis_preview": item["gis_preview"],
+                    "airport_pickup_timing": item["airport_pickup_timing"],
                 }
             )
         comparisons = {}
@@ -596,6 +740,7 @@ class DispatchRecommendationView(APIView):
                     "distance_meters": item["distance_meters"],
                     "traffic_delay_seconds": item["traffic_delay_seconds"],
                     "result": item["result"],
+                    "fuel_estimate": item["fuel_estimate"],
                 }
                 for item in candidates
             ]
@@ -631,12 +776,54 @@ class DispatchRecommendationView(APIView):
         )
 
 
+class DispatchRecommendationRouteInputSerializer(serializers.Serializer):
+    transport_request_id = serializers.UUIDField()
+    vehicle_id = serializers.IntegerField(min_value=1)
+    driver_id = serializers.IntegerField(min_value=1)
+    recommendation_token = serializers.CharField()
+
+
+class DispatchRecommendationRouteView(APIView):
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "GENERATE_RECOMMENDATION"
+
+    def post(self, request):
+        fields = DispatchRecommendationRouteInputSerializer(data=request.data)
+        fields.is_valid(raise_exception=True)
+        values = fields.validated_data
+        dispatch.verify_token(
+            values["recommendation_token"],
+            values["transport_request_id"],
+            values["vehicle_id"],
+            values["driver_id"],
+        )
+        item = get_object_or_404(TransportRequest, pk=values["transport_request_id"])
+        vehicle = get_object_or_404(Vehicle, pk=values["vehicle_id"])
+        try:
+            result = recommendation_route(item, vehicle)
+        except routing.RouteCoordinateError:
+            return Response(
+                {"detail": "This recommendation has invalid route coordinates."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"route": DriverActiveRouteSerializer(result).data})
+
+
 class DispatchConfirmationView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "DISPATCH"
 
     def post(self, request):
         serializer = DispatchConfirmationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if (
+            serializer.validated_data["selection_mode"]
+            == DispatchAssignment.SelectionMode.MANUAL
+            and not has_module_permission(request.user, "DISPATCH_BOARD", "OVERRIDE")
+        ):
+            self.permission_denied(request)
         try:
             assignment = dispatch.confirm_assignment(
                 user=request.user, **serializer.validated_data
@@ -651,7 +838,9 @@ class DispatchConfirmationView(APIView):
 
 
 class ConsolidationRecommendationView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "GENERATE_RECOMMENDATION"
 
     def post(self, request):
         field = serializers.UUIDField()
@@ -693,7 +882,9 @@ class ConsolidationRecommendationView(APIView):
 
 
 class ConsolidationConfirmationView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "DISPATCH"
 
     def post(self, request):
         token = serializers.CharField().run_validation(request.data.get("recommendation_token"))
@@ -705,7 +896,9 @@ class ConsolidationConfirmationView(APIView):
 
 
 class ConsolidationPrepareView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "DISPATCH"
 
     def post(self, request, plan_id):
         try:
@@ -716,7 +909,9 @@ class ConsolidationPrepareView(APIView):
 
 
 class SummaryView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "VIEW"
 
     def get(self, request):
         today = timezone.localdate()
@@ -726,6 +921,7 @@ class SummaryView(APIView):
             status=TransportRequest.Status.NEEDS_MORE_DETAILS
         ).count()
         approved = queryset.filter(status=TransportRequest.Status.APPROVED)
+        assignments = DispatchAssignment.objects.all()
         return Response(
             {
                 "total": queryset.count(),
@@ -745,12 +941,20 @@ class SummaryView(APIView):
                         TransportRequest.Priority.URGENT,
                     ]
                 ).count(),
+                "active_trips": assignments.exclude(
+                    execution_status=DispatchAssignment.ExecutionStatus.COMPLETED
+                ).count(),
+                "completed_trips": assignments.filter(
+                    execution_status=DispatchAssignment.ExecutionStatus.COMPLETED
+                ).count(),
             }
         )
 
 
 class CalendarView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
+    permission_action = "VIEW"
     max_days = 31
 
     def get(self, request):
@@ -824,7 +1028,8 @@ class CalendarView(APIView):
 
 
 class ActionView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "TRANSPORT_REQUESTS"
     action = None
 
     def post(self, request, request_id):
@@ -843,31 +1048,39 @@ class ActionView(APIView):
 
 
 class ApproveView(ActionView):
+    permission_action = "APPROVE"
     action = staticmethod(services.approve)
 
 
 class RejectView(ActionView):
+    permission_action = "REJECT"
     action = staticmethod(services.reject)
 
 
 class RequestMoreDetailsView(ActionView):
+    permission_action = "REQUEST_MORE_DETAILS"
     action = staticmethod(services.request_more_details)
 
 
 class ResubmitView(ActionView):
+    permission_action = "EDIT"
     action = staticmethod(services.resubmit)
 
 
 class CancelView(ActionView):
+    permission_action = "CANCEL"
     action = staticmethod(services.cancel)
 
 
 class PrepareDispatchView(ActionView):
+    permission_action = "PREPARE_DISPATCH"
     action = staticmethod(services.prepare_dispatch)
 
 
 class AssignVehicleView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DISPATCH_BOARD"
+    permission_action = "ASSIGN"
 
     def post(self, request, request_id):
         item = get_object_or_404(TransportRequest, pk=request_id)

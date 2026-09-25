@@ -105,6 +105,7 @@ class TelemetryEvent(models.Model):
     class PositionSource(models.TextChoices):
         GNSS = "GNSS", "GNSS"
         CELLULAR_LBS = "CELLULAR_LBS", "Cellular LBS"
+        SIMULATED_TEST = "SIMULATED_TEST", "Simulated test data"
 
     class DrivingEvent(models.TextChoices):
         NORMAL = "NORMAL", "Normal"
@@ -173,6 +174,11 @@ class TelemetryEvent(models.Model):
                         gnss_speed_kph__isnull=True,
                         position_accuracy_m__gt=0,
                     )
+                    | Q(
+                        position_source="SIMULATED_TEST",
+                        gnss_speed_kph__isnull=True,
+                        position_accuracy_m__isnull=True,
+                    )
                 ),
                 name="tel_position_source_valid",
             ),
@@ -206,6 +212,13 @@ class TelemetryEvent(models.Model):
                 errors["gnss_speed_kph"] = "Cellular LBS positions must not include GNSS speed."
             if self.position_accuracy_m is None or self.position_accuracy_m <= 0:
                 errors["position_accuracy_m"] = "Cellular LBS positions require positive accuracy."
+        if self.position_source == self.PositionSource.SIMULATED_TEST:
+            if self.gnss_speed_kph is not None:
+                errors["gnss_speed_kph"] = "Simulated positions cannot claim GNSS speed."
+            if self.position_accuracy_m is not None:
+                errors["position_accuracy_m"] = (
+                    "Simulated positions cannot claim measured accuracy."
+                )
         if errors:
             raise ValidationError(errors)
 
@@ -219,6 +232,89 @@ class TelemetryEvent(models.Model):
                 raise ValueError("Vehicle has no active telemetry device binding.")
             self.device_id = binding.device_id
         super().save(*args, **kwargs)
+
+
+class DriverSafetyEvent(models.Model):
+    telemetry_event = models.OneToOneField(
+        TelemetryEvent,
+        on_delete=models.PROTECT,
+        related_name="driver_safety_event",
+    )
+    assignment = models.ForeignKey(
+        "transport_requests.DispatchAssignment",
+        on_delete=models.PROTECT,
+        related_name="driver_safety_events",
+    )
+    driver = models.ForeignKey(
+        "fleet.Driver",
+        on_delete=models.PROTECT,
+        related_name="safety_events",
+    )
+    vehicle = models.ForeignKey(
+        "fleet.Vehicle",
+        on_delete=models.PROTECT,
+        related_name="driver_safety_events",
+    )
+    event_type = models.CharField(max_length=32, choices=TelemetryEvent.DrivingEvent.choices)
+    occurred_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-occurred_at", "-pk")
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    event_type__in=(
+                        TelemetryEvent.DrivingEvent.HARSH_ACCELERATION,
+                        TelemetryEvent.DrivingEvent.HARSH_BRAKING,
+                        TelemetryEvent.DrivingEvent.SHARP_TURN,
+                    )
+                ),
+                name="driver_safety_event_type_harsh",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.driver}: {self.event_type} at {self.occurred_at.isoformat()}"
+
+
+class VehicleEmergencySOS(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "ACTIVE", "Active"
+        CLEARED = "CLEARED", "Cleared"
+
+    class Source(models.TextChoices):
+        PHYSICAL_BUTTON = "PHYSICAL_BUTTON", "Physical emergency button"
+
+    device = models.ForeignKey(
+        TelemetryDevice, on_delete=models.PROTECT, related_name="emergency_sos_events"
+    )
+    vehicle = models.ForeignKey(
+        "fleet.Vehicle", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="emergency_sos_events",
+    )
+    driver = models.ForeignKey(
+        "fleet.Driver", null=True, blank=True, on_delete=models.PROTECT,
+        related_name="emergency_sos_events",
+    )
+    status = models.CharField(max_length=12, choices=Status.choices)
+    source = models.CharField(max_length=24, choices=Source.choices)
+    activated_at = models.DateTimeField()
+    cleared_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-activated_at", "-pk")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("device",), condition=Q(status="ACTIVE"),
+                name="telemetry_one_active_sos_per_device",
+            ),
+            models.CheckConstraint(
+                condition=(Q(status="ACTIVE", cleared_at__isnull=True)
+                           | Q(status="CLEARED", cleared_at__isnull=False)),
+                name="telemetry_sos_status_timestamp_consistent",
+            ),
+        ]
 
 
 class Geofence(models.Model):

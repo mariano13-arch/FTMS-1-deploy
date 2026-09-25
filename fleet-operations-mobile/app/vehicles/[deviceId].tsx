@@ -14,7 +14,7 @@ export default function VehicleDetailsScreen() {
   const router = useRouter();
   const { staff } = useStaffAuth();
   const { deviceId } = useLocalSearchParams<{ deviceId: string }>();
-  const canManageTelemetry = staff?.role === 'SUPER_ADMIN' || staff?.role === 'FLEET_MANAGER';
+  const canManageTelemetry = staff?.role === 'FLEET_ADMIN' || staff?.role === 'FLEET_MANAGER';
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);

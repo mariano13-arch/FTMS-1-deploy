@@ -81,6 +81,10 @@ class StaffManagementTests(TestCase):
                     else:
                         response = getattr(self.authenticated_client(user), method)(url)
                     self.assertEqual(response.status_code, 403)
+                    self.assertEqual(
+                        response.json()["detail"],
+                        "Only a Fleet Admin can manage staff accounts.",
+                    )
         self.assertEqual(APIClient().get(self.managed_url).status_code, 401)
 
     def test_super_admin_creates_supported_roles_with_unusable_password(self):

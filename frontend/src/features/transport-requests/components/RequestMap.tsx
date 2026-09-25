@@ -25,12 +25,34 @@ import LoadingIndicator from "../../../components/common/LoadingIndicator";
 const fallbackCenter: [number, number] = [121.0286, 14.5652];
 const fallbackZoom = 13;
 const trafficSourceId = "tomtom-traffic-source";
-const trafficLayerId = "tomtom-traffic-layer";
+export const trafficLayerId = "tomtom-traffic-layer";
 const incidentsSourceId = "tomtom-incidents-source";
 const incidentsLayerId = "tomtom-incidents-layer";
 const routeSourceId = "request-route-source";
 const routeCasingLayerId = "request-route-casing";
 const routeLayerId = "request-route-line";
+const plannedRouteSourceId = "request-planned-route-source";
+const plannedRouteCasingLayerId = "request-planned-route-casing";
+const plannedRouteLayerId = "request-planned-route-line";
+export const activeRouteLinePaint = {
+  "line-color": "#263d73",
+  "line-width": 6,
+  "line-opacity": 0.96,
+};
+export const plannedRouteLinePaint = {
+  ...activeRouteLinePaint,
+};
+export const routeCasingPaint = {
+  "line-color": "#fffdf9",
+  "line-width": 10,
+  "line-opacity": 0.72,
+};
+export const tripRouteLayerOrder = [
+  plannedRouteCasingLayerId,
+  plannedRouteLayerId,
+  routeCasingLayerId,
+  routeLayerId,
+];
 const fleetTrailSourceId = "fleet-trail-source";
 const fleetTrailLineLayerId = "fleet-trail-line";
 const fleetTrailPointLayerId = "fleet-trail-points";
@@ -81,7 +103,7 @@ export type FleetPopupInfo = {
   latitude: number;
   longitude: number;
   speedKph: number | null;
-  positionSource?: "GNSS" | "CELLULAR_LBS";
+  positionSource?: "GNSS" | "CELLULAR_LBS" | "SIMULATED_TEST";
   positionAccuracyM?: number | null;
   rpm?: number | null;
   coolantC?: number | null;
@@ -91,7 +113,9 @@ export type FleetPopupInfo = {
   ageSeconds: number;
   driverName?: string;
   assignmentStatus?: string;
+  activeRouteSummary?: string;
   telemetrySource: "real" | "demo";
+  emergencySOS?: { activatedAt: string } | null;
 };
 
 type MapProps = {
@@ -105,12 +129,17 @@ type MapProps = {
     | "destination_name"
   > | null;
   route?: TransportRoute | null;
+  plannedRoute?: TransportRoute | null;
   routeState?: "idle" | "loading" | "ready" | "error";
+  routeCameraKey?: string;
   operationalLocation?: {
     latitude: number;
     longitude: number;
     label: string;
+    plateNumber?: string;
+    positionStatus?: "CURRENT" | "STALE";
   } | null;
+  recommendationPreview?: boolean;
   numberedStops?: Array<{
     sequence: number;
     latitude: string;
@@ -123,8 +152,9 @@ type MapProps = {
     longitude: number;
     label: string;
     telemetryState: "live" | "stale" | "offline" | "no_telemetry";
-    positionSource?: "GNSS" | "CELLULAR_LBS";
+    positionSource?: "GNSS" | "CELLULAR_LBS" | "SIMULATED_TEST";
     selected?: boolean;
+    emergencySOS?: { activatedAt: string } | null;
   }>;
   focusedVehicleId?: string;
   fleetTrail?: Array<{
@@ -135,7 +165,7 @@ type MapProps = {
   }>;
   safetyEvents?: Array<{
     event_id: string;
-    event_type: "HARSH_BRAKING" | "HARSH_ACCELERATION";
+    event_type: "HARSH_BRAKING" | "HARSH_ACCELERATION" | "SHARP_TURN";
     latitude: number;
     longitude: number;
     vehicle_name: string;
@@ -169,6 +199,7 @@ type MapProps = {
   onGeofenceSelect?: (id: string) => void;
   onGeofenceCreateAt?: (point: MapCoordinate) => void;
   onGeofenceDraftMapClick?: (point: MapCoordinate) => void;
+  onUtilityPanelOpen?: () => void;
 };
 
 function styleUrl(style: MapStyle) {
@@ -202,18 +233,10 @@ function validCoordinate(
   return Number.isFinite(lat) && Number.isFinite(lng) ? [lng, lat] : null;
 }
 
-function markerElement(
-  kind: "pickup" | "destination" | "vehicle",
-  label: string,
-) {
+function markerElement(kind: "pickup" | "destination", label: string) {
   const element = document.createElement("div");
   element.className = `request-map-marker request-map-marker--${kind}`;
-  const kindLabel =
-    kind === "pickup"
-      ? "Pickup"
-      : kind === "destination"
-        ? "Destination"
-        : "Vehicle";
+  const kindLabel = kind === "pickup" ? "Pickup" : "Destination";
   element.title = `${kindLabel}: ${label}`;
   element.setAttribute("aria-label", element.title);
   element.setAttribute("role", "img");
@@ -222,12 +245,17 @@ function markerElement(
 
 function safetyEventMarker(
   label: string,
-  eventType: "HARSH_BRAKING" | "HARSH_ACCELERATION",
+  eventType: "HARSH_BRAKING" | "HARSH_ACCELERATION" | "SHARP_TURN",
 ) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = "request-map-safety-marker";
-  element.title = `${eventType === "HARSH_BRAKING" ? "Harsh braking" : "Harsh acceleration"}: ${label}`;
+  const eventLabel = eventType === "HARSH_BRAKING"
+    ? "Harsh braking"
+    : eventType === "HARSH_ACCELERATION"
+      ? "Harsh acceleration"
+      : "Sharp turn";
+  element.title = `${eventLabel}: ${label}`;
   element.setAttribute("aria-label", element.title);
   return element;
 }
@@ -247,17 +275,24 @@ function geofenceActivityMarker(
   return element;
 }
 
-function fleetVehicleMarker(
+export function fleetVehicleMarker(
   label: string,
   telemetryState: "live" | "stale" | "offline" | "no_telemetry",
-  positionSource: "GNSS" | "CELLULAR_LBS" = "GNSS",
+  positionSource: "GNSS" | "CELLULAR_LBS" | "SIMULATED_TEST" = "GNSS",
+  emergencySOS?: { activatedAt: string } | null,
 ) {
   const element = document.createElement("button");
   element.type = "button";
   element.className = `request-map-marker request-map-marker--vehicle request-map-marker--${telemetryState} request-map-fleet-marker`;
   if (positionSource === "CELLULAR_LBS")
     element.classList.add("request-map-marker--approximate");
-  element.title = `${label} — ${telemetryState === "no_telemetry" ? "No telemetry" : `${telemetryState[0].toUpperCase()}${telemetryState.slice(1)} telemetry`}`;
+  if (positionSource === "SIMULATED_TEST")
+    element.classList.add("request-map-marker--simulated");
+  if (emergencySOS) {
+    element.classList.add("request-map-marker--emergency");
+    element.dataset.emergency = "SOS";
+  }
+  element.title = `${label} — ${positionSource === "SIMULATED_TEST" ? "SIMULATED TEST DATA" : telemetryState === "no_telemetry" ? "No telemetry" : `${telemetryState[0].toUpperCase()}${telemetryState.slice(1)} telemetry`}`;
   element.setAttribute("aria-label", `Open ${label} vehicle details`);
   return element;
 }
@@ -341,6 +376,12 @@ function fleetPopupElement(
   const location = document.createElement("span");
   location.textContent = `${info.latitude.toFixed(5)}, ${info.longitude.toFixed(5)}`;
   summary.append(age, speed, updated, location);
+  if (info.emergencySOS) {
+    const emergency = document.createElement("strong");
+    emergency.className = "fleet-map-popup-emergency";
+    emergency.textContent = `EMERGENCY SOS · Active since ${new Date(info.emergencySOS.activatedAt).toLocaleString()}`;
+    summary.prepend(emergency);
+  }
   if (info.positionSource === "CELLULAR_LBS") {
     const approximate = document.createElement("strong");
     approximate.textContent = "Approximate cellular location";
@@ -349,6 +390,11 @@ function fleetPopupElement(
       ? "Accuracy unavailable"
       : `Accuracy ~${Math.round(info.positionAccuracyM)} m`;
     summary.append(approximate, accuracy);
+  }
+  if (info.positionSource === "SIMULATED_TEST") {
+    const simulated = document.createElement("strong");
+    simulated.textContent = "SIMULATED TEST POSITION DATA";
+    summary.append(simulated);
   }
   const context = document.createElement("div");
   context.className = "fleet-map-popup-context";
@@ -361,7 +407,9 @@ function fleetPopupElement(
   };
   const source = contextLine(
     "Source",
-    info.telemetrySource === "demo" ? "Demo telemetry" : "Real telemetry",
+    info.positionSource === "SIMULATED_TEST"
+      ? "SIMULATED TEST DATA"
+      : info.telemetrySource === "demo" ? "Demo telemetry" : "Real telemetry",
   );
   const driver = contextLine("Driver", info.driverName ?? "No active driver");
   const dispatch = contextLine(
@@ -369,6 +417,9 @@ function fleetPopupElement(
     info.assignmentStatus ?? "No active dispatch",
   );
   context.append(source, driver, dispatch);
+  if (info.activeRouteSummary) {
+    context.append(contextLine("Active route", info.activeRouteSummary));
+  }
   const obd = document.createElement("div");
   obd.className = "fleet-map-popup-obd";
   if (info.obdSource === "SIMULATED_TEST") {
@@ -408,8 +459,11 @@ function fleetPopupElement(
 export default function RequestMap({
   request,
   route,
+  plannedRoute,
   routeState,
+  routeCameraKey,
   operationalLocation,
+  recommendationPreview,
   numberedStops,
   fleetLocations,
   focusedVehicleId,
@@ -427,6 +481,7 @@ export default function RequestMap({
   onGeofenceSelect,
   onGeofenceCreateAt,
   onGeofenceDraftMapClick,
+  onUtilityPanelOpen,
 }: MapProps) {
   const tomTomKey = import.meta.env.VITE_TOMTOM_MAPS_KEY?.trim() ?? "";
   const containerRef = useRef<HTMLDivElement>(null);
@@ -672,17 +727,34 @@ export default function RequestMap({
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
         });
+      if (!map.getSource(plannedRouteSourceId))
+        map.addSource(plannedRouteSourceId, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+      if (!map.getLayer(plannedRouteCasingLayerId))
+        map.addLayer({
+          id: plannedRouteCasingLayerId,
+          type: "line",
+          source: plannedRouteSourceId,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: routeCasingPaint,
+        });
+      if (!map.getLayer(plannedRouteLayerId))
+        map.addLayer({
+          id: plannedRouteLayerId,
+          type: "line",
+          source: plannedRouteSourceId,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: plannedRouteLinePaint,
+        });
       if (!map.getLayer(routeCasingLayerId))
         map.addLayer({
           id: routeCasingLayerId,
           type: "line",
           source: routeSourceId,
           layout: { "line-cap": "round", "line-join": "round" },
-          paint: {
-            "line-color": "#fffdf9",
-            "line-width": 10,
-            "line-opacity": 0.72,
-          },
+          paint: routeCasingPaint,
         });
       if (!map.getLayer(routeLayerId))
         map.addLayer({
@@ -690,11 +762,7 @@ export default function RequestMap({
           type: "line",
           source: routeSourceId,
           layout: { "line-cap": "round", "line-join": "round" },
-          paint: {
-            "line-color": "#263d73",
-            "line-width": 6,
-            "line-opacity": 0.96,
-          },
+          paint: activeRouteLinePaint,
         });
       if (fleetLocationsRef.current !== undefined) {
         if (!map.getSource(geofenceSourceId))
@@ -767,6 +835,11 @@ export default function RequestMap({
             },
           });
       }
+      // Keep navigation geometry above raster traffic and operational
+      // overlays regardless of which optional layers were added.
+      tripRouteLayerOrder.forEach((layerId) => {
+        if (map.getLayer(layerId)) map.moveLayer(layerId);
+      });
       mapLoadedRef.current = true;
       setMapError(false);
       setMapLoaded(true);
@@ -910,6 +983,7 @@ export default function RequestMap({
         )
       : null;
     const routeCoordinates = route?.geometry?.coordinates ?? [];
+    const plannedRouteCoordinates = plannedRoute?.geometry?.coordinates ?? [];
     const routeData =
       routeCoordinates.length >= 2
         ? {
@@ -922,6 +996,20 @@ export default function RequestMap({
           }
         : { type: "FeatureCollection" as const, features: [] };
     (map.getSource(routeSourceId) as GeoJSONSource).setData(routeData);
+    const plannedRouteData =
+      plannedRouteCoordinates.length >= 2
+        ? {
+            type: "Feature" as const,
+            properties: {},
+            geometry: {
+              type: "LineString" as const,
+              coordinates: plannedRouteCoordinates,
+            },
+          }
+        : { type: "FeatureCollection" as const, features: [] };
+    (map.getSource(plannedRouteSourceId) as GeoJSONSource).setData(
+      plannedRouteData,
+    );
     if (fleetLocations !== undefined) {
       if (!map.getSource(fleetTrailSourceId))
         map.addSource(fleetTrailSourceId, {
@@ -1038,6 +1126,7 @@ export default function RequestMap({
         location.label,
         location.telemetryState,
         location.positionSource,
+        location.emergencySOS,
       );
       if (location.selected)
         element.classList.add("request-map-marker--selected");
@@ -1262,25 +1351,47 @@ export default function RequestMap({
           operationalLocation.longitude,
         )
       : null;
-    if (vehicleLocation && operationalLocation)
+    if (vehicleLocation && operationalLocation) {
+      const positionLabel =
+        operationalLocation.positionStatus === "STALE" ? "Last known" : "Current";
+      const element = fleetVehicleMarker(
+        operationalLocation.label,
+        operationalLocation.positionStatus === "STALE" ? "stale" : "live",
+      );
+      element.classList.add("request-map-marker--selected");
+      element.title = [
+        operationalLocation.label,
+        operationalLocation.plateNumber,
+        positionLabel,
+      ].filter(Boolean).join(" · ");
+      element.setAttribute("aria-label", `Recommended vehicle: ${element.title}`);
       markersRef.current.push(
         new maplibregl.Marker({
-          element: markerElement("vehicle", operationalLocation.label),
+          element,
           anchor: "center",
         })
           .setLngLat(vehicleLocation)
           .addTo(map),
       );
+    }
     const requestPoints =
       stopCoordinates.length > 0
         ? stopCoordinates
-        : routeCoordinates.length >= 2
-          ? [...routeCoordinates, pickup, destination]
+        : routeCoordinates.length >= 2 || plannedRouteCoordinates.length >= 2
+          ? [...routeCoordinates, ...plannedRouteCoordinates, pickup, destination]
           : [pickup, destination];
     const cameraPoints = [...requestPoints, ...fleetPoints];
     if (vehicleLocation) cameraPoints.push(vehicleLocation);
-    const cameraContext = `request:${pickup.join(",")}:${destination.join(",")}:${requestPoints.map((point) => point.join(",")).join(";")}`;
-    if (cameraContextRef.current !== cameraContext) {
+    const cameraContext = routeCameraKey
+      ? `route:${routeCameraKey}`
+      : `request:${pickup.join(",")}:${destination.join(",")}:${requestPoints.map((point) => point.join(",")).join(";")}`;
+    const routeCameraReady =
+      !routeCameraKey ||
+      routeCoordinates.length >= 2 ||
+      plannedRouteCoordinates.length >= 2 ||
+      routeState === "error" ||
+      routeState === "idle";
+    if (routeCameraReady && cameraContextRef.current !== cameraContext) {
       cameraContextRef.current = cameraContext;
       const bounds = cameraPoints.reduce(
         (result, coordinate) => result.extend(coordinate),
@@ -1312,6 +1423,9 @@ export default function RequestMap({
     operationalLocation,
     request,
     route?.geometry?.coordinates,
+    plannedRoute?.geometry?.coordinates,
+    routeCameraKey,
+    routeState,
     safetyEvents,
     styleRevision,
   ]);
@@ -1511,7 +1625,7 @@ export default function RequestMap({
           <small>Not saved. Geofence persistence is not configured yet.</small>
         </div>
       )}
-      {tomTomKey && fleetLocations !== undefined && (
+      {tomTomKey && fleetLocations !== undefined && !settingsOpen && (
         <div
           className={`fleet-map-search ${searchOpen ? "fleet-map-search--open" : ""}`}
           ref={searchRef}
@@ -1523,7 +1637,11 @@ export default function RequestMap({
             aria-label={searchOpen ? "Close map search" : "Search map places"}
             aria-expanded={searchOpen}
             onClick={() => {
-              setSearchOpen((value) => !value);
+              setSearchOpen((value) => {
+                const next = !value;
+                if (next) onUtilityPanelOpen?.();
+                return next;
+              });
               setSettingsOpen(false);
               setMapContextPoint(null);
             }}
@@ -1605,7 +1723,7 @@ export default function RequestMap({
           )}
         </div>
       )}
-      {tomTomKey && (
+      {tomTomKey && !searchOpen && (
         <div className="map-settings" ref={settingsRef}>
           <button
             type="button"
@@ -1613,7 +1731,15 @@ export default function RequestMap({
             title="Map settings"
             aria-label="Map settings"
             aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen((value) => !value)}
+            onClick={() => {
+              setSettingsOpen((value) => {
+                const next = !value;
+                if (next) onUtilityPanelOpen?.();
+                return next;
+              });
+              setSearchOpen(false);
+              setMapContextPoint(null);
+            }}
           >
             ⋮
           </button>
@@ -1738,14 +1864,23 @@ export default function RequestMap({
           )}
         </div>
       ) : request ? (
-        <div className="map-legend">
+        <div
+          className={`map-legend${recommendationPreview ? " recommendation-map-legend" : ""}`}
+          aria-label={recommendationPreview ? "Recommendation map legend" : undefined}
+        >
+          {recommendationPreview && (
+            <span>
+              <i className="recommended-vehicle-dot" />
+              Recommended Vehicle
+            </span>
+          )}
           <span>
             <i className="pickup-dot" />
-            {request.pickup_name}
+            {recommendationPreview ? `Pickup — ${request.pickup_name}` : request.pickup_name}
           </span>
           <span>
             <i className="destination-dot" />
-            {request.destination_name}
+            {recommendationPreview ? `Destination — ${request.destination_name}` : request.destination_name}
           </span>
         </div>
       ) : (

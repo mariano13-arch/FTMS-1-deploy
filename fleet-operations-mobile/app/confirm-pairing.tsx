@@ -11,9 +11,10 @@ import type { TelemetryDevice, Vehicle } from '@/types';
 
 export default function ConfirmPairingScreen() {
   const router = useRouter();
-  const { vehicleDeviceId, scannedDeviceId } = useLocalSearchParams<{
+  const { vehicleDeviceId, scannedDeviceId, registryResult } = useLocalSearchParams<{
     vehicleDeviceId: string;
     scannedDeviceId: string;
+    registryResult?: 'existing' | 'registered';
   }>();
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
   const [device, setDevice] = useState<TelemetryDevice | null>(null);
@@ -113,6 +114,12 @@ export default function ConfirmPairingScreen() {
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
       {vehicle && device ? (
         <>
+          {registryResult === 'existing' ? (
+            <Text style={styles.info}>Device already registered. Review its current binding before continuing.</Text>
+          ) : null}
+          {registryResult === 'registered' ? (
+            <Text style={styles.success}>Device registered. It remains unpaired until you explicitly confirm pairing.</Text>
+          ) : null}
           <View style={styles.card}>
             <Detail label="Vehicle" value={`${vehicle.displayName} / ${vehicle.plateNumber}`} />
             <Detail label="Device" value={device.deviceId} />
@@ -190,6 +197,7 @@ const styles = StyleSheet.create({
   value: { color: colors.ink, fontSize: 16 },
   error: { color: colors.danger, lineHeight: 20 },
   success: { color: colors.positive, fontWeight: '800' },
+  info: { color: colors.ink, fontWeight: '700', lineHeight: 20 },
   successCard: { gap: spacing.sm, padding: spacing.lg, backgroundColor: colors.surface, borderRadius: 12 },
   warningCard: { gap: spacing.md, padding: spacing.lg, backgroundColor: colors.burgundySoft, borderRadius: 12 },
   warningTitle: { color: colors.warning, fontWeight: '800', fontSize: 16 },

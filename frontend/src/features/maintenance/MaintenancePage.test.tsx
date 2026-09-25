@@ -6,11 +6,17 @@ const mocks = vi.hoisted(() => ({
   getVehicles: vi.fn(), getMaintenanceRecords: vi.fn(),
   createMaintenanceRecord: vi.fn(), transitionMaintenanceRecord: vi.fn(),
 }));
+const auth = vi.hoisted(() => ({ capabilities: [] as string[] }));
 vi.mock("../../services/vehicles", () => ({ getVehicles: mocks.getVehicles }));
 vi.mock("./api", () => ({
   getMaintenanceRecords: mocks.getMaintenanceRecords,
   createMaintenanceRecord: mocks.createMaintenanceRecord,
   transitionMaintenanceRecord: mocks.transitionMaintenanceRecord,
+}));
+vi.mock("../../contexts/AuthContext", () => ({
+  useAuth: () => ({
+    user: { capabilities: auth.capabilities },
+  }),
 }));
 
 const vehicles = { count: 1, next: null, previous: null, results: [{ device_id: "FTMS-001", display_name: "Service Van", plate_number: "ABC-123", is_active: true, latest_inspection: { id: 7, inspection_date: "2026-09-05", inspection_type: "PERIODIC", result: "PASSED" } }] };
@@ -23,6 +29,7 @@ beforeEach(() => {
   mocks.getMaintenanceRecords.mockResolvedValue(records);
   mocks.createMaintenanceRecord.mockResolvedValue(record);
   mocks.transitionMaintenanceRecord.mockResolvedValue({ ...record, status: "IN_PROGRESS" });
+  auth.capabilities = ["MAINTENANCE.VIEW", "MAINTENANCE.CREATE", "MAINTENANCE.SCHEDULE", "MAINTENANCE.START", "MAINTENANCE.COMPLETE", "MAINTENANCE.CANCEL"];
 });
 
 test("renders real maintenance records and valid lifecycle actions", async () => {
@@ -54,6 +61,7 @@ test("does not update locally when a lifecycle API call fails", async () => {
 });
 
 test("hides management controls for read-only staff", async () => {
+  auth.capabilities = ["MAINTENANCE.VIEW"];
   mocks.getMaintenanceRecords.mockResolvedValueOnce({ ...records, can_manage: false });
   render(<MaintenancePage />);
   await screen.findByText("Service Van");

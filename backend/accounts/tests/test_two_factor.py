@@ -65,6 +65,8 @@ class TwoFactorAuthenticationTests(TestCase):
         )
 
     def test_password_only_staff_login_remains_authenticated(self):
+        self.user.staff_profile.role = StaffProfile.Role.DISPATCHER
+        self.user.staff_profile.save(update_fields=["role"])
         response = self.password_login()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["user"]["username"], self.user.username)
@@ -158,6 +160,8 @@ class TwoFactorAuthenticationTests(TestCase):
         self.assertEqual(self.verify(new_challenge, "recovery", recovery_codes[0]).status_code, 401)
 
     def test_authenticated_setup_confirm_status_and_encrypted_secret(self):
+        self.user.staff_profile.role = StaffProfile.Role.DISPATCHER
+        self.user.staff_profile.save(update_fields=["role"])
         login = self.password_login()
         token = login.json()["csrf_token"]
         setup = self.client.post(
@@ -190,8 +194,9 @@ class TwoFactorAuthenticationTests(TestCase):
         status_response = self.client.get("/api/v1/auth/2fa/status/")
         self.assertEqual(
             set(status_response.json()),
-            {"enabled", "recovery_codes_remaining", "enabled_at"},
+            {"enabled", "required", "recovery_codes_remaining", "enabled_at"},
         )
+        self.assertFalse(status_response.json()["required"])
         self.assertEqual(status_response.json()["recovery_codes_remaining"], 8)
         duplicate = self.client.post(
             "/api/v1/auth/2fa/setup/", {}, format="json", HTTP_X_CSRFTOKEN=token
@@ -245,6 +250,8 @@ class TwoFactorAuthenticationTests(TestCase):
             )
 
     def test_disable_requires_current_password_and_second_factor(self):
+        self.user.staff_profile.role = StaffProfile.Role.DISPATCHER
+        self.user.staff_profile.save(update_fields=["role"])
         credential, secret = self.enabled_credential()
         self.client.force_login(self.user)
         token = self.csrf()
@@ -264,6 +271,8 @@ class TwoFactorAuthenticationTests(TestCase):
         self.assertFalse(TwoFactorRecoveryCode.objects.filter(credential_id=credential.pk).exists())
 
     def test_recovery_code_used_for_disable_cannot_be_reused(self):
+        self.user.staff_profile.role = StaffProfile.Role.DISPATCHER
+        self.user.staff_profile.save(update_fields=["role"])
         credential, _ = self.enabled_credential()
         recovery_code = issue_recovery_codes(credential)[0]
         self.client.force_login(self.user)

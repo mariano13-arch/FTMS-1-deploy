@@ -11,7 +11,7 @@ const categories = [
 
 export default function SettingsPage() {
   return <SettingsLayout><section className="settings-panel" aria-labelledby="settings-overview-title">
-    <header><div><h2 id="settings-overview-title">Settings Overview</h2><p>Current availability of system configuration areas.</p></div></header>
+    <header><div><h2 id="settings-overview-title">Settings Overview</h2></div></header>
     <div className="settings-category-list">{categories.map((item) => <Link to={item.to} key={item.to}>
       <span><strong>{item.name}</strong><small>{item.description}</small></span><SettingsStatus value={item.status} />
     </Link>)}</div>

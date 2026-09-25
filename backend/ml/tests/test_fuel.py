@@ -359,7 +359,7 @@ class FuelAnalyticsApiTests(TestCase):
         self.assertTrue(FuelPrediction.objects.filter(pk=legacy.pk).exists())
 
     def test_dashboard_time_windows_and_vehicle_filter_use_persisted_history(self):
-        now = timezone.now()
+        now = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
         for age, value in ((2, 1.0), (48, 2.0), (360, 3.0), (960, 4.0)):
             FuelPrediction.objects.create(
                 vehicle=self.vehicle,

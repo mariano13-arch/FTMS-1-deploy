@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from accounts.models import StaffProfile
+from accounts.models import RolePermission, StaffProfile
 from transport_requests.models import TransportRequest
 
 
@@ -17,6 +17,18 @@ class TransportRequestCreationAuthorizationTests(TestCase):
         self.dispatcher = self.staff("dispatcher", StaffProfile.Role.DISPATCHER)
         self.super_admin = get_user_model().objects.create_superuser(
             username="root", password="test"
+        )
+        StaffProfile.objects.create(
+            user=self.super_admin, role=StaffProfile.Role.FLEET_ADMIN
+        )
+        for role in (StaffProfile.Role.FLEET_MANAGER, StaffProfile.Role.DISPATCHER):
+            for action in ("VIEW", "EDIT"):
+                RolePermission.objects.get_or_create(
+                    role=role, module="TRANSPORT_REQUESTS", action=action
+                )
+        RolePermission.objects.get_or_create(
+            role=StaffProfile.Role.FLEET_MANAGER,
+            module="TRANSPORT_REQUESTS", action="APPROVE",
         )
         self.request_record = TransportRequest.objects.create(
             source_system=TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
@@ -73,7 +85,8 @@ class TransportRequestCreationAuthorizationTests(TestCase):
                 self.assertEqual(response.status_code, 403)
                 self.assertEqual(
                     response.json()["detail"],
-                    "Transport Request creation requires a trusted HMS/RMS integration identity.",
+                    "Transport Request creation requires a trusted HMS, RMS, or "
+                    "supply-chain integration identity.",
                 )
         self.assertEqual(TransportRequest.objects.count(), 1)
 

@@ -48,13 +48,16 @@ export default function TransportRequestFormPage({
   embedded = false,
   onClose,
   onSaved,
+  requestId: requestIdOverride,
 }: {
   editing?: boolean;
   embedded?: boolean;
   onClose?: () => void;
   onSaved?: (request: TransportRequest) => void;
+  requestId?: string;
 }) {
-  const { requestId = "" } = useParams<{ requestId: string }>();
+  const { requestId: routeRequestId = "" } = useParams<{ requestId: string }>();
+  const requestId = requestIdOverride ?? routeRequestId;
   const history = useHistory();
   const inFlight = useRef(false);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
@@ -119,6 +122,28 @@ export default function TransportRequestFormPage({
     else if (payload.load_quantity !== undefined)
       payload.load_quantity = Number(payload.load_quantity);
     if (payload.estimated_weight_kg === "") delete payload.estimated_weight_kg;
+    const flightNumber = String(payload.flight_number ?? "").trim();
+    const scheduledArrival = String(payload.flight_scheduled_arrival_at ?? "");
+    delete payload.flight_number;
+    delete payload.flight_date;
+    delete payload.flight_origin_airport;
+    delete payload.flight_arrival_airport;
+    delete payload.flight_terminal;
+    delete payload.flight_scheduled_arrival_at;
+    if (payload.request_type === "AIRPORT_PICKUP") {
+      payload.flight_context = flightNumber
+        ? {
+            flight_number: flightNumber,
+            flight_date: data.get("flight_date") || null,
+            origin_airport: data.get("flight_origin_airport") || "",
+            arrival_airport: data.get("flight_arrival_airport") || "",
+            terminal: data.get("flight_terminal") || "",
+            scheduled_arrival_at: scheduledArrival
+              ? new Date(scheduledArrival).toISOString()
+              : null,
+          }
+        : null;
+    }
     payload.scheduled_pickup_at = new Date(
       String(payload.scheduled_pickup_at),
     ).toISOString();
@@ -334,6 +359,41 @@ export default function TransportRequestFormPage({
             />
           )}
         </fieldset>
+
+        {requestType === "AIRPORT_PICKUP" && (
+          <fieldset className="form-section form-section--details">
+            <legend>Passenger / Flight Context</legend>
+            <label>
+              Flight number
+              <input name="flight_number" maxLength={20} defaultValue={existing?.flight_context?.flight_number ?? ""} />
+            </label>
+            <label>
+              Flight date
+              <input name="flight_date" type="date" defaultValue={existing?.flight_context?.flight_date ?? ""} />
+            </label>
+            <label>
+              Origin airport
+              <input name="flight_origin_airport" defaultValue={existing?.flight_context?.origin_airport ?? ""} />
+            </label>
+            <label>
+              Arrival airport
+              <input name="flight_arrival_airport" defaultValue={existing?.flight_context?.arrival_airport ?? ""} />
+            </label>
+            <label>
+              Terminal
+              <input name="flight_terminal" defaultValue={existing?.flight_context?.terminal ?? ""} />
+            </label>
+            <label>
+              Scheduled flight arrival
+              <input
+                name="flight_scheduled_arrival_at"
+                type="datetime-local"
+                defaultValue={existing?.flight_context?.scheduled_arrival_at ? new Date(new Date(existing.flight_context.scheduled_arrival_at).getTime() - new Date(existing.flight_context.scheduled_arrival_at).getTimezoneOffset() * 60_000).toISOString().slice(0, 16) : ""}
+              />
+            </label>
+            <small className="full-field">Flight data is advisory. Dispatch remains a staff decision.</small>
+          </fieldset>
+        )}
         <fieldset className="form-section form-section--details">
           <legend>Requester & Schedule</legend>
           <label>
@@ -525,7 +585,7 @@ export default function TransportRequestFormPage({
               className="btn-cancel"
               onClick={onClose}
             >
-              Cancel
+              {editing ? "Discard Changes" : "Close"}
             </button>
           ) : (
             <Link
@@ -536,7 +596,7 @@ export default function TransportRequestFormPage({
                   : "/transport-requests"
               }
             >
-              Cancel
+              {editing ? "Discard Changes" : "Close"}
             </Link>
           )}
           <button className="btn-confirm" disabled={busy}>

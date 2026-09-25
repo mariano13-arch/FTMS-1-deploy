@@ -1,5 +1,10 @@
 # API contracts
 
+> Historical sprint-era examples are retained in this file for traceability. They are
+> not the complete current contract. Use [FTMS Current API Reference](api-reference.md)
+> for the implemented endpoint inventory, authentication modes, P2-A capabilities,
+> telemetry versions 1.0–1.2, and current integration behavior.
+
 ## `GET /api/health/`
 
 The readiness endpoint performs a lightweight database query.
@@ -209,7 +214,7 @@ Vehicle endpoints are `GET/POST /api/v1/vehicles/`,
 `previous`, `results`), deterministic device-ID ordering, default size 20/max 100, and
 strict `search`, `is_active`, and `vehicle_type` filters.
 
-Super Admin may create/edit/change status; Fleet Manager may edit mutable details;
+Fleet Admin may create/edit/change status; Fleet Manager may edit mutable details;
 Dispatcher is read-only. All may view registry and live status. Latest-status requires a
 staff session. WebSocket closes are `4401` unauthenticated, `4403` unauthorized, and
 `4404` authorized but unknown, checked in that order. Existing snapshot/update schemas

@@ -68,11 +68,15 @@ export const plannedPaths = navigation
   .filter(
     (item) =>
       ![
+        "/dashboard",
         "/transport-requests",
         "/vehicles",
         "/drivers",
         "/dispatch-board",
         "/live-map",
         "/fuel-analytics",
+        "/devices",
+        "/alerts",
+        "/reports",
       ].includes(item.path),
   );

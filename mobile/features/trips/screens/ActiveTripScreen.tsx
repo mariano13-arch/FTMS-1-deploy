@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import type { Href } from 'expo-router';
 
 import { AppButton } from '@/components/AppButton';
 import { AppScreen } from '@/components/AppScreen';
 import { EmptyState } from '@/components/EmptyState';
+import TripRouteMap from '@/features/trips/components/TripRouteMap';
 import { ApiError } from '@/services/api';
 import {
   getDriverTrip,
   getDriverTripRoute,
-  getDriverTripVehiclePosition,
   transitionDriverTrip,
 } from '@/services/driverTrips';
 import { colors, spacing } from '@/theme';
@@ -19,10 +20,9 @@ import type {
   DriverTripExecutionAction,
   DriverTripExecutionStatus,
   DriverTripRoute,
-  DriverVehiclePosition,
 } from '@/types';
 
-const VEHICLE_POSITION_POLL_INTERVAL_MS = 15_000;
+const ACTIVE_ROUTE_POLL_INTERVAL_MS = 15_000;
 
 const EXECUTION_STAGES: {
   status: DriverTripExecutionStatus;
@@ -53,12 +53,27 @@ const EXECUTION_STAGES: {
 ];
 
 const ACTION_LABELS: Record<DriverTripExecutionAction, string> = {
-  START_TOWARD_PICKUP: 'Start Trip to Pickup',
-  ARRIVE_AT_PICKUP: "I've Arrived at Pickup",
+  START_TOWARD_PICKUP: 'Start to Pickup',
+  ARRIVE_AT_PICKUP: 'Arrived at Pickup',
   DEPART_PICKUP: 'Depart Pickup',
-  ARRIVE_AT_DESTINATION: "I've Arrived at Destination",
+  ARRIVE_AT_DESTINATION: 'Arrived at Destination',
   COMPLETE: 'Complete Trip',
 };
+
+function actionLabel(action: DriverTripExecutionAction, trip: DriverTrip) {
+  const supply =
+    trip.requestCategory === 'DELIVERY_LOGISTICS' &&
+    ['SUPPLIER_PICKUP', 'BRANCH_TRANSFER'].includes(trip.requestType);
+  if (action === 'DEPART_PICKUP') {
+    return supply ? 'Confirm Load Pickup & Depart' : 'Confirm Guest Pickup & Depart';
+  }
+  if (action === 'COMPLETE') {
+    return supply
+      ? 'Confirm Delivery Handover & Complete'
+      : 'Confirm Guest Drop-off & Complete';
+  }
+  return ACTION_LABELS[action];
+}
 
 const CONFIRMED_ACTIONS = new Set<DriverTripExecutionAction>([
   'DEPART_PICKUP',
@@ -83,6 +98,12 @@ function formatDistance(meters: number) {
 function formatDuration(seconds: number) {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return `${minutes} min`;
+}
+
+function formatPositionAge(seconds: number) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m old` : `${Math.max(1, minutes)}m old`;
 }
 
 function loadErrorMessage(error: unknown) {
@@ -116,10 +137,11 @@ function transitionErrorMessage(error: unknown) {
 
 function requestConfirmation(
   action: DriverTripExecutionAction,
+  label: string,
   onConfirm: () => void,
   onCancel: () => void,
 ) {
-  const message = `Confirm “${ACTION_LABELS[action]}”?`;
+  const message = `Confirm “${label}”?`;
   if (Platform.OS === 'web') {
     if (globalThis.confirm(message)) {
       onConfirm();
@@ -163,10 +185,6 @@ export default function ActiveTripScreen() {
   const [routeState, setRouteState] = useState<'loading' | 'ready' | 'error'>(
     tripId ? 'loading' : 'error',
   );
-  const [vehiclePosition, setVehiclePosition] = useState<DriverVehiclePosition | null>(null);
-  const [positionState, setPositionState] = useState<'loading' | 'ready' | 'error'>(
-    tripId ? 'loading' : 'error',
-  );
   const transitionInFlight = useRef(false);
   const confirmationPending = useRef(false);
 
@@ -204,62 +222,41 @@ export default function ActiveTripScreen() {
   }, [loadTrip]);
 
   useEffect(() => {
-    if (!tripId) {
-      return;
-    }
-    const controller = new AbortController();
-    setRouteState('loading');
-    void getDriverTripRoute(tripId, controller.signal)
-      .then((result) => {
-        setRoute(result);
-        setRouteState('ready');
-      })
-      .catch((routeError: unknown) => {
-        if (routeError instanceof Error && routeError.name === 'AbortError') {
-          return;
-        }
-        setRoute(null);
-        setRouteState('error');
-      });
-    return () => controller.abort();
-  }, [tripId]);
-
-  useEffect(() => {
-    if (!tripId || !trip || trip.execution.status === 'COMPLETED') {
+    if (!tripId || !trip?.isAccepted) {
       return;
     }
     let active = true;
     let controller: AbortController | null = null;
-    setPositionState('loading');
+    setRouteState('loading');
 
-    const fetchPosition = async () => {
+    const fetchRoute = async () => {
       controller?.abort();
       controller = new AbortController();
       try {
-        const result = await getDriverTripVehiclePosition(tripId, controller.signal);
+        const result = await getDriverTripRoute(tripId, controller.signal);
         if (active) {
-          setVehiclePosition(result);
-          setPositionState('ready');
+          setRoute(result);
+          setRouteState('ready');
         }
-      } catch (positionError) {
-        if (positionError instanceof Error && positionError.name === 'AbortError') {
+      } catch (routeError) {
+        if (routeError instanceof Error && routeError.name === 'AbortError') {
           return;
         }
         if (active) {
-          setVehiclePosition(null);
-          setPositionState('error');
+          setRoute(null);
+          setRouteState('error');
         }
       }
     };
 
-    void fetchPosition();
-    const interval = setInterval(() => void fetchPosition(), VEHICLE_POSITION_POLL_INTERVAL_MS);
+    void fetchRoute();
+    const interval = setInterval(() => void fetchRoute(), ACTIVE_ROUTE_POLL_INTERVAL_MS);
     return () => {
       active = false;
       clearInterval(interval);
       controller?.abort();
     };
-  }, [trip, tripId]);
+  }, [trip?.execution.status, trip?.isAccepted, tripId]);
 
   const submitAction = useCallback(
     async (action: DriverTripExecutionAction) => {
@@ -312,6 +309,7 @@ export default function ActiveTripScreen() {
       setIsConfirming(true);
       requestConfirmation(
         action,
+        actionLabel(action, trip!),
         () => {
           confirmationPending.current = false;
           setIsConfirming(false);
@@ -323,7 +321,7 @@ export default function ActiveTripScreen() {
         },
       );
     },
-    [submitAction],
+    [submitAction, trip],
   );
 
   const allowedActions = trip?.execution.allowedActions ?? [];
@@ -380,43 +378,34 @@ export default function ActiveTripScreen() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Route and vehicle position</Text>
-            <View style={styles.mapPlaceholder}>
-              <Text style={styles.mapPlaceholderTitle}>
-                {routeState === 'loading'
-                  ? 'Loading TomTom road route…'
-                  : routeState === 'ready'
-                    ? 'TomTom road route loaded'
-                    : 'Route currently unavailable'}
-              </Text>
-              <Text style={styles.mapPlaceholderText}>
-                In-app map display is unavailable until this build has an approved mobile map
-                renderer and client-safe TomTom Map Display credential.
-              </Text>
-            </View>
-            {positionState === 'loading' ? (
-              <Text style={styles.operationalNote}>Loading assigned-vehicle position…</Text>
-            ) : positionState === 'error' || !vehiclePosition ? (
-              <Text style={styles.operationalNote}>Vehicle location unavailable.</Text>
+            {trip.execution.status === 'COMPLETED' ? (
+              <Text style={styles.operationalNote}>Trip completed. Active navigation has ended.</Text>
+            ) : routeState === 'loading' ? (
+              <Text style={styles.operationalNote}>Loading active route…</Text>
+            ) : route ? (
+              <TripRouteMap activeRoute={route} />
             ) : (
+              <Text style={styles.operationalNote}>Route temporarily unavailable</Text>
+            )}
+            {route?.vehiclePosition ? (
               <View style={styles.positionRow}>
-                <View
-                  style={[
-                    styles.positionIndicator,
-                    vehiclePosition.isStale && styles.stalePositionIndicator,
-                  ]}
-                />
+                <View style={styles.positionIndicator} />
                 <View style={styles.positionCopy}>
                   <Text style={styles.positionTitle}>
-                    {vehiclePosition.isStale
-                      ? 'Last known vehicle position is stale'
-                      : 'Vehicle position is current'}
+                    {route.positionState === 'STALE' ? 'Last known position' : 'Vehicle position is current'}
                   </Text>
                   <Text style={styles.operationalNote}>
-                    Recorded {formatDateTime(vehiclePosition.recordedAt)}
+                    {route.vehiclePosition.source} · {route.positionState === 'STALE' && route.positionAgeSeconds !== null
+                      ? `updated ${formatPositionAge(route.positionAgeSeconds)}`
+                      : `recorded ${formatDateTime(route.vehiclePosition.recordedAt)}`}
                   </Text>
                 </View>
               </View>
-            )}
+            ) : route?.routeStatus === 'POSITION_UNAVAILABLE' ? <Text style={styles.operationalNote}>Vehicle position unavailable</Text> : null}
+            {route?.route ? <View style={styles.factsGrid}>
+              <Fact label={route.phase === 'TO_PICKUP' ? 'To Pickup' : 'To Destination'} value={formatDistance(route.route.distanceMeters)} />
+              <Fact label="TomTom travel time" value={formatDuration(route.route.durationSeconds)} />
+            </View> : null}
           </View>
 
           <View style={styles.section}>
@@ -427,25 +416,48 @@ export default function ActiveTripScreen() {
                 label="Vehicle"
                 value={`${trip.vehicle.displayName} · ${trip.vehicle.plateNumber}`}
               />
-              <Fact label="Passengers" value={String(trip.passengerCount)} />
+              {trip.requestCategory === 'DELIVERY_LOGISTICS' ? (
+                <Fact label="Load" value={trip.loadDescription || 'Description unavailable'} />
+              ) : (
+                <Fact label="Guests / passengers" value={String(trip.passengerCount)} />
+              )}
               <Fact
                 label="Request type"
                 value={trip.requestCategoryLabel ?? trip.requestTypeLabel}
               />
-              {route ? (
-                <Fact label="Road distance" value={formatDistance(route.distanceMeters)} />
+              {route?.route ? (
+                <Fact label="Road distance" value={formatDistance(route.route.distanceMeters)} />
               ) : null}
-              {route ? (
-                <Fact label="TomTom travel time" value={formatDuration(route.durationSeconds)} />
+              {route?.route ? (
+                <Fact label="TomTom travel time" value={formatDuration(route.route.durationSeconds)} />
               ) : null}
-              {route && route.trafficDelaySeconds > 0 ? (
+              {route?.route && route.route.trafficDelaySeconds > 0 ? (
                 <Fact
                   label="Traffic delay"
-                  value={formatDuration(route.trafficDelaySeconds)}
+                  value={formatDuration(route.route.trafficDelaySeconds)}
                 />
+              ) : null}
+              {trip.requestCategory === 'DELIVERY_LOGISTICS' ? (
+                <Fact label="Payload check" value={trip.capacityCompatibility?.message ?? 'Not evaluated'} />
+              ) : null}
+              {trip.flightContext ? (
+                <Fact label="Flight" value={`${trip.flightContext.flightNumber} · ${trip.flightContext.providerFlightStatus || trip.flightContext.refreshStatus}`} />
+              ) : trip.requestType === 'AIRPORT_PICKUP' ? (
+                <Fact label="Flight" value="Flight data unavailable" />
               ) : null}
             </View>
           </View>
+
+          <AppButton
+            label="Trip Receipts"
+            variant="secondary"
+            onPress={() =>
+              router.push({
+                pathname: '/trip-receipts',
+                params: { tripId: trip.id, requestNumber: trip.requestNumber },
+              } as unknown as Href)
+            }
+          />
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Execution timeline</Text>
@@ -502,7 +514,7 @@ export default function ActiveTripScreen() {
           ) : primaryAction ? (
             <AppButton
               disabled={isTransitioning || isConfirming}
-              label={isTransitioning ? 'Updating…' : ACTION_LABELS[primaryAction]}
+              label={isTransitioning ? 'Updating…' : actionLabel(primaryAction, trip)}
               onPress={() => handleAction(primaryAction)}
             />
           ) : trip.execution.status === 'COMPLETED' ? (
@@ -619,25 +631,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   factValue: { color: colors.ink, fontSize: 14, fontWeight: '700', lineHeight: 19 },
-  mapPlaceholder: {
-    minHeight: 190,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: spacing.sm,
-    padding: spacing.xl,
-    backgroundColor: colors.canvas,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  mapPlaceholderTitle: { color: colors.ink, fontSize: 16, fontWeight: '800' },
-  mapPlaceholderText: {
-    maxWidth: 460,
-    color: colors.muted,
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'center',
-  },
   operationalNote: { color: colors.muted, fontSize: 13, lineHeight: 18 },
   positionRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   positionIndicator: {
@@ -647,7 +640,6 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: colors.positive,
   },
-  stalePositionIndicator: { backgroundColor: colors.warning },
   positionCopy: { flex: 1, gap: 2 },
   positionTitle: { color: colors.ink, fontSize: 14, fontWeight: '700' },
   timeline: { gap: spacing.sm },

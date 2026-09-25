@@ -16,6 +16,7 @@ from transport_requests.models import (
     DispatchAssignment,
     DispatchExecutionEvent,
     IntegrationClient,
+    SourceResultOutbox,
     TransportRequest,
     TransportRequestEvent,
 )
@@ -37,6 +38,10 @@ class SourceIntegrationApiTests(TestCase):
         self.restaurant, self.restaurant_credential = create_integration_client(
             name="Oxford Restaurant",
             source_system=TransportRequest.SourceSystem.RESTAURANT_MANAGEMENT_SYSTEM,
+        )
+        self.supply_chain, self.supply_chain_credential = create_integration_client(
+            name="Oxford Inventory",
+            source_system=TransportRequest.SourceSystem.SUPPLY_CHAIN_MANAGEMENT_SYSTEM,
         )
 
     @staticmethod
@@ -69,7 +74,7 @@ class SourceIntegrationApiTests(TestCase):
             f"/api/v1/integrations/transport-requests/{reference}/"
         )
 
-    def test_hotel_and_restaurant_credentials_authenticate_and_bind_source(self):
+    def test_connected_source_credentials_authenticate_and_bind_source(self):
         hotel_response = self.client_for(self.hotel_credential).post(
             self.ingestion_url,
             self.payload("HMS-001"),
@@ -86,13 +91,30 @@ class SourceIntegrationApiTests(TestCase):
             ),
             format="json",
         )
+        supply_response = self.client_for(self.supply_chain_credential).post(
+            self.ingestion_url,
+            self.payload(
+                "SCMS-001",
+                request_type="SUPPLIER_PICKUP",
+                passenger_count=0,
+                load_description="Guest room supplies",
+                load_quantity=24,
+                estimated_weight_kg="400.00",
+            ),
+            format="json",
+        )
 
         self.assertEqual(hotel_response.status_code, 201)
         self.assertEqual(restaurant_response.status_code, 201)
+        self.assertEqual(supply_response.status_code, 201)
         self.assertEqual(hotel_response.json()["source_system"], "HOTEL_MANAGEMENT_SYSTEM")
         self.assertEqual(
             restaurant_response.json()["source_system"],
             "RESTAURANT_MANAGEMENT_SYSTEM",
+        )
+        self.assertEqual(
+            supply_response.json()["source_system"],
+            "SUPPLY_CHAIN_MANAGEMENT_SYSTEM",
         )
         self.assertEqual(
             TransportRequest.objects.get(external_reference="HMS-001").created_by,
@@ -170,6 +192,33 @@ class SourceIntegrationApiTests(TestCase):
             ).count(),
             1,
         )
+
+    def test_airport_flight_context_is_ingested_and_compared_idempotently(self):
+        client = self.client_for(self.hotel_credential)
+        payload = self.payload(
+            "HMS-FLIGHT-REPLAY",
+            flight_context={
+                "flight_number": "PR 123",
+                "flight_date": timezone.localdate().isoformat(),
+                "arrival_airport": "NAIA",
+                "terminal": "3",
+            },
+        )
+        created = client.post(self.ingestion_url, payload, format="json")
+        replayed = client.post(self.ingestion_url, payload, format="json")
+        changed = client.post(
+            self.ingestion_url,
+            {**payload, "flight_context": {**payload["flight_context"], "terminal": "2"}},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(replayed.status_code, 200)
+        self.assertEqual(
+            TransportRequest.objects.get(external_reference="HMS-FLIGHT-REPLAY")
+            .flight_context.flight_number,
+            "PR 123",
+        )
+        self.assertEqual(changed.status_code, 409)
 
     def test_polling_is_source_scoped_even_for_shared_external_reference(self):
         reference = "SHARED-001"
@@ -344,6 +393,7 @@ class SourceIntegrationApiTests(TestCase):
 
         item = TransportRequest.objects.get(external_reference=reference)
         services.approve(item, manager)
+        services.prepare_dispatch(item, manager)
         assignment = dispatch.confirm_assignment(
             transport_request_id=item.pk,
             vehicle_id=vehicle.pk,
@@ -352,7 +402,6 @@ class SourceIntegrationApiTests(TestCase):
             user=manager,
             override_reason="Final integrated workflow regression",
         )
-        services.prepare_dispatch(item, manager)
         assignment, accepted = accept_driver_assignment(
             assignment_id=assignment.pk,
             driver=driver,
@@ -385,11 +434,19 @@ class SourceIntegrationApiTests(TestCase):
         )
         self.assertFalse(changed)
         self.assertEqual(assignment.execution_events.count(), 5)
+        result_event = SourceResultOutbox.objects.get(transport_request=item)
+        self.assertEqual(
+            result_event.delivery_status,
+            SourceResultOutbox.DeliveryStatus.UNCONFIGURED,
+        )
+        self.assertEqual(result_event.payload["status"], "COMPLETED")
+        self.assertEqual(SourceResultOutbox.objects.filter(transport_request=item).count(), 1)
 
         completed = self.poll(self.hotel_credential, reference).json()
         self.assertEqual(completed["external_reference"], reference)
         self.assertEqual(completed["status"], "COMPLETED")
         self.assertEqual(completed["execution_status"], "COMPLETED")
+        self.assertEqual(completed["result_delivery"]["status"], "UNCONFIGURED")
         self.assertEqual(
             completed["completion_timestamp"],
             completion_timestamp.isoformat().replace("+00:00", "Z"),

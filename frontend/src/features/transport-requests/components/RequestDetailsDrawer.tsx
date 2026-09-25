@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "../../../contexts/AuthContext";
-import { getRequest, mutateRequest } from "../api";
+import { getRequest, mutateRequest, refreshRequestFlight } from "../api";
 import LoadingIndicator from "../../../components/common/LoadingIndicator";
 import {
   canCancelRequest,
   canEditRequest,
+  canPrepareRequest,
   canResubmitRequest,
   isRequestManager,
 } from "../requestActionRules";
@@ -15,11 +15,13 @@ import type { TransportRequest, TransportRoute } from "../types";
 import ActionDialog, { type ActionDialogState } from "./ActionDialog";
 import { PriorityChip, WorkflowStatusBadge } from "./RequestIndicators";
 import { humanize as label } from "../../../utils/text";
+import TransportRequestFormPage from "../pages/TransportRequestFormPage";
 
 type Props = {
   requestId: string;
   route?: TransportRoute | null;
-  allowReviewActions?: boolean;
+  standalone?: boolean;
+  mode?: "readOnly" | "review" | "dispatchPreparation";
   onRequestChanged?: (request: TransportRequest) => void;
   onClose: () => void;
 };
@@ -27,7 +29,8 @@ type Props = {
 export default function RequestDetailsDrawer({
   requestId,
   route,
-  allowReviewActions = false,
+  standalone = false,
+  mode = "readOnly",
   onRequestChanged,
   onClose,
 }: Props) {
@@ -37,8 +40,44 @@ export default function RequestDetailsDrawer({
   const [dialog, setDialog] = useState<ActionDialogState | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [flightBusy, setFlightBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const dialogRef = useRef<ActionDialogState | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (standalone) return;
+    const backdrop = backdropRef.current;
+    const workspace = backdrop?.closest(".request-right-workspace");
+    const requestWorkspace = workspace?.closest(".request-workspace");
+    const queue = requestWorkspace?.querySelector(".request-picker");
+    if (
+      !backdrop ||
+      !(workspace instanceof HTMLElement) ||
+      !(queue instanceof HTMLElement)
+    ) return;
+    const alignToWorkspace = () => {
+      const queueClearance = Math.min(
+        170,
+        Math.max(120, window.innerWidth * 0.09),
+      );
+      const left = window.innerWidth <= 760
+        ? 0
+        : queue.getBoundingClientRect().right + queueClearance;
+      backdrop.style.setProperty("--request-drawer-left", `${Math.max(0, left)}px`);
+    };
+    alignToWorkspace();
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(alignToWorkspace);
+    observer?.observe(workspace);
+    observer?.observe(queue);
+    window.addEventListener("resize", alignToWorkspace);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", alignToWorkspace);
+    };
+  }, [standalone]);
   useEffect(() => {
     const controller = new AbortController();
     void getRequest(requestId, controller.signal)
@@ -82,17 +121,37 @@ export default function RequestDetailsDrawer({
     }
   };
   const delivery = request?.request_category === "DELIVERY_LOGISTICS";
+  const supply = delivery && ["SUPPLIER_PICKUP", "BRANCH_TRANSFER"].includes(request?.request_type ?? "");
   const role = user?.role;
   const manager = isRequestManager(role);
   const hasActions =
     request &&
-    (canEditRequest(request.status, role) ||
-      canResubmitRequest(request.status, role) ||
-      canCancelRequest(request.status, role) ||
-      (allowReviewActions && manager && request.status === "FOR_APPROVAL"));
+    ((mode === "review" &&
+      (canEditRequest(request.status, role) ||
+        canResubmitRequest(request.status, role) ||
+        canCancelRequest(request.status, role) ||
+        (manager && request.status === "FOR_APPROVAL"))) ||
+      (mode === "dispatchPreparation" &&
+        (canPrepareRequest(request.status, role) ||
+          canCancelRequest(request.status, role))));
+  const refreshFlight = async () => {
+    if (!request || flightBusy) return;
+    setFlightBusy(true);
+    setActionError("");
+    try {
+      const updated = await refreshRequestFlight(request.id);
+      setRequest(updated);
+      onRequestChanged?.(updated);
+    } catch (reason) {
+      setActionError(safeError(reason));
+    } finally {
+      setFlightBusy(false);
+    }
+  };
   return (
     <div
-      className="request-drawer-backdrop"
+      ref={backdropRef}
+      className={`request-drawer-backdrop${standalone ? " request-drawer-backdrop--standalone" : " request-drawer-backdrop--workspace"}`}
       data-testid="request-workspace-backdrop"
     >
       <aside
@@ -101,6 +160,20 @@ export default function RequestDetailsDrawer({
         aria-modal="true"
         aria-labelledby="request-drawer-title"
       >
+        {editing ? (
+          <TransportRequestFormPage
+            editing
+            embedded
+            requestId={requestId}
+            onClose={() => setEditing(false)}
+            onSaved={(updated) => {
+              setRequest(updated);
+              onRequestChanged?.(updated);
+              setEditing(false);
+            }}
+          />
+        ) : (
+          <>
         <header className="d-flex align-items-start justify-content-between">
           <div>
             <small>
@@ -231,7 +304,7 @@ export default function RequestDetailsDrawer({
                 )}
               </section>
               <section>
-                <h3>{delivery ? "Delivery details" : "Passenger details"}</h3>
+                <h3>{supply ? "Supply / load context" : delivery ? "Delivery details" : "Passenger details"}</h3>
                 {delivery ? (
                   <dl>
                     <div className="wide">
@@ -276,6 +349,33 @@ export default function RequestDetailsDrawer({
                   </dl>
                 )}
               </section>
+              {request.request_type === "AIRPORT_PICKUP" && (
+                <section>
+                  <h3>Passenger / flight context</h3>
+                  {request.flight_context ? (
+                    <dl>
+                      <div><dt>Flight</dt><dd>{request.flight_context.flight_number}</dd></div>
+                      <div><dt>Flight status</dt><dd>{request.flight_context.provider_flight_status || label(request.flight_context.refresh_status)}</dd></div>
+                      <div><dt>Arrival</dt><dd>{request.flight_context.actual_arrival_at ? new Date(request.flight_context.actual_arrival_at).toLocaleString() : request.flight_context.estimated_arrival_at ? new Date(request.flight_context.estimated_arrival_at).toLocaleString() : request.flight_context.scheduled_arrival_at ? new Date(request.flight_context.scheduled_arrival_at).toLocaleString() : "Unavailable"}</dd></div>
+                      <div><dt>Terminal</dt><dd>{request.flight_context.terminal || "Unavailable"}</dd></div>
+                      <div className="wide"><dt>Provider</dt><dd>Flightradar24 · {request.flight_context.refresh_message || "Not refreshed"}</dd></div>
+                    </dl>
+                  ) : (
+                    <p>Flight data unavailable. No flight reference was supplied.</p>
+                  )}
+                  {request.flight_context && (
+                    <button
+                      type="button"
+                      className="button btn-action--outline"
+                      disabled={flightBusy}
+                      onClick={() => void refreshFlight()}
+                    >
+                      {flightBusy ? "Refreshing…" : "Refresh flight data"}
+                    </button>
+                  )}
+                  {actionError && !dialog && <p role="alert">{actionError}</p>}
+                </section>
+              )}
               {request.notes && (
                 <section>
                   <h3>Notes / special requirements</h3>
@@ -316,8 +416,7 @@ export default function RequestDetailsDrawer({
         {state === "ready" && request && hasActions && (
           <footer className="request-drawer-actions">
             <div className="d-flex flex-wrap align-items-center gap-2">
-              {allowReviewActions &&
-                manager &&
+              {mode === "review" && manager &&
                 request.status === "FOR_APPROVAL" && (
                   <>
                     <button
@@ -370,15 +469,16 @@ export default function RequestDetailsDrawer({
                     </button>
                   </>
                 )}
-              {canEditRequest(request.status, role) && (
-                <Link
+              {mode === "review" && canEditRequest(request.status, role) && (
+                <button
+                  type="button"
                   className="button btn-action--filled"
-                  to={`/transport-requests/${request.id}/edit`}
+                  onClick={() => setEditing(true)}
                 >
                   Edit request
-                </Link>
+                </button>
               )}
-              {canResubmitRequest(request.status, role) && (
+              {mode === "review" && canResubmitRequest(request.status, role) && (
                 <button
                   className="btn-confirm"
                   disabled={busy}
@@ -396,6 +496,24 @@ export default function RequestDetailsDrawer({
                   Resubmit for Approval
                 </button>
               )}
+              {mode === "dispatchPreparation" && canPrepareRequest(request.status, role) && (
+                <button
+                  className="btn-confirm"
+                  disabled={busy}
+                  onClick={() =>
+                    open({
+                      action: "prepare-dispatch",
+                      title: "Prepare for Dispatch",
+                      description:
+                        "Release this approved request to the Dispatch Board. No vehicle or driver will be assigned by this action.",
+                      confirmLabel: "Prepare for Dispatch",
+                      note: "hidden",
+                    })
+                  }
+                >
+                  Prepare for Dispatch
+                </button>
+              )}
               {canCancelRequest(request.status, role) && (
                 <button
                   className="button--danger"
@@ -408,6 +526,7 @@ export default function RequestDetailsDrawer({
                         "Cancel this request and preserve its recorded history.",
                       confirmLabel: "Cancel Request",
                       note: "required",
+                      dismissLabel: "Keep Request",
                     })
                   }
                 >
@@ -416,6 +535,8 @@ export default function RequestDetailsDrawer({
               )}
             </div>
           </footer>
+        )}
+          </>
         )}
       </aside>
       {dialog && (

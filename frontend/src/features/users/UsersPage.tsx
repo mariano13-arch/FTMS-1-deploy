@@ -19,6 +19,7 @@ import "./UsersPage.css";
 const roleLabels: Record<ManagedRole, string> = {
   FLEET_MANAGER: "Fleet Manager",
   DISPATCHER: "Dispatcher",
+  FLEET_STAFF: "Fleet Staff",
 };
 
 const emptyForm: CreateStaffInput = {
@@ -199,7 +200,7 @@ function StaffUsersManager() {
 
   return <div className="users-page">
     <header className="users-header">
-      <div><h2>Staff Users</h2><p>Manage staff access, account status, roles, and setup invitations.</p></div>
+      <div><h2>Staff Users</h2></div>
       <button className="users-button users-button--primary" type="button" onClick={() => setShowCreate(true)}><Plus size={15} /> Add User</button>
     </header>
 
@@ -252,7 +253,7 @@ function StaffUsersManager() {
         <div className="users-form-grid"><label>First Name<input required value={form.first_name} onChange={(event) => setForm({ ...form, first_name: event.target.value })} /></label><label>Last Name<input required value={form.last_name} onChange={(event) => setForm({ ...form, last_name: event.target.value })} /></label></div>
         <label>Username<input required autoComplete="username" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label>
         <label>Email<input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
-        <label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as ManagedRole })}><option value="FLEET_MANAGER">Fleet Manager</option><option value="DISPATCHER">Dispatcher</option></select></label>
+        <label>Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as ManagedRole })}><option value="FLEET_MANAGER">Fleet Manager</option><option value="DISPATCHER">Dispatcher</option><option value="FLEET_STAFF">Fleet Staff</option></select></label>
         <p className="users-form-note">The user will choose their password from the emailed one-time setup invitation.</p>
         <footer><button type="button" className="users-button" onClick={() => setShowCreate(false)}>Cancel</button><button className="users-button users-button--primary" disabled={busyKey === "create"}>{busyKey === "create" ? "Creating…" : "Create & Send Invitation"}</button></footer>
       </form>
@@ -271,7 +272,7 @@ function StaffUsersManager() {
     </section></div>}
     {roleUser && <div className="users-dialog-backdrop" role="presentation"><section className="users-dialog users-role-dialog" role="dialog" aria-modal="true" aria-labelledby="change-role-title">
       <header><div><span className="users-kicker">{roleUser.username}</span><h2 id="change-role-title">Change Role</h2></div><button type="button" aria-label="Close role editor" onClick={() => setRoleUser(null)}>×</button></header>
-      <label>Role<select aria-label={`New role for ${roleUser.username}`} value={roleDraft} onChange={(event) => setRoleDraft(event.target.value as ManagedRole)}><option value="FLEET_MANAGER">Fleet Manager</option><option value="DISPATCHER">Dispatcher</option></select></label>
+      <label>Role<select aria-label={`New role for ${roleUser.username}`} value={roleDraft} onChange={(event) => setRoleDraft(event.target.value as ManagedRole)}><option value="FLEET_MANAGER">Fleet Manager</option><option value="DISPATCHER">Dispatcher</option><option value="FLEET_STAFF">Fleet Staff</option></select></label>
       <footer><button type="button" className="users-button" onClick={() => setRoleUser(null)}>Cancel</button><button type="button" className="users-button users-button--primary" disabled={roleDraft === roleUser.role || Boolean(busyKey)} onClick={() => void saveRole(roleUser)}>{busyKey === `role-${roleUser.id}` ? "Saving…" : "Save Role"}</button></footer>
     </section></div>}
     {ConfirmModalComponent}
@@ -280,8 +281,8 @@ function StaffUsersManager() {
 
 export default function UsersPage() {
   const { user } = useAuth();
-  if (user?.role !== "SUPER_ADMIN") {
-    return <main className="users-page users-access-denied"><ShieldAlert size={28} /><h1>Access denied</h1><p>Only a Super Admin can manage staff accounts.</p></main>;
+  if (user?.role !== "FLEET_ADMIN") {
+    return <main className="users-page users-access-denied"><ShieldAlert size={28} /><h1>Access denied</h1><p>Only a Fleet Admin can manage staff accounts.</p></main>;
   }
   return <UsersAccessLayout><StaffUsersManager /></UsersAccessLayout>;
 }

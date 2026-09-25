@@ -34,6 +34,7 @@ def _register_session(user, session_key):
             registration.save(update_fields=["session_key", "updated_at"])
     if old_session_key:
         Session.objects.filter(session_key=old_session_key).delete()
+    return old_session_key is not None
 
 
 def establish_authenticated_session(request, user):
@@ -43,7 +44,7 @@ def establish_authenticated_session(request, user):
     request.session[LAST_ACTIVITY_AT] = now
     request.session.set_expiry(0)
     request.session.save()
-    _register_session(user, request.session.session_key)
+    return _register_session(user, request.session.session_key)
 
 
 def _unregister_if_current(user, session_key):
@@ -57,6 +58,15 @@ def end_authenticated_session(request, user):
     session_key = request.session.session_key
     _unregister_if_current(user, session_key)
     logout(request)
+
+
+def invalidate_authenticated_sessions(user):
+    registration = ActiveUserSession.objects.filter(user=user).only("session_key").first()
+    if registration:
+        Session.objects.filter(session_key=registration.session_key).delete()
+        registration.delete()
+        return True
+    return False
 
 
 def _expire(request, user, message):

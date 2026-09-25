@@ -162,7 +162,7 @@ class Command(BaseCommand):
         )
         if not creator:
             raise CommandError(
-                "Create an active Super Admin or Fleet Manager before seeding requests."
+                "Create an active Fleet Admin or Fleet Manager before seeding requests."
             )
 
         now = timezone.now().replace(minute=0, second=0, microsecond=0)

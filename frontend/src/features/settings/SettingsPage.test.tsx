@@ -10,6 +10,7 @@ import { IntegrationsSettingsPage, OperationalRulesSettingsPage, SecuritySetting
 const mocks = vi.hoisted(() => ({ fuelModel: vi.fn(), fuelReadiness: vi.fn(), maintenanceModel: vi.fn(), maintenanceReadiness: vi.fn() }));
 vi.mock("../fuel-analytics/api", () => ({ getFuelModelInfo: mocks.fuelModel, getFuelReadiness: mocks.fuelReadiness }));
 vi.mock("../maintenance/api", () => ({ getMaintenanceModelInfo: mocks.maintenanceModel, getMaintenanceReadiness: mocks.maintenanceReadiness }));
+vi.mock("../../contexts/AuthContext", () => ({ useAuth: () => ({ user: { role: "FLEET_ADMIN", capabilities: [] } }) }));
 
 const fuelModel = { model_name: "FTMS Fuel Estimator", model_version: "experiment-3", model_type: "XGBoost Regressor", model_role: "Selected deployable candidate", target: "estimated_fuel_lph", features: ["engine_load", "rpm"], excluded_leakage_features: [], metrics: { mae_lph: 1, rmse_lph: 2, r2: .8 }, hyperparameters: {}, prediction_semantics: "model_estimate", accuracy_note: "Estimated fuel rate is not measured consumption.", availability: "available", is_estimate: true };
 const fuelReadiness = { inputs: [{ feature: "engine_load", status: "available", source: "telemetry", note: "" }, { feature: "rpm", status: "missing", source: null, note: "not mapped" }], latest_telemetry: null, latest_operational_result: {} };
@@ -48,14 +49,14 @@ describe("System Rules & Settings workspace", () => {
     storage.mockRestore();
   });
 
-  test("shows real staff 2FA status while leaving other Security items planned", async () => {
+  test("shows real staff 2FA and password controls while leaving sessions planned", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ enabled: false, recovery_codes_remaining: 0, enabled_at: null }), { headers: { "Content-Type": "application/json" } }));
     renderAt(<SecuritySettingsPage />, "/settings/security");
     expect(screen.getByRole("link", { name: "Security" })).toHaveClass("active");
-    for (const section of ["Two-Factor Authentication", "Password", "Active Sessions"]) expect(screen.getByText(section)).toBeInTheDocument();
+    for (const section of ["Two-Factor Authentication", "Change Password", "Active Sessions"]) expect(screen.getByText(section)).toBeInTheDocument();
     expect(await screen.findByText("Disabled")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set up authenticator" })).toBeInTheDocument();
-    expect(screen.getAllByText("Planned")).toHaveLength(2);
+    expect(screen.getAllByText("Planned")).toHaveLength(1);
   });
 
   test("renders real setup data and displays recovery codes only from confirmation", async () => {
@@ -72,6 +73,43 @@ describe("System Rules & Settings workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm setup" }));
     expect(await screen.findByText(/CODE-ONE/)).toBeInTheDocument();
     expect(screen.getByText(/Recovery codes remaining: 2/)).toBeInTheDocument();
+  });
+
+  test("mandatory roles see the MFA policy instead of a disable action", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({
+      enabled: true, required: true, recovery_codes_remaining: 8,
+      enabled_at: "2026-09-24T00:00:00Z",
+    }), { headers: { "Content-Type": "application/json" } }));
+    renderAt(<SecuritySettingsPage />, "/settings/security");
+    expect(await screen.findByText("MFA is required for this role.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disable 2FA" })).not.toBeInTheDocument();
+  });
+
+  test("shows wrong-current-password errors in the Change Password form", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ enabled: false, recovery_codes_remaining: 0, enabled_at: null }), { headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ current_password: ["Current password is incorrect."] }), { status: 400, headers: { "Content-Type": "application/json" } }));
+    renderAt(<SecuritySettingsPage />, "/settings/security");
+    await screen.findByText("Disabled");
+    fireEvent.change(screen.getByLabelText("Change current password"), { target: { value: "wrong" } });
+    fireEvent.change(screen.getByLabelText("Change new password"), { target: { value: "A-strong-password-42!" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "A-strong-password-42!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Current password is incorrect");
+  });
+
+  test("successful password change returns the user to login", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ enabled: false, recovery_codes_remaining: 0, enabled_at: null }), { headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const history = createMemoryHistory({ initialEntries: ["/settings/security"] });
+    render(<Router history={history}><SecuritySettingsPage /></Router>);
+    await screen.findByText("Disabled");
+    fireEvent.change(screen.getByLabelText("Change current password"), { target: { value: "old" } });
+    fireEvent.change(screen.getByLabelText("Change new password"), { target: { value: "A-strong-password-42!" } });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), { target: { value: "A-strong-password-42!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    await vi.waitFor(() => expect(history.location.pathname).toBe("/login"));
   });
 
   test("shows only truthful read-only Operational Rules", () => {

@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.test import APIClient
 
-from accounts.models import StaffProfile
+from accounts.models import RolePermission, StaffProfile
 from fleet.maintenance import maintenance_readiness
 from fleet.models import Driver, Vehicle, VehicleInspection, VehicleMaintenanceRecord
 from transport_requests import dispatch, services
@@ -24,13 +24,22 @@ class VehicleMaintenanceTests(TestCase):
         self.inspection = self.inspect(self.vehicle, VehicleInspection.Result.PASSED)
         self.client = APIClient()
         self.client.force_authenticate(self.manager)
+        for action in ("VIEW", "CREATE", "SCHEDULE", "START", "COMPLETE", "CANCEL"):
+            RolePermission.objects.get_or_create(
+                role=StaffProfile.Role.FLEET_MANAGER, module="MAINTENANCE", action=action
+            )
+        RolePermission.objects.get_or_create(
+            role=StaffProfile.Role.DISPATCHER, module="MAINTENANCE", action="VIEW"
+        )
 
     def user(self, username, role=None, superuser=False):
         user = get_user_model().objects.create_user(
             username=username, is_staff=True, is_superuser=superuser
         )
-        if role:
-            StaffProfile.objects.create(user=user, role=role)
+        StaffProfile.objects.create(
+            user=user,
+            role=role or StaffProfile.Role.FLEET_ADMIN,
+        )
         return user
 
     def make_vehicle(self, device_id):
@@ -178,7 +187,7 @@ class VehicleMaintenanceTests(TestCase):
             estimated_duration_minutes=60,
             required_vehicle_type=Vehicle.VehicleType.VAN,
             passenger_count=4,
-            status=TransportRequest.Status.APPROVED,
+            status=TransportRequest.Status.READY_FOR_DISPATCH,
             created_by=self.manager,
         )
 

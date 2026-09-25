@@ -4,15 +4,18 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from accounts.models import StaffProfile
-from accounts.roles import SUPER_ADMIN, resolve_role
+from accounts.models import StaffProfile, UserNotification
+from accounts.notifications import notify_capability_users
+from accounts.roles import resolve_role
 from fleet.inspection_readiness import inspection_readiness
 from fleet.maintenance import maintenance_readiness
 from fleet.models import Vehicle
+from fleet.number_coding import evaluate_vehicle_number_coding
 
+from .domain import is_supply_request
 from .models import TransportRequest, TransportRequestEvent
 
-MANAGERS = {SUPER_ADMIN, StaffProfile.Role.FLEET_MANAGER}
+MANAGERS = {StaffProfile.Role.FLEET_ADMIN, StaffProfile.Role.FLEET_MANAGER}
 OPERATORS = MANAGERS | {StaffProfile.Role.DISPATCHER}
 ALLOCATING_STATUSES = {
     TransportRequest.Status.APPROVED,
@@ -91,9 +94,7 @@ def allocation_conflicts(request, vehicle):
             status__in=ALLOCATING_STATUSES,
             scheduled_pickup_at__lt=requested_end,
         )
-        .exclude(
-            dispatch_assignment__execution_status="COMPLETED"
-        )
+        .exclude(dispatch_assignment__execution_status="COMPLETED")
         .exclude(pk=request.pk)
         .order_by("scheduled_pickup_at", "pk")
     )
@@ -113,10 +114,27 @@ def validate_vehicle(request, vehicle, *, require_new_assignment_readiness=True)
         raise serializers.ValidationError(
             {"vehicle": "Vehicle passenger capacity is lower than the passenger count."}
         )
+    if is_supply_request(request) and request.estimated_weight_kg is not None:
+        if vehicle.payload_capacity_kg is None:
+            raise serializers.ValidationError(
+                {
+                    "vehicle": (
+                        "Vehicle payload capacity is not recorded, so load compatibility "
+                        "cannot be confirmed."
+                    )
+                }
+            )
+        if vehicle.payload_capacity_kg < request.estimated_weight_kg:
+            raise serializers.ValidationError(
+                {"vehicle": "Vehicle payload capacity is lower than the estimated load weight."}
+            )
     if request.required_vehicle_type and vehicle.vehicle_type != request.required_vehicle_type:
         raise serializers.ValidationError(
             {"vehicle": (f"Vehicle type must be {request.get_required_vehicle_type_display()}.")}
         )
+    coding = evaluate_vehicle_number_coding(vehicle, request.scheduled_pickup_at)
+    if not coding.eligible:
+        raise serializers.ValidationError({"vehicle": coding.reason})
     conflicts = allocation_conflicts(request, vehicle)
     if conflicts:
         raise AllocationConflict(vehicle, conflicts)
@@ -153,7 +171,20 @@ def apply_transition(current, new_status, user, event_type, note=""):
         current.approved_at = timezone.now()
         fields += ["approved_by", "approved_at"]
     current.save(update_fields=fields)
-    record_event(current, event_type, user, previous, note)
+    event = record_event(current, event_type, user, previous, note)
+    if new_status == TransportRequest.Status.READY_FOR_DISPATCH:
+        transaction.on_commit(
+            lambda: notify_capability_users(
+                module="DISPATCH_BOARD",
+                action="VIEW",
+                notification_type=UserNotification.Type.TRANSPORT_READY,
+                title="Transport Request Ready for Dispatch",
+                message=f"{current.request_number} is ready for dispatch planning.",
+                target_url="/dispatch-board",
+                source_key=f"transport-request-event:{event.pk}:ready-for-dispatch",
+            ),
+            robust=True,
+        )
     return current
 
 
@@ -250,31 +281,6 @@ def prepare_dispatch(request, user, note=""):
         raise serializers.ValidationError(
             {"status": "Only approved requests can be prepared for dispatch."}
         )
-    if not current.assigned_vehicle_id:
-        raise serializers.ValidationError({"assigned_vehicle": "Assign a vehicle first."})
-    from .dispatch import driver_conflicts, validate_driver
-    from .models import DispatchAssignment
-
-    assignment = (
-        DispatchAssignment.objects.select_for_update()
-        .select_related("driver", "vehicle")
-        .filter(transport_request=current)
-        .first()
-    )
-    if not assignment:
-        raise serializers.ValidationError(
-            {"dispatch_assignment": "Confirm a Driver and Vehicle in Dispatch Board first."}
-        )
-    if assignment.vehicle_id != current.assigned_vehicle_id:
-        raise serializers.ValidationError(
-            {"assigned_vehicle": "Confirmed assignment and request vehicle do not match."}
-        )
-    validate_driver(current, assignment.driver, exclude_assignment_id=assignment.pk)
-    if driver_conflicts(current, assignment.driver, exclude_assignment_id=assignment.pk):
-        raise serializers.ValidationError({"driver": "Driver has an overlapping assignment."})
-    vehicle = lock_relevant_vehicles(current.assigned_vehicle_id)[current.assigned_vehicle_id]
-    validate_vehicle(current, vehicle, require_new_assignment_readiness=False)
-    current.assigned_vehicle = vehicle
     return apply_transition(
         current,
         TransportRequest.Status.READY_FOR_DISPATCH,

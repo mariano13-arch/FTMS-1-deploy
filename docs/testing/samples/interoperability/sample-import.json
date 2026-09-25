@@ -1,0 +1,15 @@
+{
+  "external_reference": "HMS-SAFE-SAMPLE-001",
+  "request_type": "AIRPORT_PICKUP",
+  "requester_name": "Front Desk Test",
+  "pickup_name": "Synthetic Hotel Pickup",
+  "pickup_address": "Synthetic pickup address",
+  "pickup_latitude": "14.565200",
+  "pickup_longitude": "121.028600",
+  "destination_name": "Synthetic Airport Dropoff",
+  "destination_address": "Synthetic destination address",
+  "destination_latitude": "14.508600",
+  "destination_longitude": "121.019800",
+  "scheduled_pickup_at": "2026-09-25T10:00:00+08:00",
+  "passenger_count": 2
+}

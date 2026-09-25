@@ -1,7 +1,9 @@
 from django.urls import path
 
 from telemetry.views import (
+    ActiveAttentionListView,
     FleetLiveSafetyEventListView,
+    FleetLiveAssignmentRouteView,
     FleetLiveVehicleListView,
     FleetLiveVehicleTrailView,
     GeofenceDetailView,
@@ -13,10 +15,13 @@ from telemetry.views import (
     TelemetryDevicePairView,
     TelemetryDeviceUnpairView,
     TelemetryEventCreateView,
+    VehicleEmergencySOSView,
 )
 
 urlpatterns = [
+    path("alerts/active-attention/", ActiveAttentionListView.as_view(), name="active-attention"),
     path("telemetry/", TelemetryEventCreateView.as_view(), name="telemetry-create"),
+    path("sos/", VehicleEmergencySOSView.as_view(), name="vehicle-emergency-sos"),
     path(
         "telemetry-devices/",
         TelemetryDeviceCreateView.as_view(),
@@ -38,6 +43,11 @@ urlpatterns = [
         name="telemetry-device-unpair",
     ),
     path("fleet-live/vehicles/", FleetLiveVehicleListView.as_view(), name="fleet-live-vehicles"),
+    path(
+        "fleet-live/assignments/<int:assignment_id>/route/",
+        FleetLiveAssignmentRouteView.as_view(),
+        name="fleet-live-assignment-route",
+    ),
     path(
         "fleet-live/vehicles/<int:vehicle_id>/trail/",
         FleetLiveVehicleTrailView.as_view(),

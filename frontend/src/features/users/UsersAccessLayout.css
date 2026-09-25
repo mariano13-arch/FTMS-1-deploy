@@ -3,9 +3,9 @@
   color: #172638;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 0.25rem;
   min-height: 100%;
-  padding: 10px 12px 12px;
+  padding: var(--module-page-top) var(--module-page-inline) 1rem;
 }
 
 .users-access-breadcrumb {
@@ -85,6 +85,195 @@
   margin: 5px 0 0;
 }
 
+.users-audit-log {
+  align-self: stretch;
+  background: #fff;
+  border: 1px solid #d2dae3;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+}
+
+.users-audit-log h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.audit-filters {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(110px, 1fr)) auto auto;
+}
+
+.audit-filters label {
+  color: #51647a;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 3px;
+}
+
+.audit-filters input,
+.audit-filters select {
+  border: 1px solid #cdd6e0;
+  border-radius: 3px;
+  color: #172638;
+  font-size: 11px;
+  min-height: 30px;
+  padding: 5px 7px;
+}
+
+.audit-filters button,
+.audit-drawer button {
+  background: #981b2d;
+  border: 1px solid #821424;
+  border-radius: 3px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  min-height: 30px;
+  padding: 5px 10px;
+}
+
+.audit-filters button.secondary {
+  background: #f5f3ef;
+  border-color: #d7d0c6;
+  color: #364b62;
+}
+
+.audit-table-wrap {
+  border: 1px solid #dbe2ea;
+  min-height: 0;
+  overflow: auto;
+}
+
+.audit-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+}
+
+.audit-table th,
+.audit-table td {
+  border-bottom: 1px solid #edf1f5;
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.audit-table th {
+  background: #f8f1f2;
+  color: #5f1020;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.audit-outcome {
+  border-radius: 3px;
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
+.audit-outcome--success {
+  background: #e8f5ef;
+  color: #17643c;
+}
+
+.audit-outcome--failure,
+.audit-outcome--denied {
+  background: #fbe9eb;
+  color: #981b2d;
+}
+
+.link-button {
+  background: none;
+  border: 0;
+  color: #981b2d;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.audit-state,
+.audit-empty {
+  color: #60728a;
+  font-size: 12px;
+  padding: 14px;
+  text-align: center;
+}
+
+.audit-state--error {
+  color: #981b2d;
+}
+
+.audit-state button {
+  margin-left: 8px;
+}
+
+.audit-drawer-backdrop {
+  background: rgba(23, 38, 56, 0.35);
+  inset: 0;
+  position: fixed;
+  z-index: 30;
+}
+
+.audit-drawer {
+  background: #fff;
+  border-left: 1px solid #cdd6e0;
+  box-shadow: -10px 0 24px rgba(23, 38, 56, 0.18);
+  box-sizing: border-box;
+  height: 100%;
+  margin-left: auto;
+  max-width: 440px;
+  overflow: auto;
+  padding: 14px;
+  width: min(440px, 100%);
+}
+
+.audit-drawer header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.audit-drawer h3,
+.audit-drawer h4 {
+  margin: 0 0 8px;
+}
+
+.audit-details-list {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 14px;
+}
+
+.audit-details-list div {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 105px 1fr;
+}
+
+.audit-details-list dt {
+  color: #60728a;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.audit-details-list dd {
+  font-size: 11px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 600px) {
   .users-access-tabs {
     overflow-x: auto;
@@ -92,5 +281,9 @@
 
   .users-access-tabs a {
     min-width: max-content;
+  }
+
+  .audit-filters {
+    grid-template-columns: 1fr;
   }
 }

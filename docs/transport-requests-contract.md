@@ -25,7 +25,7 @@ Dispatch Queue means `APPROVED`, including both unassigned and assigned requests
 
 ## Permissions
 
-- Super Admin and Fleet Manager: view/create/edit eligible records, approve, reject, request more details, resubmit, manually assign/reassign, prepare for dispatch, cancel, and view history.
+- Fleet Admin and Fleet Manager: view/create/edit eligible records, approve, reject, request more details, resubmit, manually assign/reassign, prepare for dispatch, cancel, and view history.
 - Dispatcher: view/create, edit `FOR_APPROVAL` or `NEEDS_MORE_DETAILS`, resubmit, manually assign/reassign approved requests, prepare for dispatch, and view history. Dispatchers cannot approve, reject, request more details, or cancel.
 
 ## API

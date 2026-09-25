@@ -1,0 +1,159 @@
+{
+  "info": {
+    "_postman_id": "9c7ab204-d90f-4f62-852d-857c3c8bc604",
+    "name": "FTMS Current API - Evaluator Reads",
+    "description": "Safe evaluator collection for the current FTMS API. Run CSRF Bootstrap, then Staff Login. Postman retains the Django session cookie automatically. No operational mutation request is included.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "test_username", "value": "", "type": "string" },
+    { "key": "test_password", "value": "", "type": "string" },
+    { "key": "csrf_token", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/api/health/", "host": ["{{base_url}}"], "path": ["api", "health", ""] },
+        "description": "Public database-backed readiness check."
+      }
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "CSRF Bootstrap",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.collectionVariables.set('csrf_token', body.csrf_token);",
+                  "pm.test('CSRF bootstrap succeeded', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/csrf/", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "csrf", ""] }
+          }
+        },
+        {
+          "name": "Staff Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeded or requested 2FA', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.csrf_token) pm.collectionVariables.set('csrf_token', body.csrf_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-CSRFToken", "value": "{{csrf_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{test_username}}\",\n  \"password\": \"{{test_password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/login/", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login", ""] },
+            "description": "Uses collection variables. If 2FA is enabled, complete verification through the FTMS UI or add the current challenge/code manually; no secrets are stored here."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard Summary",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/api/v1/dashboard/summary/", "host": ["{{base_url}}"], "path": ["api", "v1", "dashboard", "summary", ""] },
+        "description": "Requires DASHBOARD.VIEW."
+      }
+    },
+    {
+      "name": "Transport Requests - First Page",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/transport-requests/?page=1&page_size=20",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "transport-requests", ""],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "20" }
+          ]
+        },
+        "description": "Read-only paginated request list; requires TRANSPORT_REQUESTS.VIEW."
+      }
+    },
+    {
+      "name": "Dispatch Board",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/api/v1/transport-requests/dispatch-board/", "host": ["{{base_url}}"], "path": ["api", "v1", "transport-requests", "dispatch-board", ""] },
+        "description": "Read-only board; requires DISPATCH_BOARD.VIEW. Recommendations still require explicit generation and human confirmation and are intentionally absent from this collection."
+      }
+    },
+    {
+      "name": "Fleet Live Vehicles",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/api/v1/fleet-live/vehicles/", "host": ["{{base_url}}"], "path": ["api", "v1", "fleet-live", "vehicles", ""] },
+        "description": "Requires LIVE_MAP.VIEW. Telemetry fields preserve physical/simulated provenance."
+      }
+    },
+    {
+      "name": "Transport Request Report",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/reports/transport-requests/?page=1&page_size=15",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "reports", "transport-requests", ""],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "15" }
+          ]
+        },
+        "description": "JSON report requires REPORTS.VIEW. CSV exports separately require REPORTS.EXPORT."
+      }
+    },
+    {
+      "name": "My Notifications",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/v1/auth/notifications/?page=1&page_size=20",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "auth", "notifications", ""],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "20" }
+          ]
+        },
+        "description": "Returns only the authenticated staff user's notifications."
+      }
+    }
+  ]
+}

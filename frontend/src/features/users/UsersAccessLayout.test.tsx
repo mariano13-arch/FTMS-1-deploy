@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory } from "history";
 import { Router } from "react-router-dom";
 import { describe, expect, test, vi } from "vitest";
@@ -6,8 +6,15 @@ import AuditLogsPage from "./AuditLogsPage";
 import UsersAccessLayout from "./UsersAccessLayout";
 
 vi.mock("../../contexts/AuthContext", () => ({
-  useAuth: () => ({ user: { role: "SUPER_ADMIN" } }),
+  useAuth: () => ({ user: { role: "FLEET_ADMIN" } }),
 }));
+
+const { auditMock } = vi.hoisted(() => ({ auditMock: vi.fn() }));
+
+vi.mock("./api", async () => {
+  const actual = await vi.importActual<typeof import("./api")>("./api");
+  return { ...actual, listAuditLogs: (...args: unknown[]) => auditMock(...args) };
+});
 
 function renderLayout(path: string) {
   const history = createMemoryHistory({ initialEntries: [path] });
@@ -35,12 +42,54 @@ describe("UsersAccessLayout", () => {
     expect(screen.getByRole("link", { name: "Staff Users" })).not.toHaveClass("active");
   });
 
-  test("renders a truthful Audit Logs placeholder without fabricated activity", () => {
+  test("renders Audit Logs table, filters, and details", async () => {
+    auditMock.mockResolvedValueOnce({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{
+        id: 1,
+        occurred_at: "2026-09-25T01:00:00Z",
+        actor: 7,
+        actor_display: "Fleet Admin",
+        actor_type: "STAFF",
+        action: "STAFF_ROLE_CHANGED",
+        target_type: "User",
+        target_id: "9",
+        target_label: "dispatcher",
+        outcome: "SUCCESS",
+        source: "WEB",
+        ip_address: "127.0.0.1",
+        user_agent: "Vitest",
+        changes: { role: { old: "FLEET_STAFF", new: "DISPATCHER" } },
+        metadata: {},
+      }],
+    });
     const history = createMemoryHistory({ initialEntries: ["/users/audit-logs"] });
     render(<Router history={history}><AuditLogsPage /></Router>);
     expect(screen.getByRole("link", { name: "Audit Logs" })).toHaveClass("active");
-    expect(screen.getByRole("heading", { name: "Audit Logs" })).toBeInTheDocument();
-    expect(screen.getByText("Centralized administrative audit logging is not available yet.")).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading audit logs");
+    const table = await screen.findByRole("table");
+    expect(table).toBeInTheDocument();
+    expect(within(table).getByText("Staff role changed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("dialog", { name: "Audit log details" })).toBeInTheDocument();
+    expect(screen.getByText("FLEET_STAFF -> DISPATCHER")).toBeInTheDocument();
+  });
+
+  test("sends filters and clears them", async () => {
+    auditMock.mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
+    const history = createMemoryHistory({ initialEntries: ["/users/audit-logs"] });
+    render(<Router history={history}><AuditLogsPage /></Router>);
+    await screen.findByText("No audit events recorded yet.");
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "LOGIN_SUCCESS" } });
+    fireEvent.change(screen.getByLabelText("Result"), { target: { value: "SUCCESS" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(auditMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "LOGIN_SUCCESS", outcome: "SUCCESS" }),
+      expect.any(AbortSignal),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(auditMock).toHaveBeenLastCalledWith({}, expect.any(AbortSignal)));
   });
 });

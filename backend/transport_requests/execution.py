@@ -3,7 +3,12 @@ from dataclasses import dataclass
 from django.db import transaction
 from django.utils import timezone
 
-from .models import DispatchAssignment, DispatchExecutionEvent, TransportRequest
+from .models import (
+    DispatchAssignment,
+    DispatchExecutionEvent,
+    SourceResultOutbox,
+    TransportRequest,
+)
 
 
 class IllegalExecutionTransition(Exception):
@@ -103,4 +108,20 @@ def transition_driver_execution(*, assignment_id, driver, user, action):
         performed_by=user,
         actor_type=DispatchExecutionEvent.ActorType.DRIVER,
     )
+    if transition.next_status == DispatchAssignment.ExecutionStatus.COMPLETED:
+        SourceResultOutbox.objects.get_or_create(
+            transport_request=assignment.transport_request,
+            event_type="TRIP_COMPLETED",
+            defaults={
+                "payload": {
+                    "ftms_request_id": str(assignment.transport_request_id),
+                    "request_number": assignment.transport_request.request_number,
+                    "external_reference": assignment.transport_request.external_reference,
+                    "source_system": assignment.transport_request.source_system,
+                    "status": "COMPLETED",
+                    "completion_timestamp": transition_time.isoformat(),
+                },
+                "delivery_status": SourceResultOutbox.DeliveryStatus.UNCONFIGURED,
+            },
+        )
     return assignment, True

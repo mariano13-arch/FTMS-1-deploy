@@ -1,0 +1,3 @@
+fuel_type,fuel_grade,price_per_liter,provider,source_mode,effective_at,currency,is_active
+GASOLINE,UNLEADED_91,71.2500,ShellPH,MANUAL,2026-09-20T08:00:00+08:00,PHP,true
+DIESEL,REGULAR_DIESEL,62.1000,ShellPH,EXTERNAL_CACHED,2026-09-20T08:00:00+08:00,PHP,true

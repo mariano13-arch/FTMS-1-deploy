@@ -113,6 +113,9 @@ function GeofenceMonitoring({
       className="live-fleet-geofence-monitoring"
       aria-label={`${geofence.name} geofence monitoring`}
     >
+      <div className="live-fleet-geofence-section-heading">
+        <span>Monitoring</span>
+      </div>
       <div className="live-fleet-geofence-summary">
         <span>
           <strong>{geofence.current_vehicle_count}</strong>
@@ -144,7 +147,10 @@ function GeofenceMonitoring({
         </span>
       </div>
 
-      <h3>Vehicles inside</h3>
+      <div className="live-fleet-geofence-section-heading">
+        <span>Vehicles Inside</span>
+        <small>{geofence.current_vehicle_count}</small>
+      </div>
 
       {geofence.current_vehicles?.length ? (
         <ul>
@@ -163,7 +169,7 @@ function GeofenceMonitoring({
       )}
 
       <div className="live-fleet-geofence-activity-heading">
-        <h3>Geofence Activity History</h3>
+        <h3>Activity History</h3>
         <small>{activity?.count ?? 0} records</small>
       </div>
 
@@ -375,7 +381,7 @@ export default function GeofenceWorkspace({
   return (
     <aside
       id="live-fleet-geofence-panel"
-      className="live-fleet-geofence-panel"
+      className={`live-fleet-geofence-panel ${draft ? "live-fleet-geofence-panel--editor" : "live-fleet-geofence-panel--browser"}`}
       aria-label="Geofence workspace"
     >
       <header>
@@ -401,78 +407,86 @@ export default function GeofenceWorkspace({
 
       {draft ? (
         <div className="live-fleet-geofence-editor">
-          <label>
-            Name
-            <input
-              aria-label="Geofence name"
-              value={draft.name}
-              maxLength={120}
-              onChange={(event) =>
-                change("name", event.target.value)
-              }
-              placeholder="e.g. Oxford loading zone"
-            />
-          </label>
-
-          <div className="live-fleet-geofence-two">
+          <section className="live-fleet-geofence-form-section" aria-labelledby="geofence-details-heading">
+            <h3 id="geofence-details-heading">Geofence Details</h3>
             <label>
-              Category
-              <select
-                aria-label="Geofence category"
-                value={draft.category}
-                onChange={(event) =>
-                  change(
-                    "category",
-                    event.target
-                      .value as GeofenceWrite["category"],
-                  )
-                }
-              >
-                <option value="DEPOT">Depot</option>
-                <option value="CUSTOMER">Customer site</option>
-                <option value="HOTEL">Hotel property</option>
-                <option value="RESTRICTED">
-                  Restricted area
-                </option>
-                <option value="CUSTOM">Custom</option>
-              </select>
-            </label>
-
-            <label>
-              Boundary
-              <select
-                aria-label="Geofence boundary shape"
-                value={draft.shape_type}
-                onChange={(event) =>
-                  onShapeChange(
-                    event.target
-                      .value as GeofenceWrite["shape_type"],
-                  )
-                }
-              >
-                <option value="CIRCLE">Circle</option>
-                <option value="POLYGON">Custom polygon</option>
-              </select>
-            </label>
-          </div>
-
-          {draft.shape_type === "CIRCLE" ? (
-            <label>
-              Radius <span>{draft.radius_meters} m</span>
+              Name
               <input
-                aria-label="Geofence radius"
-                type="range"
-                min="25"
-                max="3000"
-                step="25"
-                value={draft.radius_meters ?? 150}
+                aria-label="Geofence name"
+                value={draft.name}
+                maxLength={120}
                 onChange={(event) =>
-                  onRadiusChange(Number(event.target.value))
+                  change("name", event.target.value)
                 }
+                placeholder="e.g. Oxford loading zone"
               />
             </label>
-          ) : (
-            <div className="live-fleet-geofence-draw">
+
+            <div className="live-fleet-geofence-two">
+              <label>
+                Category
+                <select
+                  aria-label="Geofence category"
+                  value={draft.category}
+                  onChange={(event) =>
+                    change("category", event.target.value as GeofenceWrite["category"])
+                  }
+                >
+                  <option value="DEPOT">Depot</option>
+                  <option value="CUSTOMER">Customer site</option>
+                  <option value="HOTEL">Hotel property</option>
+                  <option value="RESTRICTED">Restricted area</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </label>
+
+              <label>
+                Boundary
+                <select
+                  aria-label="Geofence boundary shape"
+                  value={draft.shape_type}
+                  onChange={(event) =>
+                    onShapeChange(event.target.value as GeofenceWrite["shape_type"])
+                  }
+                >
+                  <option value="CIRCLE">Circle</option>
+                  <option value="POLYGON">Custom polygon</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Description
+              <textarea
+                aria-label="Geofence description"
+                value={draft.description}
+                maxLength={500}
+                rows={3}
+                onChange={(event) =>
+                  change("description", event.target.value)
+                }
+                placeholder="Purpose or operating notes"
+              />
+            </label>
+          </section>
+
+          <section className="live-fleet-geofence-form-section" aria-labelledby="boundary-settings-heading">
+            <h3 id="boundary-settings-heading">Boundary Settings</h3>
+            {draft.shape_type === "CIRCLE" ? (
+              <label className="live-fleet-geofence-radius">
+                <span>Radius <output>{draft.radius_meters} m</output></span>
+                <input
+                  aria-label="Geofence radius"
+                  type="range"
+                  min="25"
+                  max="3000"
+                  step="25"
+                  value={draft.radius_meters ?? 150}
+                  onChange={(event) => onRadiusChange(Number(event.target.value))}
+                />
+              </label>
+            ) : (
+              <div className="live-fleet-geofence-draw">
               <strong>
                 {draft.vertices.length} boundary points
               </strong>
@@ -493,26 +507,15 @@ export default function GeofenceWorkspace({
               >
                 Finish drawing
               </button>
-            </div>
-          )}
+              </div>
+            )}
+          </section>
 
-          <label>
-            Description
-            <textarea
-              aria-label="Geofence description"
-              value={draft.description}
-              maxLength={500}
-              rows={3}
-              onChange={(event) =>
-                change("description", event.target.value)
-              }
-              placeholder="Purpose or operating notes"
-            />
-          </label>
-
-          <div className="live-fleet-geofence-options">
-            <label>
-              Color
+          <section className="live-fleet-geofence-form-section" aria-labelledby="appearance-monitoring-heading">
+            <h3 id="appearance-monitoring-heading">Appearance &amp; Monitoring</h3>
+            <div className="live-fleet-geofence-options">
+            <label className="live-fleet-geofence-color-control">
+              <span>Boundary color</span>
               <input
                 aria-label="Geofence color"
                 type="color"
@@ -526,7 +529,8 @@ export default function GeofenceWorkspace({
               />
             </label>
 
-            <label>
+            <label className="live-fleet-geofence-switch">
+              <span><strong>Show on map</strong><small>Display this geofence on the Live Map</small></span>
               <input
                 type="checkbox"
                 checked={draft.show_on_map}
@@ -534,10 +538,11 @@ export default function GeofenceWorkspace({
                   change("show_on_map", event.target.checked)
                 }
               />
-              Show on map
+              <i aria-hidden="true" />
             </label>
 
-            <label>
+            <label className="live-fleet-geofence-switch">
+              <span><strong>Track activity</strong><small>Record enter / exit activity</small></span>
               <input
                 type="checkbox"
                 checked={draft.is_active}
@@ -545,9 +550,10 @@ export default function GeofenceWorkspace({
                   change("is_active", event.target.checked)
                 }
               />
-              Track activity
+              <i aria-hidden="true" />
             </label>
-          </div>
+            </div>
+          </section>
 
           {saveState === "error" && (
             <p
@@ -576,7 +582,7 @@ export default function GeofenceWorkspace({
               {saveState === "loading"
                 ? "Saving…"
                 : draft.id
-                  ? "Save changes"
+                  ? "Save Changes"
                   : "Create geofence"}
             </button>
           </footer>
@@ -584,13 +590,10 @@ export default function GeofenceWorkspace({
       ) : (
         <div className="live-fleet-geofence-browser">
           <div className="live-fleet-geofence-toolbar">
-            <span>
-              {geofences.length} saved zone
-              {geofences.length === 1 ? "" : "s"}
-            </span>
+            <span><strong>Saved Geofences</strong><small>{geofences.length}</small></span>
 
             <button type="button" onClick={onPlaceNew}>
-              + New geofence
+              + New Geofence
             </button>
           </div>
 
@@ -613,6 +616,7 @@ export default function GeofenceWorkspace({
                   className={
                     selectedId === item.id ? "selected" : ""
                   }
+                  aria-pressed={selectedId === item.id}
                   key={item.id}
                   onClick={() => onSelect(item.id)}
                 >
@@ -639,13 +643,22 @@ export default function GeofenceWorkspace({
 
           {selected && (
             <section
+              key={selected.id}
               className="live-fleet-geofence-detail"
               aria-label={`${selected.name} geofence details`}
             >
+              <div className="live-fleet-geofence-section-heading">
+                <span>Selected Geofence</span>
+              </div>
               <header>
                 <span>
-                  <small>{words(selected.category)}</small>
-                  <strong>{selected.name}</strong>
+                    <small>{words(selected.category)}</small>
+                    <strong>{selected.name}</strong>
+                    <em>
+                      {selected.shape_type === "CIRCLE"
+                        ? `${selected.radius_meters} m radius · Circle`
+                        : `${selected.vertices.length} boundary points · Custom polygon`}
+                    </em>
                 </span>
 
                 <button type="button" onClick={onEdit}>

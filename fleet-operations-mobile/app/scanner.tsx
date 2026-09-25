@@ -7,7 +7,7 @@ import { AppButton } from '@/components/AppButton';
 import { AppScreen } from '@/components/AppScreen';
 import { parseTelemetryDeviceQr } from '@/features/pairing/qr';
 import { ApiError } from '@/services/api';
-import { getTelemetryDevice } from '@/services/fleet';
+import { getTelemetryDevice, registerTelemetryDevice } from '@/services/fleet';
 import { colors, spacing } from '@/theme';
 
 export default function ScannerScreen() {
@@ -16,6 +16,7 @@ export default function ScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unknownDeviceId, setUnknownDeviceId] = useState<string | null>(null);
   const lastValue = useRef<string | null>(null);
 
   async function scanned(result: BarcodeScanningResult) {
@@ -32,15 +33,37 @@ export default function ScannerScreen() {
       await getTelemetryDevice(deviceId);
       router.replace({
         pathname: '/confirm-pairing',
-        params: { vehicleDeviceId, scannedDeviceId: deviceId },
+        params: { vehicleDeviceId, scannedDeviceId: deviceId, registryResult: 'existing' },
       });
     } catch (lookupError) {
       setError(
         lookupError instanceof ApiError && lookupError.status === 404
-          ? 'Device not registered in FTMS.'
+          ? 'Device not registered in FTMS. Confirm registration to add it without pairing.'
           : lookupError instanceof ApiError
             ? lookupError.message
             : 'Unable to validate this device.',
+      );
+      if (lookupError instanceof ApiError && lookupError.status === 404) {
+        setUnknownDeviceId(deviceId);
+      }
+    }
+  }
+
+  async function registerUnknownDevice() {
+    if (!unknownDeviceId) return;
+    setProcessing(true);
+    setError(null);
+    try {
+      await registerTelemetryDevice(unknownDeviceId);
+      router.replace({
+        pathname: '/confirm-pairing',
+        params: { vehicleDeviceId, scannedDeviceId: unknownDeviceId, registryResult: 'registered' },
+      });
+    } catch (registrationError) {
+      setError(
+        registrationError instanceof ApiError
+          ? registrationError.message
+          : 'Unable to register this device.',
       );
     }
   }
@@ -48,6 +71,7 @@ export default function ScannerScreen() {
   function scanAgain() {
     lastValue.current = null;
     setError(null);
+    setUnknownDeviceId(null);
     setProcessing(false);
   }
 
@@ -84,6 +108,9 @@ export default function ScannerScreen() {
       {error ? (
         <View style={styles.errorCard}>
           <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
+          {unknownDeviceId ? (
+            <AppButton label="Register Device" onPress={() => void registerUnknownDevice()} />
+          ) : null}
           <AppButton label="Scan Again" onPress={scanAgain} variant="secondary" />
         </View>
       ) : null}

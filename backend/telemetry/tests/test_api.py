@@ -78,6 +78,23 @@ class TelemetryApiTests(TestCase):
         self.assertEqual(event.position_accuracy_m, Decimal("550.00"))
         self.assertIsNone(event.gnss_speed_kph)
 
+    def test_external_ingestion_rejects_simulated_position_provenance(self):
+        payload = {
+            **self.payload,
+            "schema_version": "1.2",
+            "position_source": "SIMULATED_TEST",
+            "position_accuracy_m": None,
+            "gnss_speed_kph": None,
+            "rpm": None,
+            "coolant_c": None,
+            "engine_load_pct": None,
+            "obd_source": None,
+        }
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("position_source", response.json())
+        self.assertFalse(TelemetryEvent.objects.exists())
+
     def test_accepts_v1_2_simulated_test_obd_provenance(self):
         payload = {
             **self.payload,
@@ -129,6 +146,28 @@ class TelemetryApiTests(TestCase):
         event = TelemetryEvent.objects.get()
         self.assertIsNone(event.obd_source)
         self.assertIsNone(event.rpm)
+
+    def test_v1_2_accepts_edge_driver_behavior_events(self):
+        for index, driving_event in enumerate(
+            ("HARSH_ACCELERATION", "HARSH_BRAKING", "SHARP_TURN"), start=1
+        ):
+            with self.subTest(driving_event=driving_event):
+                payload = {
+                    **self.payload,
+                    "schema_version": "1.2",
+                    "event_id": f"edge-behavior-{index}",
+                    "sequence_number": 400 + index,
+                    "position_source": "GNSS",
+                    "position_accuracy_m": None,
+                    "obd_source": "SIMULATED_TEST",
+                    "driving_event": driving_event,
+                }
+                self.assertEqual(self.post(payload).status_code, 201)
+                self.assertTrue(
+                    TelemetryEvent.objects.filter(
+                        event_id=payload["event_id"], driving_event=driving_event
+                    ).exists()
+                )
 
     def test_rejects_cellular_lbs_with_gnss_speed(self):
         payload = {**self.payload, "schema_version": "1.1",

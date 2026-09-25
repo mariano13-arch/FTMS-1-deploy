@@ -169,6 +169,8 @@ def _decode_challenge(raw):
             return None
         if not isinstance(value.get("user_id"), int):
             return None
+        if value.get("purpose", "verify") not in {"verify", "enroll"}:
+            return None
         if not isinstance(value.get("expires_at"), (int, float)):
             return None
         return value
@@ -176,10 +178,14 @@ def _decode_challenge(raw):
         return None
 
 
-def create_challenge(user_id):
+def create_challenge(user_id, purpose="verify"):
     token = secrets.token_urlsafe(32)
     state = json.dumps(
-        {"user_id": user_id, "expires_at": time.time() + CHALLENGE_TTL_SECONDS}
+        {
+            "user_id": user_id,
+            "purpose": purpose,
+            "expires_at": time.time() + CHALLENGE_TTL_SECONDS,
+        }
     )
     if not _cache_operation(
         lambda client: client.set(challenge_key(token), state, ex=CHALLENGE_TTL_SECONDS)

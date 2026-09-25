@@ -15,7 +15,7 @@ class AuthenticationTests(TestCase):
             last_name="Manager",
         )
         StaffProfile.objects.create(
-            user=self.user, role=StaffProfile.Role.FLEET_MANAGER
+            user=self.user, role=StaffProfile.Role.DISPATCHER
         )
         self.client = APIClient(enforce_csrf_checks=True)
 
@@ -33,9 +33,22 @@ class AuthenticationTests(TestCase):
             format="json", HTTP_X_CSRFTOKEN=before,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["user"]["role"], "FLEET_MANAGER")
+        self.assertEqual(response.json()["user"]["role"], "DISPATCHER")
         self.assertNotEqual(response.json()["csrf_token"], before)
         self.assertIn("sessionid", response.cookies)
+
+    def test_persisted_fleet_admin_is_the_api_business_role(self):
+        admin = get_user_model().objects.create_superuser(
+            username="fleet-admin", password=self.password
+        )
+        StaffProfile.objects.create(user=admin, role=StaffProfile.Role.FLEET_ADMIN)
+        client = APIClient()
+        client.force_authenticate(admin)
+
+        response = client.get("/api/v1/auth/me/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["user"]["role"], "FLEET_ADMIN")
 
     def test_login_requires_csrf_and_strict_payload(self):
         self.assertEqual(

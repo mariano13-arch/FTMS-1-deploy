@@ -15,7 +15,7 @@ export default function RootLayout() {
 
 function Navigator() {
   const { staff, isBootstrapping } = useStaffAuth();
-  const canManageTelemetry = staff?.role === 'SUPER_ADMIN' || staff?.role === 'FLEET_MANAGER';
+  const canManageTelemetry = staff?.role === 'FLEET_ADMIN' || staff?.role === 'FLEET_MANAGER';
   if (isBootstrapping) {
     return (
       <View style={styles.loading}>

@@ -11,7 +11,7 @@ route optimization, analytics, device authentication, and physical IoT integrati
 - Django, Django REST Framework, Channels, Daphne, and Celery
 - PostgreSQL 17 with PostGIS
 - Redis and Mosquitto MQTT
-- Planned later: Google Maps/Routes, OR-Tools, XGBoost, LILYGO T-A7670E R2, and TensorFlow Lite Micro
+- Planned later: Google Maps/Routes, OR-Tools, and XGBoost; repository firmware now includes LILYGO T-A7670E TensorFlow Lite Micro driver-behavior inference, without asserting physical deployment
 
 ## Prerequisites
 
@@ -88,7 +88,7 @@ docker compose exec backend python manage.py create_staff_user \
   --username fleetmanager --role FLEET_MANAGER
 ```
 
-Create Super Admins only with `createsuperuser`. Configure credentialed origins and
+Create Fleet Admins only with `createsuperuser`. Configure credentialed origins and
 secure-cookie behavior with the four `DJANGO_CORS_*`, `DJANGO_CSRF_*`, and
 `DJANGO_*_COOKIE_SECURE` settings shown in `.env.example`; wildcard origins are forbidden.
 

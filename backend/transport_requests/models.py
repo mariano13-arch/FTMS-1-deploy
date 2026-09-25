@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
+from django.utils.text import get_valid_filename
 from django.utils import timezone
 
 from fleet.models import Driver, Vehicle
@@ -15,12 +16,23 @@ def generate_request_number():
     return f"TR-{timezone.localdate():%Y%m%d}-{secrets.token_hex(3).upper()}"
 
 
+def receipt_image_upload_to(instance, filename):
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    safe_name = get_valid_filename(f"{uuid.uuid4().hex}.{extension}")
+    today = timezone.localdate()
+    return f"trip_receipts/{today:%Y/%m}/{safe_name}"
+
+
 class TransportRequest(models.Model):
     class SourceSystem(models.TextChoices):
         HOTEL_MANAGEMENT_SYSTEM = "HOTEL_MANAGEMENT_SYSTEM", "Hotel management system"
         RESTAURANT_MANAGEMENT_SYSTEM = (
             "RESTAURANT_MANAGEMENT_SYSTEM",
             "Restaurant management system",
+        )
+        SUPPLY_CHAIN_MANAGEMENT_SYSTEM = (
+            "SUPPLY_CHAIN_MANAGEMENT_SYSTEM",
+            "Supply chain management system",
         )
         MANUAL_STAFF_ENTRY = "MANUAL_STAFF_ENTRY", "Manual staff entry"
         OTHER_SUBSYSTEM = "OTHER_SUBSYSTEM", "Other subsystem"
@@ -154,10 +166,6 @@ class TransportRequest(models.Model):
                 condition=~Q(external_reference=""),
                 name="tr_source_external_unique",
             ),
-            models.CheckConstraint(
-                condition=(~Q(status="READY_FOR_DISPATCH") | Q(assigned_vehicle__isnull=False)),
-                name="tr_ready_requires_vehicle",
-            ),
         ]
 
     def __str__(self):
@@ -182,6 +190,66 @@ class TransportRequest(models.Model):
         super().save(*args, **kwargs)
 
 
+class TransportRequestFlightContext(models.Model):
+    """Advisory flight data kept separate from the transport workflow state."""
+
+    class Provider(models.TextChoices):
+        FLIGHTRADAR24 = "FLIGHTRADAR24", "Flightradar24"
+
+    class RefreshStatus(models.TextChoices):
+        NOT_CONFIGURED = "NOT_CONFIGURED", "Not configured"
+        NOT_REFRESHED = "NOT_REFRESHED", "Not refreshed"
+        AVAILABLE = "AVAILABLE", "Available"
+        UNAVAILABLE = "UNAVAILABLE", "Unavailable"
+
+    transport_request = models.OneToOneField(
+        TransportRequest,
+        on_delete=models.CASCADE,
+        related_name="flight_context",
+    )
+    provider = models.CharField(
+        max_length=24, choices=Provider.choices, default=Provider.FLIGHTRADAR24
+    )
+    flight_number = models.CharField(max_length=20)
+    flight_date = models.DateField(null=True, blank=True)
+    origin_airport = models.CharField(max_length=120, blank=True, default="")
+    arrival_airport = models.CharField(max_length=120, blank=True, default="")
+    terminal = models.CharField(max_length=40, blank=True, default="")
+    scheduled_arrival_at = models.DateTimeField(null=True, blank=True)
+    estimated_arrival_at = models.DateTimeField(null=True, blank=True)
+    actual_arrival_at = models.DateTimeField(null=True, blank=True)
+    provider_flight_status = models.CharField(max_length=80, blank=True, default="")
+    refresh_status = models.CharField(
+        max_length=24,
+        choices=RefreshStatus.choices,
+        default=RefreshStatus.NOT_REFRESHED,
+    )
+    last_refresh_attempt_at = models.DateTimeField(null=True, blank=True)
+    last_successful_refresh_at = models.DateTimeField(null=True, blank=True)
+    refresh_message = models.CharField(max_length=240, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("transport_request_id",)
+
+    def __str__(self):
+        return f"{self.transport_request.request_number}: {self.flight_number}"
+
+    def save(self, *args, **kwargs):
+        for field in (
+            "flight_number",
+            "origin_airport",
+            "arrival_airport",
+            "terminal",
+            "provider_flight_status",
+            "refresh_message",
+        ):
+            value = getattr(self, field)
+            setattr(self, field, value.strip() if isinstance(value, str) else value)
+        super().save(*args, **kwargs)
+
+
 class IntegrationClient(models.Model):
     TRUSTED_SOURCE_CHOICES = (
         (
@@ -191,6 +259,10 @@ class IntegrationClient(models.Model):
         (
             TransportRequest.SourceSystem.RESTAURANT_MANAGEMENT_SYSTEM,
             "Restaurant management system",
+        ),
+        (
+            TransportRequest.SourceSystem.SUPPLY_CHAIN_MANAGEMENT_SYSTEM,
+            "Supply chain management system",
         ),
     )
 
@@ -216,6 +288,7 @@ class IntegrationClient(models.Model):
                     source_system__in=(
                         TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
                         TransportRequest.SourceSystem.RESTAURANT_MANAGEMENT_SYSTEM,
+                        TransportRequest.SourceSystem.SUPPLY_CHAIN_MANAGEMENT_SYSTEM,
                     )
                 ),
                 name="integration_client_trusted_source",
@@ -448,6 +521,44 @@ class DispatchExecutionEvent(models.Model):
         raise ValueError("Dispatch execution events are immutable.")
 
 
+class SourceResultOutbox(models.Model):
+    """Durable completion result seam for a future source-system callback worker."""
+
+    class DeliveryStatus(models.TextChoices):
+        UNCONFIGURED = "UNCONFIGURED", "Callback not configured"
+        PENDING = "PENDING", "Pending"
+        DELIVERED = "DELIVERED", "Delivered"
+        FAILED = "FAILED", "Failed"
+
+    transport_request = models.ForeignKey(
+        TransportRequest, on_delete=models.PROTECT, related_name="source_result_outbox"
+    )
+    event_type = models.CharField(max_length=32, default="TRIP_COMPLETED")
+    payload = models.JSONField(default=dict)
+    delivery_status = models.CharField(
+        max_length=16,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.UNCONFIGURED,
+    )
+    delivery_attempts = models.PositiveSmallIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=240, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "pk")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["transport_request", "event_type"],
+                name="source_result_outbox_event_uq",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.transport_request.request_number}: {self.event_type}"
+
+
 class DispatchPlan(models.Model):
     class PlanType(models.TextChoices):
         CONSOLIDATED = "CONSOLIDATED", "Consolidated"
@@ -518,3 +629,79 @@ class DispatchPlanEvent(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("Dispatch plan events are immutable.")
+
+
+class TripExpenseReceipt(models.Model):
+    class ExpenseType(models.TextChoices):
+        FUEL = "FUEL", "Fuel"
+        TOLL = "TOLL", "Toll"
+
+    dispatch_assignment = models.ForeignKey(
+        DispatchAssignment,
+        on_delete=models.PROTECT,
+        related_name="expense_receipts",
+    )
+    driver = models.ForeignKey(
+        Driver,
+        on_delete=models.PROTECT,
+        related_name="expense_receipts",
+    )
+    vehicle = models.ForeignKey(
+        Vehicle,
+        on_delete=models.PROTECT,
+        related_name="expense_receipts",
+    )
+    expense_type = models.CharField(max_length=8, choices=ExpenseType.choices)
+    transaction_at = models.DateTimeField()
+    amount = models.DecimalField(
+        max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    receipt_number = models.CharField(max_length=80, blank=True, default="")
+    merchant_or_operator = models.CharField(max_length=160)
+    receipt_image = models.FileField(upload_to=receipt_image_upload_to)
+    liters = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    unit_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.0001"))],
+    )
+    fuel_type = models.CharField(
+        max_length=20, choices=Vehicle.FuelType.choices, blank=True, default=""
+    )
+    fuel_grade = models.CharField(
+        max_length=20, choices=Vehicle.FuelGrade.choices, blank=True, default=""
+    )
+    toll_plaza = models.CharField(max_length=160, blank=True, default="")
+    confirmed_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-transaction_at", "-created_at", "-pk")
+        indexes = [
+            models.Index(
+                fields=["dispatch_assignment", "-transaction_at"],
+                name="trip_rcpt_assign_time_idx",
+            ),
+            models.Index(fields=["driver", "-created_at"], name="trip_receipt_driver_time_idx"),
+            models.Index(
+                fields=["expense_type", "receipt_number"],
+                name="trip_receipt_type_number_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.dispatch_assignment_id} {self.expense_type} {self.amount}"
+
+    def save(self, *args, **kwargs):
+        for field in ("receipt_number", "merchant_or_operator", "toll_plaza"):
+            setattr(self, field, getattr(self, field).strip())
+        super().save(*args, **kwargs)

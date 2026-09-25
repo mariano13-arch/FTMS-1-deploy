@@ -192,8 +192,6 @@ class DriverAcceptanceApiTests(TestCase):
             event_type=DispatchAssignmentEvent.EventType.DRIVER_ACCEPTED
         )
 
-        self.trip.status = TransportRequest.Status.APPROVED
-        self.trip.save(update_fields=["status", "updated_at"])
         dispatch.confirm_assignment(
             transport_request_id=self.trip.pk,
             vehicle_id=self.other_vehicle.pk,
@@ -234,8 +232,6 @@ class DriverAcceptanceApiTests(TestCase):
         self.client.force_login(self.driver_user)
         self.assertEqual(self.accept(stale_confirmation).status_code, 200)
 
-        self.trip.status = TransportRequest.Status.APPROVED
-        self.trip.save(update_fields=["status", "updated_at"])
         dispatch.confirm_assignment(
             transport_request_id=self.trip.pk,
             vehicle_id=self.other_vehicle.pk,

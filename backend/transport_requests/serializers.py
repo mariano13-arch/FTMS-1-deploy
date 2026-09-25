@@ -12,6 +12,7 @@ from .models import (
     DispatchPlanStop,
     TransportRequest,
     TransportRequestEvent,
+    TransportRequestFlightContext,
 )
 from .services import planning_end, record_event
 
@@ -51,6 +52,7 @@ BASE_FIELDS = [
     "approved_at",
     "created_at",
     "updated_at",
+    "flight_context",
 ]
 IMMUTABLE_FIELDS = {
     "id",
@@ -64,6 +66,43 @@ IMMUTABLE_FIELDS = {
     "updated_at",
     "events",
 }
+
+
+class FlightContextSerializer(StrictFieldsMixin, serializers.ModelSerializer):
+    class Meta:
+        model = TransportRequestFlightContext
+        fields = [
+            "provider",
+            "flight_number",
+            "flight_date",
+            "origin_airport",
+            "arrival_airport",
+            "terminal",
+            "scheduled_arrival_at",
+            "estimated_arrival_at",
+            "actual_arrival_at",
+            "provider_flight_status",
+            "refresh_status",
+            "last_refresh_attempt_at",
+            "last_successful_refresh_at",
+            "refresh_message",
+        ]
+        read_only_fields = [
+            "provider",
+            "estimated_arrival_at",
+            "actual_arrival_at",
+            "provider_flight_status",
+            "refresh_status",
+            "last_refresh_attempt_at",
+            "last_successful_refresh_at",
+            "refresh_message",
+        ]
+
+    def validate_flight_number(self, value):
+        normalized = value.strip().upper()
+        if not normalized:
+            raise serializers.ValidationError("Must not be blank.")
+        return normalized
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -103,6 +142,7 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
     assigned_vehicle = AssignedVehicleSerializer(read_only=True)
     created_by = serializers.SerializerMethodField()
     approved_by = serializers.SerializerMethodField()
+    flight_context = FlightContextSerializer(required=False, allow_null=True)
 
     immutable_fields = IMMUTABLE_FIELDS
 
@@ -181,6 +221,13 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists():
                 errors["external_reference"] = "This subsystem request has already been imported."
+        flight_context = attrs.get("flight_context", serializers.empty)
+        request_type = attrs.get("request_type", getattr(self.instance, "request_type", None))
+        if (
+            flight_context not in (serializers.empty, None)
+            and request_type != TransportRequest.RequestType.AIRPORT_PICKUP
+        ):
+            errors["flight_context"] = "Flight context is only valid for airport pickup requests."
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
@@ -188,19 +235,34 @@ class TransportRequestBaseSerializer(StrictFieldsMixin, serializers.ModelSeriali
     @transaction.atomic
     def create(self, validated_data):
         user = self.context["request"].user
+        flight_context = validated_data.pop("flight_context", None)
         try:
             request = TransportRequest.objects.create(created_by=user, **validated_data)
         except IntegrityError as error:
             raise serializers.ValidationError(
                 {"external_reference": "This subsystem request has already been imported."}
             ) from error
+        if flight_context:
+            TransportRequestFlightContext.objects.create(
+                transport_request=request, **flight_context
+            )
         record_event(request, "CREATED", user)
         return request
 
     @transaction.atomic
     def update(self, instance, validated_data):
         previous = instance.status
+        flight_context = validated_data.pop("flight_context", serializers.empty)
         request = super().update(instance, validated_data)
+        if request.request_type != TransportRequest.RequestType.AIRPORT_PICKUP:
+            TransportRequestFlightContext.objects.filter(transport_request=request).delete()
+        elif flight_context is not serializers.empty:
+            if flight_context is None:
+                TransportRequestFlightContext.objects.filter(transport_request=request).delete()
+            else:
+                TransportRequestFlightContext.objects.update_or_create(
+                    transport_request=request, defaults=flight_context
+                )
         record_event(request, "EDITED", self.context["request"].user, previous)
         return request
 
@@ -267,7 +329,9 @@ class DispatchDriverSerializer(serializers.ModelSerializer):
         fields = ["id", "driver_code", "full_name", "eligibility_status"]
 
     def get_full_name(self, driver):
-        return " ".join(filter(None, [driver.first_name, driver.middle_name, driver.last_name]))
+        from fleet.schedules import compact_driver_name
+
+        return compact_driver_name(driver)
 
     def get_eligibility_status(self, driver):
         from fleet.serializers import driver_eligibility
@@ -316,6 +380,13 @@ class DispatchAssignmentSerializer(serializers.ModelSerializer):
 
     def get_is_accepted(self, assignment):
         return assignment.accepted_at is not None
+
+
+class OperationalAssignmentSerializer(DispatchAssignmentSerializer):
+    transport_request = TransportRequestListSerializer(read_only=True)
+
+    class Meta(DispatchAssignmentSerializer.Meta):
+        fields = [*DispatchAssignmentSerializer.Meta.fields, "transport_request"]
 
 
 class DispatchConfirmationSerializer(StrictFieldsMixin, serializers.Serializer):

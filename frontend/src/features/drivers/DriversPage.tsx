@@ -21,6 +21,8 @@ import {
 } from "../../services/drivers";
 import { ApiError } from "../../services/api";
 
+const DRIVER_PAGE_SIZE = 20;
+const SAFETY_HISTORY_PAGE_SIZE = 10;
 const shown = (value: string | null) => value || "Not linked";
 const saveError = (error: unknown) => {
   if (!(error instanceof ApiError))
@@ -46,28 +48,42 @@ export default function DriversPage() {
   const { user } = useAuth();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [count, setCount] = useState(0);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [nextPage, setNextPage] = useState<string | null>(null);
+  const [previousPage, setPreviousPage] = useState<string | null>(null);
   const [selected, setSelected] = useState<Driver | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [search, setSearch] = useState("");
   const [employment, setEmployment] = useState("");
   const [eligibility, setEligibility] = useState("");
+  const [shift, setShift] = useState("");
+  const [restDay, setRestDay] = useState("");
   const [tab, setTab] = useState("overview");
   const [formMode, setFormMode] = useState<"add" | "edit" | null>(null);
   const [documents, setDocuments] = useState<DriverDocument[]>([]);
+  const [safetyHistoryPage, setSafetyHistoryPage] = useState(1);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({
+      page: String(pageNumber),
+      page_size: String(DRIVER_PAGE_SIZE),
+    });
     if (search.trim()) params.set("search", search.trim());
     if (employment) params.set("employment_status", employment);
     if (eligibility) params.set("eligibility_status", eligibility);
+    if (shift) params.set("work_shift", shift);
+    if (restDay) params.set("rest_day", restDay);
+    setState("loading");
     getDrivers(params.toString(), controller.signal)
       .then((page) => {
         setDrivers(page.results);
         setCount(page.count);
+        setNextPage(page.next);
+        setPreviousPage(page.previous);
         setSelected(
           (current) =>
             page.results.find((item) => item.id === current?.id) ??
@@ -81,7 +97,7 @@ export default function DriversPage() {
           setState("error");
       });
     return () => controller.abort();
-  }, [search, employment, eligibility]);
+  }, [search, employment, eligibility, shift, restDay, pageNumber]);
   useEffect(() => {
     if (tab !== "documents" || !selected) return;
     const controller = new AbortController();
@@ -90,6 +106,7 @@ export default function DriversPage() {
     );
     return () => controller.abort();
   }, [selected, tab]);
+  useEffect(() => setSafetyHistoryPage(1), [selected?.id]);
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
@@ -140,7 +157,7 @@ export default function DriversPage() {
   };
   return (
     <section className="drivers-page drivers-page--workspace">
-      <header className="d-flex justify-content-between align-items-start gap-3">
+      <header className="drivers-header d-flex justify-content-between align-items-start gap-3">
         <div>
           <p className="breadcrumb text-secondary small mb-1">
             Fleet &amp; Safety / Drivers
@@ -148,7 +165,7 @@ export default function DriversPage() {
           <h1 className="mb-1">Drivers &amp; Safety Scores</h1>
         </div>
         <div className="drivers-header-actions">
-          {user?.role === "SUPER_ADMIN" && (
+          {user?.role === "FLEET_ADMIN" && (
             <button
               className="btn-action--filled"
               onClick={() => {
@@ -172,7 +189,10 @@ export default function DriversPage() {
           <input
             aria-label="Search drivers"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPageNumber(1);
+            }}
             placeholder="Name or driver code"
           />
         </label>
@@ -180,7 +200,10 @@ export default function DriversPage() {
           Employment
           <select
             value={employment}
-            onChange={(e) => setEmployment(e.target.value)}
+            onChange={(e) => {
+              setEmployment(e.target.value);
+              setPageNumber(1);
+            }}
           >
             <option value="">All statuses</option>
             {employmentStatuses.map((value) => (
@@ -194,13 +217,33 @@ export default function DriversPage() {
           Eligibility
           <select
             value={eligibility}
-            onChange={(e) => setEligibility(e.target.value)}
+            onChange={(e) => {
+              setEligibility(e.target.value);
+              setPageNumber(1);
+            }}
           >
             <option value="">All eligibility</option>
             {eligibilityStatuses.map((value) => (
               <option key={value} value={value}>
                 {words(value)}
               </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Shift
+          <select value={shift} onChange={(e) => { setShift(e.target.value); setPageNumber(1); }}>
+            <option value="">All shifts</option>
+            <option value="DAY">Day</option>
+            <option value="NIGHT">Night</option>
+          </select>
+        </label>
+        <label>
+          Rest day
+          <select value={restDay} onChange={(e) => { setRestDay(e.target.value); setPageNumber(1); }}>
+            <option value="">All days</option>
+            {["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"].map((day) => (
+              <option key={day} value={day}>{words(day)}</option>
             ))}
           </select>
         </label>
@@ -245,6 +288,35 @@ export default function DriversPage() {
               </span>
             </button>
           ))}
+          {state === "ready" && (
+            <nav className="request-pagination driver-pagination" aria-label="Driver pages">
+              <span>
+                Showing {count ? (pageNumber - 1) * DRIVER_PAGE_SIZE + 1 : 0}–
+                {Math.min(pageNumber * DRIVER_PAGE_SIZE, count)} of {count}
+              </span>
+              <div>
+                <button
+                  type="button"
+                  className="btn-filter"
+                  disabled={!previousPage}
+                  onClick={() => setPageNumber((value) => Math.max(1, value - 1))}
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {pageNumber} of {Math.max(1, Math.ceil(count / DRIVER_PAGE_SIZE))}
+                </span>
+                <button
+                  type="button"
+                  className="btn-filter"
+                  disabled={!nextPage}
+                  onClick={() => setPageNumber((value) => value + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            </nav>
+          )}
         </section>
         <section className="driver-detail">
           {!selected ? (
@@ -282,9 +354,12 @@ export default function DriversPage() {
                     }
                   />
                 </span>
-                <span className="driver-safety-score">
+                <span
+                  className="driver-safety-score"
+                  aria-label="Driver safety score"
+                >
                   <small>Safety score</small>
-                  <strong>—</strong>
+                  <strong>{selected.safety_score ?? "—"}</strong>
                 </span>
                 {user?.role !== "DISPATCHER" && (
                   <button
@@ -347,19 +422,25 @@ export default function DriversPage() {
                         ],
                       ]}
                     />
+                    <DriverData
+                      title="FTMS Local Development Schedule"
+                      values={[
+                        ["Shift", selected.shift_label],
+                        ["Hours", selected.shift_hours],
+                        ["Rest days", selected.weekly_rest_days.map(words).join(", ")],
+                        ["Schedule status", words(selected.schedule_status)],
+                      ]}
+                    />
                   </>
                 )}
                 {tab === "eligibility" && (
                   <>
-                    <h3>{words(selected.eligibility_status)}</h3>
-                    {selected.eligibility_reasons.length ? (
+                    {selected.eligibility_reasons.length > 0 && (
                       <ul className="driver-eligibility-reasons">
                         {selected.eligibility_reasons.map((reason) => (
                           <li key={reason}>{reason}</li>
                         ))}
                       </ul>
-                    ) : (
-                      <p>All current readiness evidence is present.</p>
                     )}
                     <DriverData
                       title="Readiness evidence"
@@ -382,11 +463,6 @@ export default function DriversPage() {
                         ],
                       ]}
                     />
-                    <p>Safety Score is not currently used for eligibility.</p>
-                    <p>
-                      License-code and vehicle compatibility are not evaluated
-                      yet.
-                    </p>
                   </>
                 )}
                 {tab === "credentials" && (
@@ -409,15 +485,42 @@ export default function DriversPage() {
                   />
                 )}{" "}
                 {tab === "safety" && (
-                  <div className="driver-safety-empty">
+                  selected.safety_score_source === "DEMO_SEED" ? (
+                  <div className="driver-safety-profile">
                     <h3>Safety Score</h3>
-                    <strong>—</strong>
-                    <b>Not yet scored</b>
-                    <p>
-                      Safety scoring will become available when validated
-                      driving-behavior and incident inputs are integrated.
-                    </p>
+                    <strong>{selected.safety_score}</strong>
+                    <small>Demo safety dataset</small>
+                    <div className="driver-safety-summary">
+                      <span><b>{selected.safety_completed_trips}</b><small>Completed Trips</small></span>
+                      <span><b>{selected.safety_driving_hours}</b><small>Driving Hours</small></span>
+                      <span><b>{selected.safety_event_count}</b><small>Safety Events</small></span>
+                    </div>
+                    <h3>Safety History</h3>
+                    {selected.safety_history.length ? (
+                      <div className="table-responsive"><table className="table">
+                        <thead><tr><th>Date / Time</th><th>Event</th></tr></thead>
+                        <tbody>{selected.safety_history.slice(
+                          (safetyHistoryPage - 1) * SAFETY_HISTORY_PAGE_SIZE,
+                          safetyHistoryPage * SAFETY_HISTORY_PAGE_SIZE,
+                        ).map((event) => (
+                          <tr key={event.id}><td>{new Date(event.occurred_at).toLocaleString()}</td><td>{event.event_label}</td></tr>
+                        ))}</tbody>
+                      </table>
+                      <div className="driver-safety-pagination">
+                        <button type="button" disabled={safetyHistoryPage === 1} onClick={() => setSafetyHistoryPage((page) => page - 1)}>Previous</button>
+                        <span>Page {safetyHistoryPage} of {Math.ceil(selected.safety_history.length / SAFETY_HISTORY_PAGE_SIZE)}</span>
+                        <button type="button" disabled={safetyHistoryPage * SAFETY_HISTORY_PAGE_SIZE >= selected.safety_history.length} onClick={() => setSafetyHistoryPage((page) => page + 1)}>Next</button>
+                      </div></div>
+                    ) : <p>No recorded safety events</p>}
                   </div>
+                  ) : selected.safety_score !== null ? (
+                    <div className="driver-safety-profile">
+                      <h3>Safety Score</h3>
+                      <strong>{selected.safety_score}</strong>
+                    </div>
+                  ) : (
+                    <div className="driver-safety-empty"><h3>Safety Score</h3><strong>—</strong><b>Not yet scored</b><p>Safety scoring will become available when validated driving-behavior and incident inputs are integrated.</p></div>
+                  )
                 )}
                 {tab === "documents" && (
                   <>
@@ -496,7 +599,7 @@ export default function DriversPage() {
             </header>
             <DriverForm
               driver={formMode === "edit" ? selected : null}
-              superAdmin={user?.role === "SUPER_ADMIN"}
+              superAdmin={user?.role === "FLEET_ADMIN"}
               onSubmit={save}
               onCancel={() => setFormMode(null)}
               saving={saving}

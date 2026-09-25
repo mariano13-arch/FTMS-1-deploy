@@ -8,10 +8,13 @@ from .views import (
     ConsolidationConfirmationView,
     ConsolidationPrepareView,
     ConsolidationRecommendationView,
+    DispatchAssignmentListView,
     DispatchBoardView,
     DispatchConfirmationView,
     DispatchMatrixView,
     DispatchRecommendationView,
+    DispatchRecommendationRouteView,
+    FlightRefreshView,
     PlaceDetailsView,
     PlaceSuggestView,
     PrepareDispatchView,
@@ -25,11 +28,21 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "dispatch-assignments/",
+        DispatchAssignmentListView.as_view(),
+        name="dispatch-assignment-list",
+    ),
     path("dispatch-board/", DispatchBoardView.as_view(), name="dispatch-board"),
     path(
         "dispatch-board/recommendations/",
         DispatchRecommendationView.as_view(),
         name="dispatch-recommendations",
+    ),
+    path(
+        "dispatch-board/recommendation-route/",
+        DispatchRecommendationRouteView.as_view(),
+        name="dispatch-recommendation-route",
     ),
     path(
         "dispatch-board/confirm/",
@@ -73,6 +86,7 @@ urlpatterns = [
         TransportRequestRouteView.as_view(),
         name="transport-request-route",
     ),
+    path("<uuid:request_id>/flight/refresh/", FlightRefreshView.as_view()),
     path("<uuid:request_id>/approve/", ApproveView.as_view()),
     path("<uuid:request_id>/reject/", RejectView.as_view()),
     path("<uuid:request_id>/request-more-details/", RequestMoreDetailsView.as_view()),

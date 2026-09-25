@@ -1,6 +1,6 @@
 import { api } from "../../services/api";
 
-export type ManagedRole = "FLEET_MANAGER" | "DISPATCHER";
+export type ManagedRole = "FLEET_MANAGER" | "DISPATCHER" | "FLEET_STAFF";
 export type SetupStatus = "pending" | "complete";
 export type InvitationDelivery = "SENT" | "NOT_SENT_ERROR";
 
@@ -54,4 +54,48 @@ export function resendStaffInvitation(userId: number) {
     `/api/v1/auth/staff/${userId}/resend-invitation/`,
     { method: "POST" },
   );
+}
+
+export type AuditOutcome = "SUCCESS" | "FAILURE" | "DENIED";
+export type AuditEvent = {
+  id: number;
+  occurred_at: string;
+  actor: number | null;
+  actor_display: string;
+  actor_type: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  outcome: AuditOutcome;
+  source: string;
+  ip_address: string | null;
+  user_agent: string;
+  changes: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
+
+export type AuditLogResponse = {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: AuditEvent[];
+};
+
+export type AuditLogFilters = {
+  occurred_after?: string;
+  occurred_before?: string;
+  actor?: string;
+  action?: string;
+  outcome?: string;
+  page?: number;
+};
+
+export function listAuditLogs(filters: AuditLogFilters = {}, signal?: AbortSignal) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  const query = params.toString();
+  return api<AuditLogResponse>(`/api/v1/auth/audit-logs/${query ? `?${query}` : ""}`, { signal });
 }

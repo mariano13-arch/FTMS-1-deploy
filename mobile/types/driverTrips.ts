@@ -9,6 +9,19 @@ export type DriverTripVehicle = {
   plateNumber: string;
   vehicleType: string;
   vehicleTypeLabel: string;
+  passengerCapacity?: number | null;
+  payloadCapacityKg?: string | null;
+};
+
+export type DriverTripFlightContext = {
+  flightNumber: string;
+  terminal: string;
+  scheduledArrivalAt: string | null;
+  estimatedArrivalAt: string | null;
+  actualArrivalAt: string | null;
+  providerFlightStatus: string;
+  refreshStatus: string;
+  refreshMessage: string;
 };
 
 export type DriverTripExecutionStatus =
@@ -39,7 +52,7 @@ export type DriverTripExecution = {
   completedAt: string | null;
 };
 
-export type DriverTripRoute = {
+export type DriverRoadRoute = {
   geometry: {
     type: 'LineString';
     coordinates: [longitude: number, latitude: number][];
@@ -57,6 +70,27 @@ export type DriverVehiclePosition = {
   longitude: number;
   recordedAt: string;
   isStale: boolean;
+  source: 'GNSS' | 'CELLULAR_LBS' | 'SIMULATED_TEST';
+};
+
+export type DriverRoutePlace = {
+  name: string;
+  latitude: number;
+  longitude: number;
+};
+
+export type DriverTripRoute = {
+  phase: 'TO_PICKUP' | 'TO_DESTINATION' | 'ARRIVED' | 'COMPLETED';
+  executionStatus: DriverTripExecutionStatus;
+  routeStatus: 'AVAILABLE' | 'POSITION_UNAVAILABLE' | 'TEMPORARILY_UNAVAILABLE' | 'NOT_ACTIVE';
+  positionState: 'CURRENT' | 'STALE' | 'UNAVAILABLE';
+  positionRecordedAt: string | null;
+  positionAgeSeconds: number | null;
+  routeBasis: 'CURRENT_VEHICLE_POSITION' | 'LAST_KNOWN_VEHICLE_POSITION' | 'PICKUP' | null;
+  vehiclePosition: DriverVehiclePosition | null;
+  pickup: DriverRoutePlace;
+  destination: DriverRoutePlace;
+  route: DriverRoadRoute | null;
 };
 
 export type DriverTrip = {
@@ -85,5 +119,7 @@ export type DriverTrip = {
   loadQuantity: number | null;
   estimatedWeightKg: string | null;
   temperatureRequirement: string;
+  flightContext?: DriverTripFlightContext | null;
+  capacityCompatibility?: { status: string; message: string };
   execution: DriverTripExecution;
 };

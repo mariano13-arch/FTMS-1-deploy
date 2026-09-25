@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import (
+    AuditEvent,
     VALID_MODULE_ACTIONS,
     PermissionAction,
     StaffProfile,
@@ -36,8 +37,29 @@ class LoginSerializer(StrictFieldsSerializer):
         return super().to_internal_value(data)
 
 
+class ForgotPasswordSerializer(StrictFieldsSerializer):
+    email = serializers.EmailField()
+
+
+class ChangePasswordSerializer(StrictFieldsSerializer):
+    current_password = serializers.CharField(trim_whitespace=False, write_only=True)
+    new_password = serializers.CharField(trim_whitespace=False, write_only=True)
+    confirm_password = serializers.CharField(trim_whitespace=False, write_only=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError(
+                {"confirm_password": ["Passwords do not match."]}
+            )
+        return attrs
+
+
 class TwoFactorCodeSerializer(StrictFieldsSerializer):
     code = serializers.CharField(trim_whitespace=True, max_length=128)
+
+
+class TwoFactorEnrollmentConfirmSerializer(TwoFactorCodeSerializer):
+    challenge_token = serializers.CharField(trim_whitespace=False, max_length=256)
 
 
 class TwoFactorVerifySerializer(TwoFactorCodeSerializer):
@@ -103,6 +125,10 @@ class StaffPasswordSetupSerializer(DriverPasswordSetupSerializer):
     pass
 
 
+class ResetPasswordSerializer(DriverPasswordSetupSerializer):
+    pass
+
+
 class RolePermissionEntrySerializer(StrictFieldsSerializer):
     module = serializers.CharField()
     action = serializers.CharField()
@@ -129,3 +155,33 @@ class RolePermissionReplaceSerializer(StrictFieldsSerializer):
                 "Duplicate module/action permissions are not allowed."
             )
         return permissions
+
+
+class AuditEventSerializer(serializers.ModelSerializer):
+    actor_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditEvent
+        fields = [
+            "id",
+            "occurred_at",
+            "actor",
+            "actor_display",
+            "actor_type",
+            "action",
+            "target_type",
+            "target_id",
+            "target_label",
+            "outcome",
+            "source",
+            "ip_address",
+            "user_agent",
+            "changes",
+            "metadata",
+        ]
+        read_only_fields = fields
+
+    def get_actor_display(self, event):
+        if event.actor_id is None:
+            return "Unknown"
+        return event.actor.get_full_name().strip() or event.actor.username

@@ -10,6 +10,7 @@ export const getRequestSuggestions = (search: string, status = "", signal?: Abor
 };
 export const getRequest = (id: string, signal?: AbortSignal) => api<TransportRequest>(`${root}${encodeURIComponent(id)}/`, { signal });
 export const getRequestRoute = (id: string, signal?: AbortSignal) => api<TransportRoute>(`${root}${encodeURIComponent(id)}/route/`, { signal });
+export const refreshRequestFlight = (id: string, signal?: AbortSignal) => api<TransportRequest>(`${root}${encodeURIComponent(id)}/flight/refresh/`, { method: "POST", body: "{}", signal });
 export const suggestPlaces = (query: string, sessionId: string, signal?: AbortSignal) => api<PlaceSuggestions>(`${root}places/suggest/`, { method: "POST", body: JSON.stringify({ query, session_id: sessionId }), signal });
 export const getPlaceDetails = (type: string, id: string, sessionId: string, signal?: AbortSignal) => api<PlaceDetails>(`${root}places/details/${encodeURIComponent(type)}/${encodeURIComponent(id)}/?session_id=${encodeURIComponent(sessionId)}`, { signal });
 export const getSummary = (signal?: AbortSignal) => api<Summary>(`${root}summary/`, { signal });

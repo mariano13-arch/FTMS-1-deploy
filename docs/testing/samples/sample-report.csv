@@ -1,0 +1,3 @@
+Request Number,Source System,Request Type,Category,Priority,Current Status,Scheduled Pickup,Created At
+TR-SAMPLE-001,Manual staff entry,Guest transfer,Passenger transport,Normal,Approved,2026-09-20T10:00:00+08:00,2026-09-19T08:00:00+08:00
+'=SAFE-FORMULA,Hotel management system,Guest transfer,Passenger transport,High,Ready for dispatch,2026-09-21T14:30:00+08:00,2026-09-20T09:15:00+08:00

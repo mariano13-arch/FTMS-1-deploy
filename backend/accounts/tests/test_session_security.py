@@ -21,7 +21,7 @@ class SessionSecurityTests(TestCase):
 
     def setUp(self):
         cache.clear()
-        self.user = self.create_staff("manager", StaffProfile.Role.FLEET_MANAGER)
+        self.user = self.create_staff("manager", StaffProfile.Role.DISPATCHER)
 
     def create_staff(self, username, role=None, **user_fields):
         user = get_user_model().objects.create_user(
@@ -129,6 +129,7 @@ class SessionSecurityTests(TestCase):
         self.assertEqual(self.get_me(first, self.start + 4).status_code, 401)
         self.assertEqual(self.get_me(second, self.start + 4).status_code, 200)
 
+    @override_settings(FTMS_SESSION_IDLE_TIMEOUT_SECONDS=900)
     def test_idle_timeout_is_authoritative_and_background_requests_do_not_renew_it(self):
         client = APIClient(enforce_csrf_checks=True)
         self.login(client)
@@ -139,6 +140,7 @@ class SessionSecurityTests(TestCase):
         self.assertIn("inactivity", expired.json()["detail"])
         self.assertFalse(ActiveUserSession.objects.filter(user=self.user).exists())
 
+    @override_settings(FTMS_SESSION_IDLE_TIMEOUT_SECONDS=900)
     def test_meaningful_activity_uses_server_time_and_extends_only_idle_limit(self):
         client = APIClient(enforce_csrf_checks=True)
         login_response = self.login(client)
@@ -155,7 +157,10 @@ class SessionSecurityTests(TestCase):
         self.assertEqual(self.get_me(client, self.start + 1_499).status_code, 200)
         self.assertEqual(self.get_me(client, self.start + 1_500).status_code, 401)
 
-    @override_settings(FTMS_SESSION_IDLE_TIMEOUT_SECONDS=30_000)
+    @override_settings(
+        FTMS_SESSION_IDLE_TIMEOUT_SECONDS=30_000,
+        FTMS_SESSION_ABSOLUTE_TIMEOUT_SECONDS=28_800,
+    )
     def test_absolute_timeout_cannot_be_extended_by_activity(self):
         client = APIClient(enforce_csrf_checks=True)
         login_response = self.login(client)
@@ -191,8 +196,8 @@ class SessionSecurityTests(TestCase):
 
     def test_supported_staff_account_types_use_session_controls(self):
         dispatcher = self.create_staff("dispatcher", StaffProfile.Role.DISPATCHER)
-        super_admin = self.create_staff("admin", is_superuser=True)
-        for username, user in (("dispatcher", dispatcher), ("admin", super_admin)):
+        fleet_staff = self.create_staff("fleet-staff", StaffProfile.Role.FLEET_STAFF)
+        for username, user in (("dispatcher", dispatcher), ("fleet-staff", fleet_staff)):
             with self.subTest(username=username):
                 client = APIClient(enforce_csrf_checks=True)
                 self.assertEqual(self.login(client, username=username).status_code, 200)

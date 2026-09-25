@@ -23,6 +23,7 @@ export const requestTypes = [
 export const sourceSystems = [
   "HOTEL_MANAGEMENT_SYSTEM",
   "RESTAURANT_MANAGEMENT_SYSTEM",
+  "SUPPLY_CHAIN_MANAGEMENT_SYSTEM",
   "MANUAL_STAFF_ENTRY",
   "OTHER_SUBSYSTEM",
 ] as const;
@@ -90,6 +91,23 @@ export type TransportRequestBase = {
   approved_at: string | null;
   created_at: string;
   updated_at: string;
+  flight_context?: FlightContext | null;
+};
+export type FlightContext = {
+  provider: "FLIGHTRADAR24";
+  flight_number: string;
+  flight_date: string | null;
+  origin_airport: string;
+  arrival_airport: string;
+  terminal: string;
+  scheduled_arrival_at: string | null;
+  estimated_arrival_at: string | null;
+  actual_arrival_at: string | null;
+  provider_flight_status: string;
+  refresh_status: "NOT_CONFIGURED" | "NOT_REFRESHED" | "AVAILABLE" | "UNAVAILABLE";
+  last_refresh_attempt_at: string | null;
+  last_successful_refresh_at: string | null;
+  refresh_message: string;
 };
 export type TransportRequestListItem = TransportRequestBase & {
   latest_event_type: string | null;
@@ -143,6 +161,8 @@ export type Summary = {
   ready_for_dispatch: number;
   scheduled_today: number;
   high_priority: number;
+  active_trips: number;
+  completed_trips: number;
 };
 export type CalendarResponse = {
   start: string;

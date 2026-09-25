@@ -76,6 +76,24 @@ test("renders populated telemetry, simulated provenance, zeroes, and LBS semanti
   expect(screen.getByText("Simulated test")).toBeInTheDocument();
 });
 
+test("labels persisted simulated positions separately from GNSS and OBD", async () => {
+  mocks.getFleet.mockResolvedValueOnce(response([{ ...vehicle, telemetry: {
+    ...vehicle.telemetry!,
+    position_source: "SIMULATED_TEST",
+    position_accuracy_m: null,
+    speed_kph: null,
+    obd_source: null,
+    telemetry_source: "demo",
+    is_demo_telemetry: true,
+  } }]));
+  renderPage();
+  await screen.findByRole("heading", { name: "Operations Shuttle" });
+  expect(screen.getByText("SIMULATED TEST POSITION DATA")).toBeInTheDocument();
+  expect(screen.getByText("SIMULATED TEST DATA")).toBeInTheDocument();
+  expect(screen.queryByText("Approximate cellular location")).not.toBeInTheDocument();
+  expect(screen.queryByText("SIMULATED TEST OBD DATA")).not.toBeInTheDocument();
+});
+
 test("renders the vehicle's saved photo", async () => {
   mocks.getFleet.mockResolvedValueOnce(response([{ ...vehicle, photo_url: "/api/v1/vehicles/LILYGO-002/photo/" }]));
   renderPage();
@@ -102,4 +120,18 @@ test("shows a clear empty state when the vehicle has no telemetry", async () => 
   renderPage();
   expect(await screen.findByRole("heading", { name: "No telemetry received" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Position" })).not.toBeInTheDocument();
+});
+
+test("shows backend-restored physical emergency state and activated time", async () => {
+  mocks.getFleet.mockResolvedValueOnce(response([{ ...vehicle, emergency_sos: {
+    id: 7, device_id: "LILYGO-002", vehicle_id: 1, driver_id: null,
+    status: "ACTIVE", source: "PHYSICAL_BUTTON",
+    activated_at: "2026-09-24T01:02:03Z", cleared_at: null,
+  } }]));
+  renderPage();
+  const emergency = await screen.findByLabelText("Emergency SOS");
+  expect(emergency).toHaveTextContent("EMERGENCY SOS");
+  expect(emergency).toHaveTextContent("Active");
+  expect(emergency).toHaveTextContent("Physical emergency button");
+  expect(emergency).toHaveTextContent(new Date("2026-09-24T01:02:03Z").toLocaleString());
 });

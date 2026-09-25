@@ -2,7 +2,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import StaffAccess
+from accounts.permissions import ModuleActionAccess, StaffAccess
 from fleet.models import Vehicle
 from ml.dashboard import RANGES, dashboard_data
 from ml.fuel import (
@@ -67,7 +67,9 @@ class FuelDashboardFilterSerializer(serializers.Serializer):
 
 class FuelModelInfoView(APIView):
     http_method_names = ["get", "options"]
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "FUEL_ANALYTICS"
+    permission_action = "VIEW"
 
     def get(self, request):
         return Response(model_info())
@@ -75,7 +77,9 @@ class FuelModelInfoView(APIView):
 
 class FuelReadinessView(APIView):
     http_method_names = ["get", "options"]
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "FUEL_ANALYTICS"
+    permission_action = "VIEW"
 
     def get(self, request):
         return Response(operational_readiness())
@@ -83,7 +87,9 @@ class FuelReadinessView(APIView):
 
 class FuelDashboardView(APIView):
     http_method_names = ["get", "options"]
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "FUEL_ANALYTICS"
+    permission_action = "VIEW"
 
     def get(self, request):
         unknown = set(request.query_params) - {
@@ -112,7 +118,9 @@ class FuelDashboardView(APIView):
 
 class FuelPredictionView(APIView):
     http_method_names = ["post", "options"]
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "FUEL_ANALYTICS"
+    permission_action = "VIEW"
 
     def post(self, request):
         if not isinstance(request.data, dict):

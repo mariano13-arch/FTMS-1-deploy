@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { getCalendar } from "../api";
 import type { CalendarRequest, CalendarResponse } from "../types";
 import { PriorityChip, WorkflowStatusBadge } from "./RequestIndicators";
@@ -8,6 +7,18 @@ import LoadingIndicator from "../../../components/common/LoadingIndicator";
 import { X } from "lucide-react";
 
 type Mode = "daily" | "weekly" | "monthly";
+const MANILA_TIME_ZONE = "Asia/Manila";
+const manilaDateKey = (value: Date) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
 const dateKey = (value: Date) => {
   const y = value.getFullYear();
   const m = String(value.getMonth() + 1).padStart(2, "0");
@@ -39,7 +50,7 @@ const monthFetchRange = (anchor: Date): { start: string; end: string } => {
   const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
   return { start: dateKey(first), end: dateKey(last) };
 };
-const todayKey = dateKey(new Date());
+const todayKey = manilaDateKey(new Date());
 const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6;
 const priorityDot: Record<string, string> = {
   low: "#8b9a7b",
@@ -48,7 +59,11 @@ const priorityDot: Record<string, string> = {
   urgent: "#a8312c",
 };
 
-export default function CalendarView() {
+export default function CalendarView({
+  onViewRequest,
+}: {
+  onViewRequest?: (requestId: string) => void;
+}) {
   const [mode, setMode] = useState<Mode>("monthly");
   const [anchor, setAnchor] = useState(() => new Date());
   const [data, setData] = useState<CalendarResponse | null>(null);
@@ -128,7 +143,11 @@ export default function CalendarView() {
 
   const moveMonth = (amount: number) => {
     const next = new Date(anchor);
+    const focusedDay = next.getDate();
+    next.setDate(1);
     next.setMonth(next.getMonth() + amount);
+    const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+    next.setDate(Math.min(focusedDay, lastDay));
     navigateTo(next);
   };
 
@@ -145,6 +164,7 @@ export default function CalendarView() {
   const rangeLabel = useMemo(() => {
     if (mode === "daily")
       return days[0].toLocaleDateString(undefined, {
+        timeZone: MANILA_TIME_ZONE,
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -152,14 +172,26 @@ export default function CalendarView() {
       });
     if (mode === "monthly")
       return anchor.toLocaleDateString(undefined, {
+        timeZone: MANILA_TIME_ZONE,
         month: "long",
         year: "numeric",
       });
-    return `${days[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${days.at(-1)!.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+    return `${days[0].toLocaleDateString(undefined, { timeZone: MANILA_TIME_ZONE, month: "short", day: "numeric" })} – ${days.at(-1)!.toLocaleDateString(undefined, { timeZone: MANILA_TIME_ZONE, month: "short", day: "numeric", year: "numeric" })}`;
   }, [mode, days, anchor]);
 
   const dayItems = useCallback(
-    (key: string) => data?.results.filter((r) => r.calendar_date === key) ?? [],
+    (key: string) =>
+      data?.results
+        .filter(
+          (request) =>
+            request.calendar_date === key &&
+            Number.isFinite(Date.parse(request.scheduled_pickup_at)),
+        )
+        .sort(
+          (left, right) =>
+            Date.parse(left.scheduled_pickup_at) -
+            Date.parse(right.scheduled_pickup_at),
+        ) ?? [],
     [data],
   );
 
@@ -245,14 +277,13 @@ export default function CalendarView() {
             </div>
           )}
           {state === "ready" && data?.results.length === 0 && (
-            <div className="calendar-state">
-              No requests are scheduled in this period.
-            </div>
+            <p className="calendar-period-empty">
+              No scheduled requests this {mode === "monthly" ? "month" : "week"}.
+            </p>
           )}
           {mode === "weekly" &&
             state === "ready" &&
-            data &&
-            data.results.length > 0 && (
+            data && (
               <div className="calendar-week-cols">
                 {days.map((day) => {
                   const key = dateKey(day);
@@ -267,6 +298,7 @@ export default function CalendarView() {
                           <span className="calendar-week-col-dayname">
                             {day
                               .toLocaleDateString(undefined, {
+                                timeZone: MANILA_TIME_ZONE,
                                 weekday: "long",
                               })
                               .toUpperCase()}
@@ -285,6 +317,7 @@ export default function CalendarView() {
                               <ScheduleRowCompact
                                 item={item}
                                 timeZone={data.timezone}
+                                onViewRequest={onViewRequest}
                                 key={item.id}
                               />
                             ))
@@ -298,8 +331,7 @@ export default function CalendarView() {
             )}
           {mode === "monthly" &&
             state === "ready" &&
-            data &&
-            data.results.length > 0 && (
+            data && (
               <div className={`calendar-grid calendar-grid--${mode}`}>
                 {mode === "monthly" && (
                   <div className="calendar-grid-weekdays" role="row">
@@ -328,19 +360,21 @@ export default function CalendarView() {
                     ...new Set(items.map((i) => i.priority.toLowerCase())),
                   ];
                   return (
-                    <button
-                      type="button"
+                    <div
                       className={cls.join(" ")}
                       key={key}
-                      onClick={() => selectDay(key)}
-                      aria-pressed={selected}
+                      data-date={key}
                     >
-                      <span className="calendar-cell-date">
-                        {day.getDate()}
-                      </span>
-                      {items.length > 0 && (
-                        <div className="calendar-cell-indicators">
-                          <div className="calendar-cell-dots">
+                      <button
+                        type="button"
+                        className="calendar-cell-date-button"
+                        onClick={() => selectDay(key)}
+                        aria-pressed={selected}
+                        aria-label={`View ${key}`}
+                      >
+                        <span className="calendar-cell-date">{day.getDate()}</span>
+                        {items.length > 0 && (
+                          <span className="calendar-cell-dots" aria-hidden="true">
                             {priorities.map((p) => (
                               <span
                                 className="calendar-cell-dot"
@@ -348,14 +382,29 @@ export default function CalendarView() {
                                 key={p}
                               />
                             ))}
-                          </div>
-                          <span className="calendar-cell-count">
-                            {items.length} request
-                            {items.length !== 1 ? "s" : ""}
                           </span>
-                        </div>
-                      )}
-                    </button>
+                        )}
+                      </button>
+                      <div className="calendar-cell-events">
+                        {items.slice(0, 3).map((item) => (
+                          <ScheduleRowCompact
+                            item={item}
+                            timeZone={data.timezone}
+                            onViewRequest={onViewRequest}
+                            key={item.id}
+                          />
+                        ))}
+                        {items.length > 3 && (
+                          <button
+                            type="button"
+                            className="calendar-cell-more"
+                            onClick={() => selectDay(key)}
+                          >
+                            +{items.length - 3} more
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -364,10 +413,11 @@ export default function CalendarView() {
       )}
 
       {mode === "daily" && state === "ready" && data && (
-        <div className="calendar-schedule-panel">
+        <div className="calendar-day-view" role="region" aria-label="Daily schedule timeline">
           <div className="calendar-schedule-header">
             <h3>
               {days[0].toLocaleDateString(undefined, {
+                timeZone: MANILA_TIME_ZONE,
                 weekday: "long",
                 month: "long",
                 day: "numeric",
@@ -378,20 +428,34 @@ export default function CalendarView() {
               {panelItems.length} request{panelItems.length !== 1 ? "s" : ""}
             </span>
           </div>
-          <div className="calendar-schedule-list">
-            {panelItems.length === 0 ? (
-              <p className="calendar-schedule-empty">
-                No requests scheduled for this day.
-              </p>
-            ) : (
-              panelItems.map((item) => (
-                <ScheduleRow
-                  item={item}
-                  timeZone={data.timezone}
-                  key={item.id}
-                />
-              ))
-            )}
+          {panelItems.length === 0 && (
+            <p className="calendar-period-empty">No scheduled requests today.</p>
+          )}
+          <div className="calendar-day-timeline">
+            {Array.from({ length: 24 }, (_, hour) => {
+              const hourItems = panelItems.filter(
+                (item) => Number(new Intl.DateTimeFormat("en-US", {
+                  timeZone: data.timezone,
+                  hour: "2-digit",
+                  hourCycle: "h23",
+                }).format(new Date(item.scheduled_pickup_at))) === hour,
+              );
+              return (
+                <div className="calendar-hour-row" key={hour}>
+                  <time>{String(hour).padStart(2, "0")}:00</time>
+                  <div>
+                    {hourItems.map((item) => (
+                      <ScheduleRow
+                        item={item}
+                        timeZone={data.timezone}
+                        onViewRequest={onViewRequest}
+                        key={item.id}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -406,6 +470,7 @@ export default function CalendarView() {
               {(() => {
                 const d = new Date(showPanel + "T12:00:00");
                 return d.toLocaleDateString(undefined, {
+                  timeZone: MANILA_TIME_ZONE,
                   weekday: "long",
                   month: "long",
                   day: "numeric",
@@ -434,6 +499,7 @@ export default function CalendarView() {
                 <ScheduleRow
                   item={item}
                   timeZone={data.timezone}
+                  onViewRequest={onViewRequest}
                   key={item.id}
                 />
               ))
@@ -460,12 +526,14 @@ export default function CalendarView() {
 function ScheduleRow({
   item,
   timeZone,
+  onViewRequest,
 }: {
   item: CalendarRequest;
   timeZone: string;
+  onViewRequest?: (requestId: string) => void;
 }) {
   return (
-    <Link className="schedule-row" to={`/transport-requests/${item.id}`}>
+    <button className="schedule-row" type="button" onClick={() => onViewRequest?.(item.id)}>
       <span className="schedule-row-time">
         {new Date(item.scheduled_pickup_at).toLocaleTimeString([], {
           hour: "2-digit",
@@ -498,21 +566,24 @@ function ScheduleRow({
           </span>
         )}
       </span>
-    </Link>
+    </button>
   );
 }
 
 function ScheduleRowCompact({
   item,
   timeZone,
+  onViewRequest,
 }: {
   item: CalendarRequest;
   timeZone: string;
+  onViewRequest?: (requestId: string) => void;
 }) {
   return (
-    <Link
+    <button
       className="schedule-row-compact"
-      to={`/transport-requests/${item.id}`}
+      type="button"
+      onClick={() => onViewRequest?.(item.id)}
     >
       <span className="schedule-row-compact-time">
         {new Date(item.scheduled_pickup_at).toLocaleTimeString([], {
@@ -525,9 +596,11 @@ function ScheduleRowCompact({
         <span className="schedule-row-compact-number">
           {item.request_number}
         </span>
-        <PriorityChip value={item.priority} />
       </div>
-      <WorkflowStatusBadge value={item.status} />
-    </Link>
+      <span className="schedule-row-compact-route">
+        {item.pickup_name} → {item.destination_name}
+      </span>
+      <span className="schedule-row-compact-status">{label(item.status)}</span>
+    </button>
   );
 }

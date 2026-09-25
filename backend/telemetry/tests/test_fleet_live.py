@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
@@ -12,6 +13,8 @@ from fleet.models import Driver, Vehicle
 from telemetry import demo
 from telemetry.models import TelemetryEvent
 from transport_requests.models import DispatchAssignment, TransportRequest
+from transport_requests import routing
+from transport_requests import matrix
 
 
 class FleetLiveApiTests(TestCase):
@@ -118,6 +121,28 @@ class FleetLiveApiTests(TestCase):
         telemetry = response.json()["vehicles"][0]["telemetry"]
         self.assertEqual(telemetry["position_source"], "CELLULAR_LBS")
         self.assertEqual(telemetry["position_accuracy_m"], 550.0)
+        self.assertIsNone(telemetry["speed_kph"])
+
+    def test_persisted_simulated_position_is_labeled_demo_not_real(self):
+        self.telemetry(
+            self.live,
+            timezone.now(),
+            position_source=TelemetryEvent.PositionSource.SIMULATED_TEST,
+            position_accuracy_m=None,
+            gnss_speed_kph=None,
+            rpm=None,
+            coolant_c=None,
+            engine_load_pct=None,
+        )
+        response = self.client.get("/api/v1/fleet-live/vehicles/")
+        telemetry = next(
+            item["telemetry"]
+            for item in response.json()["vehicles"]
+            if item["device_id"] == self.live.device_id
+        )
+        self.assertEqual(telemetry["position_source"], "SIMULATED_TEST")
+        self.assertEqual(telemetry["telemetry_source"], "demo")
+        self.assertTrue(telemetry["is_demo_telemetry"])
         self.assertIsNone(telemetry["speed_kph"])
 
     def test_exposes_actual_obd_values_and_provenance(self):
@@ -272,6 +297,132 @@ class FleetLiveApiTests(TestCase):
             for vehicle in response.json()["vehicles"]
             if vehicle["device_id"] == self.live.device_id
         )
+
+    def route_result(self):
+        return {
+            "geometry": {"type": "LineString", "coordinates": [[121.05, 14.58], [121.02, 14.56]]},
+            "distance_meters": 4200,
+            "duration_seconds": 720,
+            "traffic_delay_seconds": 60,
+            "departure_time": "2026-09-21T00:00:00Z",
+            "arrival_time": "2026-09-21T00:12:00Z",
+            "traffic_mode": "live",
+        }
+
+    def test_staff_active_route_uses_canonical_phase_origins_and_targets(self):
+        assignment = self.make_assignment()
+        self.telemetry(self.live, timezone.now(), longitude=121.05, latitude=14.58)
+        url = f"/api/v1/fleet-live/assignments/{assignment.pk}/route/"
+
+        with patch("transport_requests.routing.get_route_between", return_value=self.route_result()) as get_route:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["route"]["phase"], "TO_PICKUP")
+            self.assertEqual(response.json()["route"]["position_state"], "CURRENT")
+            self.assertEqual(response.json()["route"]["route_basis"], "CURRENT_VEHICLE_POSITION")
+            self.assertEqual(response.json()["route"]["route"]["distance_meters"], 4200)
+            self.assertEqual(response.json()["route"]["planned_route_status"], "AVAILABLE")
+            self.assertEqual(
+                [call.args[1:] for call in get_route.call_args_list],
+                [
+                    ([121.02, 14.56], [121.0198, 14.5086]),
+                    ([121.05, 14.58], [121.02, 14.56]),
+                ],
+            )
+
+            assignment.execution_status = DispatchAssignment.ExecutionStatus.AT_PICKUP
+            assignment.save(update_fields=["execution_status", "updated_at"])
+            self.client.get(url)
+            self.assertEqual(get_route.call_args.args[1:], ([121.02, 14.56], [121.0198, 14.5086]))
+
+            assignment.execution_status = DispatchAssignment.ExecutionStatus.IN_TRANSIT
+            assignment.save(update_fields=["execution_status", "updated_at"])
+            self.client.get(url)
+            self.assertEqual(get_route.call_args.args[1:], ([121.05, 14.58], [121.0198, 14.5086]))
+
+    def test_pre_pickup_route_legs_fail_independently_without_fallback(self):
+        assignment = self.make_assignment()
+        self.telemetry(self.live, timezone.now(), longitude=121.05, latitude=14.58)
+        url = f"/api/v1/fleet-live/assignments/{assignment.pk}/route/"
+
+        def active_fails(identity, _origin, _target):
+            if str(identity).startswith("driver:"):
+                raise routing.RouteServiceError
+            return self.route_result()
+
+        with patch("transport_requests.routing.get_route_between", side_effect=active_fails):
+            route = self.client.get(url).json()["route"]
+        self.assertEqual(route["route_status"], "TEMPORARILY_UNAVAILABLE")
+        self.assertIsNone(route["route"])
+        self.assertEqual(route["planned_route_status"], "AVAILABLE")
+        self.assertIsNotNone(route["planned_route"])
+
+        def planned_fails(identity, _origin, _target):
+            if str(identity) == str(assignment.transport_request_id):
+                raise routing.RouteServiceError
+            return self.route_result()
+
+        with patch("transport_requests.routing.get_route_between", side_effect=planned_fails):
+            route = self.client.get(url).json()["route"]
+        self.assertEqual(route["route_status"], "AVAILABLE")
+        self.assertIsNotNone(route["route"])
+        self.assertEqual(route["planned_route_status"], "TEMPORARILY_UNAVAILABLE")
+        self.assertIsNone(route["planned_route"])
+
+    def test_stale_position_routes_from_last_known_coordinates_without_dispatch_eligibility(self):
+        assignment = self.make_assignment()
+        event = self.telemetry(
+            self.live,
+            timezone.now() - timedelta(seconds=301),
+            longitude=121.05,
+            latitude=14.58,
+        )
+        self.assertFalse(matrix.dispatch_position_is_eligible(self.live, event))
+        url = f"/api/v1/fleet-live/assignments/{assignment.pk}/route/"
+
+        with patch("transport_requests.routing.get_route_between", return_value=self.route_result()) as get_route:
+            response = self.client.get(url)
+            active_route = response.json()["route"]
+            self.assertEqual(active_route["position_state"], "STALE")
+            self.assertTrue(active_route["vehicle_position"]["is_stale"])
+            self.assertEqual(active_route["route_basis"], "LAST_KNOWN_VEHICLE_POSITION")
+            self.assertGreaterEqual(active_route["position_age_seconds"], 301)
+            self.assertEqual(get_route.call_args.args[1:], ([121.05, 14.58], [121.02, 14.56]))
+
+            assignment.execution_status = DispatchAssignment.ExecutionStatus.IN_TRANSIT
+            assignment.save(update_fields=["execution_status", "updated_at"])
+            response = self.client.get(url)
+            self.assertEqual(response.json()["route"]["route_basis"], "LAST_KNOWN_VEHICLE_POSITION")
+            self.assertEqual(get_route.call_args.args[1:], ([121.05, 14.58], [121.0198, 14.5086]))
+
+    def test_arrived_completed_and_provider_failure_never_return_fake_routes(self):
+        assignment = self.make_assignment()
+        self.telemetry(self.live, timezone.now(), longitude=121.05, latitude=14.58)
+        url = f"/api/v1/fleet-live/assignments/{assignment.pk}/route/"
+
+        with patch("transport_requests.routing.get_route_between", side_effect=routing.RouteServiceError):
+            response = self.client.get(url)
+            self.assertEqual(response.json()["route"]["route_status"], "TEMPORARILY_UNAVAILABLE")
+            self.assertIsNone(response.json()["route"]["route"])
+
+        for execution_status in (
+            DispatchAssignment.ExecutionStatus.AT_DESTINATION,
+            DispatchAssignment.ExecutionStatus.COMPLETED,
+        ):
+            assignment.execution_status = execution_status
+            assignment.save(update_fields=["execution_status", "updated_at"])
+            with patch("transport_requests.routing.get_route_between") as get_route:
+                response = self.client.get(url)
+                self.assertEqual(response.json()["route"]["route_status"], "NOT_ACTIVE")
+                self.assertIsNone(response.json()["route"]["route"])
+                self.assertIsNone(response.json()["route"]["planned_route"])
+                get_route.assert_not_called()
+
+    def test_active_route_endpoint_requires_staff_authentication(self):
+        assignment = self.make_assignment()
+        self.client.force_authenticate(user=None)
+        response = self.client.get(f"/api/v1/fleet-live/assignments/{assignment.pk}/route/")
+        self.assertIn(response.status_code, {401, 403})
 
     def test_only_accepted_released_in_progress_assignment_is_active(self):
         assignment = self.make_assignment(
@@ -470,7 +621,7 @@ class FleetLiveApiTests(TestCase):
             TelemetryEvent.objects.filter(pk__in=[lbs.pk, future.pk]).count(), 2
         )
 
-    def test_returns_only_supported_real_safety_events_as_map_pins(self):
+    def test_returns_all_persisted_non_normal_safety_events_as_map_pins(self):
         now = timezone.now()
         self.telemetry(
             self.live, now, event_id="brake-1",
@@ -483,6 +634,13 @@ class FleetLiveApiTests(TestCase):
         self.telemetry(
             self.offline,
             now,
+            event_id="turn-1",
+            sequence_number=2,
+            driving_event=TelemetryEvent.DrivingEvent.SHARP_TURN,
+        )
+        self.telemetry(
+            self.offline,
+            now - timedelta(seconds=1),
             event_id="normal-1",
             driving_event=TelemetryEvent.DrivingEvent.NORMAL,
         )
@@ -490,12 +648,31 @@ class FleetLiveApiTests(TestCase):
         response = self.client.get("/api/v1/fleet-live/safety-events/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()["events"]), 2)
+        self.assertEqual(len(response.json()["events"]), 3)
         self.assertEqual(
             {event["event_id"] for event in response.json()["events"]},
-            {"brake-1", "acceleration-1"},
+            {"brake-1", "acceleration-1", "turn-1"},
         )
         self.assertNotIn("normal-1", {event["event_id"] for event in response.json()["events"]})
+
+    def test_safety_events_are_newest_first_paginated_and_filterable(self):
+        now = timezone.now()
+        self.telemetry(self.live, now - timedelta(minutes=2), event_id="brake-filter", driving_event=TelemetryEvent.DrivingEvent.HARSH_BRAKING)
+        self.telemetry(self.live, now - timedelta(minutes=1), event_id="turn-filter", sequence_number=2, driving_event=TelemetryEvent.DrivingEvent.SHARP_TURN)
+        response = self.client.get(
+            "/api/v1/fleet-live/safety-events/",
+            {"event_type": "SHARP_TURN", "vehicle": self.live.pk, "page_size": 1},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+        self.assertEqual(response.json()["results"][0]["event_id"], "turn-filter")
+        self.assertEqual(response.json()["events"], response.json()["results"])
+        self.assertIn("received_at", response.json()["results"][0])
+        search_response = self.client.get(
+            "/api/v1/fleet-live/safety-events/", {"search": self.live.device_id}
+        )
+        self.assertEqual(search_response.status_code, 200)
+        self.assertEqual(search_response.json()["count"], 2)
 
     def test_trail_and_safety_event_endpoints_require_staff_authentication(self):
         self.client.force_authenticate(user=None)

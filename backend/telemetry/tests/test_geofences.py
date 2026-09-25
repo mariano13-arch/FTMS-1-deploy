@@ -229,6 +229,16 @@ class GeofenceApiTests(TestCase):
             [item["id"] for item in enter_response.json()["results"]],
             [other_transition.pk, second.pk],
         )
+        restricted_response = self.client.get(
+            "/api/v1/fleet-live/geofence-events/",
+            {"restricted_entry": "true", "category": "RESTRICTED", "page_size": 1},
+        )
+        self.assertEqual(restricted_response.json()["count"], 1)
+        self.assertEqual(restricted_response.json()["results"][0]["id"], second.pk)
+        self.assertTrue(restricted_response.json()["results"][0]["is_restricted_entry"])
+        self.assertEqual(restricted_response.json()["results"][0]["telemetry_event_id"], "report-new")
+        self.assertEqual(restricted_response.json()["results"][0]["telemetry_position_source"], "GNSS")
+        self.assertIn("telemetry_recorded_at", restricted_response.json()["results"][0])
         historical_response = self.client.get(
             "/api/v1/fleet-live/geofence-events/",
             {"date_to": (timezone.localdate() - timedelta(days=1)).isoformat()},
@@ -248,6 +258,7 @@ class GeofenceApiTests(TestCase):
             "date_from=2026-08-22&date_to=2026-08-21",
             "page=0",
             "page_size=101",
+            "category=UNKNOWN",
             "unexpected=true",
         ):
             with self.subTest(query=query):

@@ -108,6 +108,14 @@ export async function getTelemetryDevice(
   return mapDevice(response);
 }
 
+export async function registerTelemetryDevice(deviceId: string): Promise<TelemetryDevice> {
+  const response = await api<DevicePayload>('/api/v1/telemetry-devices/', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: deviceId }),
+  });
+  return mapDevice(response);
+}
+
 export async function pairTelemetryDevice(
   deviceId: string,
   vehicleId: number,

@@ -18,6 +18,7 @@ htmlcov/
 .DS_Store
 .env.local
 .env.*.local
+firmware/lilygo/ftms_lilygo_config.h
 tmp/
 *.tsbuildinfo
 mobile/expo-output.log

@@ -3,9 +3,9 @@ import { StatusBadge, workflowStatusTone } from "../../../components/common/Stat
 import { humanize as words } from "../../../utils/text";
 
 const statusLabel: Record<RequestStatus, string> = {
-  FOR_APPROVAL: "Awaiting Decision",
+  FOR_APPROVAL: "Awaiting Review",
   NEEDS_MORE_DETAILS: "Needs More Details",
-  APPROVED: "Approved",
+  APPROVED: "Approved — Awaiting Dispatch Preparation",
   REJECTED: "Rejected",
   READY_FOR_DISPATCH: "Ready for Dispatch",
   CANCELLED: "Cancelled",

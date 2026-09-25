@@ -1,7 +1,9 @@
 import mimetypes
+from decimal import Decimal
 from hashlib import sha256
 
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.http import FileResponse, Http404
@@ -13,13 +15,16 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import UserNotification
+from accounts.notifications import notify_capability_users
 from accounts.permissions import (
     CanChangeVehicleStatus,
     CanCreateVehicle,
     CanEditVehicle,
+    ModuleActionAccess,
     StaffAccess,
 )
-from accounts.roles import can_create, can_edit
+from accounts.roles import can_create, can_edit, has_module_permission
 from telemetry.models import TelemetryDeviceBinding
 
 from .driver_onboarding import (
@@ -27,25 +32,223 @@ from .driver_onboarding import (
     create_driver_with_account,
     send_driver_setup_email,
 )
+from .fuel_price_imports import ImportFileError, import_fuel_prices
 from .maintenance import transition_maintenance
 from .models import (
     Driver,
     DriverDocument,
+    FuelPriceRecord,
+    NumberCodingRule,
+    NumberCodingSuspension,
     Vehicle,
+    VehicleCodingExemption,
     VehicleDocument,
     VehicleInspection,
     VehicleMaintenanceRecord,
 )
+from .partner_fuel_prices import GRADE_FUEL_TYPES, record_preferred_partner_price
+from .safety import safety_metrics_for_drivers
 from .serializers import (
     DriverDocumentSerializer,
     DriverSerializer,
     MaintenanceTransitionSerializer,
+    NumberCodingRuleSerializer,
+    NumberCodingSuspensionSerializer,
+    VehicleCodingExemptionSerializer,
     VehicleDocumentSerializer,
     VehicleInspectionSerializer,
     VehicleMaintenanceRecordSerializer,
     VehicleSerializer,
     driver_eligibility,
 )
+
+PARTNER_GRADE_LABELS = {
+    Vehicle.FuelGrade.UNLEADED_91: "Unleaded 91",
+    Vehicle.FuelGrade.PREMIUM_95: "Premium 95",
+    Vehicle.FuelGrade.PREMIUM_97: "Premium 97",
+    Vehicle.FuelGrade.REGULAR_DIESEL: "Regular Diesel",
+    Vehicle.FuelGrade.PREMIUM_DIESEL: "Premium Diesel",
+}
+
+
+class PartnerFuelPriceInputSerializer(serializers.Serializer):
+    fuel_grade = serializers.ChoiceField(choices=tuple(PARTNER_GRADE_LABELS))
+    price_per_liter = serializers.DecimalField(
+        max_digits=10, decimal_places=4, min_value=Decimal("0.0001")
+    )
+    effective_at = serializers.DateTimeField()
+
+    def validate_effective_at(self, value):
+        if value > timezone.now():
+            raise serializers.ValidationError("Effective date/time cannot be in the future.")
+        return value
+
+
+def partner_price_data(record):
+    if record is None:
+        return None
+    return {
+        "id": record.pk,
+        "fuel_type": record.fuel_type,
+        "fuel_grade": record.fuel_grade,
+        "price_per_liter": str(record.price_per_liter),
+        "currency": record.currency,
+        "provider": record.provider,
+        "source_mode": record.source_mode,
+        "effective_at": record.effective_at,
+        "recorded_at": record.retrieved_at,
+        "is_active": record.is_active,
+    }
+
+
+class PartnerFuelPriceSettingsView(APIView):
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "SYSTEM_SETTINGS"
+    permission_actions = {"GET": "VIEW", "POST": "MANAGE_PRICES"}
+    http_method_names = ["get", "post", "options"]
+
+    def get(self, request):
+        records = FuelPriceRecord.objects.filter(provider="ShellPH").order_by(
+            "-effective_at", "-retrieved_at", "-pk"
+        )
+        current = records.filter(is_active=True, effective_at__lte=timezone.now())
+        vehicle_counts = dict(
+            Vehicle.objects.filter(fuel_grade__in=PARTNER_GRADE_LABELS)
+            .values_list("fuel_grade")
+            .annotate(total=Count("pk"))
+        )
+        products = []
+        for grade, label in PARTNER_GRADE_LABELS.items():
+            products.append(
+                {
+                    "fuel_grade": grade,
+                    "label": label,
+                    "fuel_type": GRADE_FUEL_TYPES[grade],
+                    "vehicle_count": vehicle_counts.get(grade, 0),
+                    "current_price": partner_price_data(current.filter(fuel_grade=grade).first()),
+                    "history": [
+                        partner_price_data(record)
+                        for record in records.filter(fuel_grade=grade)[:5]
+                    ],
+                }
+            )
+        return Response({"provider": "ShellPH", "provider_label": "Shell", "products": products})
+
+    def post(self, request):
+        serializer = PartnerFuelPriceInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            record = record_preferred_partner_price(**serializer.validated_data)
+        except ValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict) from exc
+        return Response(partner_price_data(record), status=status.HTTP_201_CREATED)
+
+
+class FuelPriceImportView(APIView):
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "SYSTEM_SETTINGS"
+    permission_action = "MANAGE_PRICES"
+    parser_classes = [MultiPartParser]
+    http_method_names = ["post", "options"]
+
+    def post(self, request):
+        uploaded_file = request.FILES.get("file")
+        if uploaded_file is None:
+            return Response(
+                {"detail": "Upload a CSV or XLSX file in the file field."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            return Response(import_fuel_prices(uploaded_file), status=status.HTTP_200_OK)
+        except ImportFileError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class NumberCodingCollectionView(APIView):
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "SYSTEM_SETTINGS"
+    permission_actions = {"GET": "VIEW", "POST": "MANAGE_NUMBER_CODING"}
+    http_method_names = ["get", "post", "options"]
+    model = None
+    serializer_class = None
+    select_related = ()
+
+    def queryset(self):
+        return self.model.objects.select_related(*self.select_related).order_by("pk")
+
+    def get(self, request):
+        return Response(self.serializer_class(self.queryset(), many=True).data)
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        save_kwargs = {}
+        if self.model is NumberCodingSuspension:
+            save_kwargs["created_by"] = request.user
+        elif self.model is VehicleCodingExemption:
+            save_kwargs["verified_by"] = request.user
+        serializer.save(**save_kwargs)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class NumberCodingDetailView(APIView):
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "SYSTEM_SETTINGS"
+    permission_actions = {"GET": "VIEW", "PATCH": "MANAGE_NUMBER_CODING"}
+    http_method_names = ["get", "patch", "options"]
+    model = None
+    serializer_class = None
+    select_related = ()
+
+    def get_object(self, record_id):
+        return get_object_or_404(
+            self.model.objects.select_related(*self.select_related), pk=record_id
+        )
+
+    def get(self, request, record_id):
+        return Response(self.serializer_class(self.get_object(record_id)).data)
+
+    def patch(self, request, record_id):
+        serializer = self.serializer_class(
+            self.get_object(record_id), data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class NumberCodingRuleListView(NumberCodingCollectionView):
+    model = NumberCodingRule
+    serializer_class = NumberCodingRuleSerializer
+
+
+class NumberCodingRuleDetailView(NumberCodingDetailView):
+    model = NumberCodingRule
+    serializer_class = NumberCodingRuleSerializer
+
+
+class NumberCodingSuspensionListView(NumberCodingCollectionView):
+    model = NumberCodingSuspension
+    serializer_class = NumberCodingSuspensionSerializer
+    select_related = ("created_by",)
+
+
+class NumberCodingSuspensionDetailView(NumberCodingDetailView):
+    model = NumberCodingSuspension
+    serializer_class = NumberCodingSuspensionSerializer
+    select_related = ("created_by",)
+
+
+class VehicleCodingExemptionListView(NumberCodingCollectionView):
+    model = VehicleCodingExemption
+    serializer_class = VehicleCodingExemptionSerializer
+    select_related = ("vehicle", "verified_by")
+
+
+class VehicleCodingExemptionDetailView(NumberCodingDetailView):
+    model = VehicleCodingExemption
+    serializer_class = VehicleCodingExemptionSerializer
+    select_related = ("vehicle", "verified_by")
 
 
 def vehicle_queryset():
@@ -59,9 +262,7 @@ def vehicle_queryset():
             ),
             to_attr="current_telemetry_device_bindings",
         ),
-    ).annotate(
-        document_count=Count("documents", distinct=True)
-    )
+    ).annotate(document_count=Count("documents", distinct=True))
 
 
 class VehiclePagination(PageNumberPagination):
@@ -71,7 +272,9 @@ class VehiclePagination(PageNumberPagination):
 
 
 class VehicleListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "VEHICLES"
+    permission_actions = {"GET": "VIEW", "POST": "CREATE"}
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     http_method_names = ["get", "post", "options"]
 
@@ -129,7 +332,9 @@ class VehicleListView(APIView):
 
 
 class VehicleDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "VEHICLES"
+    permission_actions = {"GET": "VIEW", "PATCH": "EDIT"}
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     http_method_names = ["get", "patch", "options"]
 
@@ -154,7 +359,9 @@ class VehicleDetailView(APIView):
 
 
 class VehiclePhotoView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "VEHICLES"
+    permission_action = "VIEW"
     http_method_names = ["get", "options"]
 
     def get(self, request, device_id):
@@ -195,7 +402,9 @@ class VehicleInspectionPagination(PageNumberPagination):
 
 
 class VehicleInspectionDefinitionView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "INSPECTIONS"
+    permission_action = "VIEW"
     http_method_names = ["get", "options"]
 
     def get(self, request):
@@ -207,9 +416,7 @@ class VehicleInspectionDefinitionView(APIView):
                     "field": field_name,
                     "label": str(field.verbose_name).capitalize(),
                     "required": not field.blank,
-                    "choices": [
-                        {"value": value, "label": label} for value, label in field.choices
-                    ],
+                    "choices": [{"value": value, "label": label} for value, label in field.choices],
                 }
             )
         return Response(
@@ -228,7 +435,9 @@ class VehicleInspectionDefinitionView(APIView):
 
 
 class VehicleInspectionListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "INSPECTIONS"
+    permission_actions = {"GET": "VIEW", "POST": "CREATE"}
     http_method_names = ["get", "post", "options"]
 
     def get_vehicle(self, device_id):
@@ -242,8 +451,6 @@ class VehicleInspectionListView(APIView):
         return paginator.get_paginated_response(VehicleInspectionSerializer(page, many=True).data)
 
     def post(self, request, device_id):
-        if not CanEditVehicle().has_permission(request, self):
-            self.permission_denied(request)
         serializer = VehicleInspectionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         idempotency_key = request.headers.get("Idempotency-Key", "").strip()
@@ -253,9 +460,7 @@ class VehicleInspectionListView(APIView):
             )
         cache_key = None
         if idempotency_key:
-            digest = sha256(
-                f"{request.user.pk}:{device_id}:{idempotency_key}".encode()
-            ).hexdigest()
+            digest = sha256(f"{request.user.pk}:{device_id}:{idempotency_key}".encode()).hexdigest()
             cache_key = f"fleet:inspection-submission:{digest}"
             if not cache.add(cache_key, "pending", timeout=300):
                 inspection_id = cache.get(cache_key)
@@ -290,6 +495,28 @@ class VehicleInspectionListView(APIView):
                         "inspection_date", timezone.localdate()
                     ),
                 )
+                if serializer.instance.result in {
+                    VehicleInspection.Result.FAILED,
+                    VehicleInspection.Result.NEEDS_ATTENTION,
+                }:
+                    inspection = serializer.instance
+                    transaction.on_commit(
+                        lambda: notify_capability_users(
+                            module="INSPECTIONS",
+                            action="VIEW",
+                            notification_type=UserNotification.Type.INSPECTION_ATTENTION,
+                            title="Vehicle Inspection Requires Attention",
+                            message=(
+                                f"{vehicle.display_name} inspection result: "
+                                f"{inspection.get_result_display()}."
+                            ),
+                            target_url=f"/vehicles/{vehicle.device_id}",
+                            source_key=(
+                                f"vehicle-inspection:{inspection.pk}:{inspection.result.lower()}"
+                            ),
+                        ),
+                        robust=True,
+                    )
         except Exception:
             if cache_key:
                 cache.delete(cache_key)
@@ -300,7 +527,9 @@ class VehicleInspectionListView(APIView):
 
 
 class VehicleInspectionDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "INSPECTIONS"
+    permission_actions = {"GET": "VIEW", "PATCH": "CORRECT"}
     http_method_names = ["get", "patch", "options"]
 
     def get_object(self, device_id, inspection_id):
@@ -314,8 +543,6 @@ class VehicleInspectionDetailView(APIView):
         return Response(VehicleInspectionSerializer(self.get_object(device_id, inspection_id)).data)
 
     def patch(self, request, device_id, inspection_id):
-        if not CanEditVehicle().has_permission(request, self):
-            self.permission_denied(request)
         serializer = VehicleInspectionSerializer(
             self.get_object(device_id, inspection_id),
             data=request.data,
@@ -333,7 +560,9 @@ class VehicleMaintenancePagination(PageNumberPagination):
 
 
 class VehicleMaintenanceListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "MAINTENANCE"
+    permission_actions = {"GET": "VIEW", "POST": "CREATE"}
     http_method_names = ["get", "post", "options"]
 
     def get(self, request):
@@ -357,12 +586,13 @@ class VehicleMaintenanceListView(APIView):
         response = paginator.get_paginated_response(
             VehicleMaintenanceRecordSerializer(page, many=True).data
         )
-        response.data["can_manage"] = can_edit(request.user)
+        response.data["can_manage"] = any(
+            has_module_permission(request.user, "MAINTENANCE", action)
+            for action in ("CREATE", "SCHEDULE", "START", "COMPLETE", "CANCEL")
+        )
         return response
 
     def post(self, request):
-        if not CanEditVehicle().has_permission(request, self):
-            self.permission_denied(request)
         serializer = VehicleMaintenanceRecordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save(created_by=request.user)
@@ -370,14 +600,14 @@ class VehicleMaintenanceListView(APIView):
 
 
 class VehicleMaintenanceDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "MAINTENANCE"
+    permission_action = "VIEW"
     http_method_names = ["get", "options"]
 
     def get(self, request, record_id):
         record = get_object_or_404(
-            VehicleMaintenanceRecord.objects.select_related(
-                "vehicle", "inspection", "created_by"
-            ),
+            VehicleMaintenanceRecord.objects.select_related("vehicle", "inspection", "created_by"),
             pk=record_id,
         )
         return Response(VehicleMaintenanceRecordSerializer(record).data)
@@ -388,10 +618,18 @@ class VehicleMaintenanceTransitionView(APIView):
     http_method_names = ["post", "options"]
 
     def post(self, request, record_id):
-        if not CanEditVehicle().has_permission(request, self):
-            self.permission_denied(request)
         serializer = MaintenanceTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        required_action = {
+            VehicleMaintenanceRecord.Status.SCHEDULED: "SCHEDULE",
+            VehicleMaintenanceRecord.Status.IN_PROGRESS: "START",
+            VehicleMaintenanceRecord.Status.COMPLETED: "COMPLETE",
+            VehicleMaintenanceRecord.Status.CANCELLED: "CANCEL",
+        }.get(serializer.validated_data["status"])
+        if not required_action or not has_module_permission(
+            request.user, "MAINTENANCE", required_action
+        ):
+            self.permission_denied(request)
         record = get_object_or_404(VehicleMaintenanceRecord, pk=record_id)
         updated = transition_maintenance(
             record.pk,
@@ -411,7 +649,9 @@ class VehicleDocumentPagination(PageNumberPagination):
 
 
 class VehicleDocumentListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "VEHICLES"
+    permission_action = "MANAGE_DOCUMENTS"
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "post", "options"]
 
@@ -447,7 +687,9 @@ class VehicleDocumentListView(APIView):
 
 
 class VehicleDocumentDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "VEHICLES"
+    permission_action = "MANAGE_DOCUMENTS"
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "patch", "options"]
 
@@ -473,7 +715,9 @@ class VehicleDocumentDetailView(APIView):
 
 
 class VehicleDocumentFileView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "VEHICLES"
+    permission_action = "MANAGE_DOCUMENTS"
     http_method_names = ["get", "options"]
 
     def get(self, request, device_id, document_id):
@@ -498,12 +742,22 @@ class DriverPagination(PageNumberPagination):
 
 
 class DriverListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DRIVERS"
+    permission_actions = {"GET": "VIEW", "POST": "CREATE"}
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "post", "options"]
 
     def get(self, request):
-        allowed = {"search", "employment_status", "eligibility_status", "page", "page_size"}
+        allowed = {
+            "search",
+            "employment_status",
+            "eligibility_status",
+            "work_shift",
+            "rest_day",
+            "page",
+            "page_size",
+        }
         unknown = set(request.query_params) - allowed
         if unknown:
             raise serializers.ValidationError({key: "Unknown filter." for key in unknown})
@@ -521,6 +775,18 @@ class DriverListView(APIView):
             if employment not in Driver.EmploymentStatus.values:
                 raise serializers.ValidationError({"employment_status": "Invalid status."})
             queryset = queryset.filter(employment_status=employment)
+        work_shift = request.query_params.get("work_shift")
+        if work_shift:
+            if work_shift not in Driver.WorkShift.values:
+                raise serializers.ValidationError({"work_shift": "Invalid shift."})
+            queryset = queryset.filter(work_shift=work_shift)
+        rest_day = request.query_params.get("rest_day")
+        if rest_day:
+            from fleet.schedules import WEEKDAYS
+
+            if rest_day not in WEEKDAYS:
+                raise serializers.ValidationError({"rest_day": "Invalid weekday."})
+            queryset = queryset.filter(weekly_rest_days__contains=[rest_day])
         eligibility = request.query_params.get("eligibility_status")
         if eligibility:
             if eligibility not in {"ELIGIBLE", "RESTRICTED", "NOT_ELIGIBLE"}:
@@ -531,8 +797,13 @@ class DriverListView(APIView):
             queryset = queryset.filter(pk__in=matching)
         paginator = DriverPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
+        safety_metrics = safety_metrics_for_drivers(driver.pk for driver in page)
         return paginator.get_paginated_response(
-            DriverSerializer(page, many=True, context={"request": request}).data
+            DriverSerializer(
+                page,
+                many=True,
+                context={"request": request, "safety_metrics": safety_metrics},
+            ).data
         )
 
     def post(self, request):
@@ -565,7 +836,9 @@ class DriverListView(APIView):
 
 
 class DriverDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DRIVERS"
+    permission_actions = {"GET": "VIEW", "PATCH": "EDIT"}
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "patch", "options"]
 
@@ -573,7 +846,13 @@ class DriverDetailView(APIView):
         return get_object_or_404(Driver.objects.select_related("linked_user"), pk=driver_id)
 
     def get(self, request, driver_id):
-        return Response(DriverSerializer(self.get_object(driver_id)).data)
+        driver = self.get_object(driver_id)
+        return Response(
+            DriverSerializer(
+                driver,
+                context={"safety_metrics": safety_metrics_for_drivers([driver.pk])},
+            ).data
+        )
 
     def patch(self, request, driver_id):
         if not can_edit(request.user):
@@ -590,7 +869,9 @@ class DriverDetailView(APIView):
 
 
 class DriverPhotoView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DRIVERS"
+    permission_action = "VIEW"
     http_method_names = ["get", "options"]
 
     def get(self, request, driver_id):
@@ -607,7 +888,9 @@ class DriverPhotoView(APIView):
 
 
 class DriverDocumentListView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DRIVERS"
+    permission_action = "MANAGE_DOCUMENTS"
     parser_classes = [MultiPartParser, FormParser]
     http_method_names = ["get", "post", "options"]
 
@@ -632,7 +915,9 @@ class DriverDocumentListView(APIView):
 
 
 class DriverDocumentDetailView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DRIVERS"
+    permission_action = "MANAGE_DOCUMENTS"
     http_method_names = ["get", "options"]
 
     def get(self, request, driver_id, document_id):
@@ -645,7 +930,9 @@ class DriverDocumentDetailView(APIView):
 
 
 class DriverDocumentFileView(APIView):
-    permission_classes = [StaffAccess]
+    permission_classes = [StaffAccess, ModuleActionAccess]
+    permission_module = "DRIVERS"
+    permission_action = "MANAGE_DOCUMENTS"
     http_method_names = ["get", "options"]
 
     def get(self, request, driver_id, document_id):

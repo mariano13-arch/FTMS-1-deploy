@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../../../contexts/AuthContext";
 import CalendarView from "../components/CalendarView";
 import RequestMap from "../components/RequestMap";
 import RequestDetailsDrawer from "../components/RequestDetailsDrawer";
@@ -8,7 +10,8 @@ import {
   WorkflowStatusBadge,
 } from "../components/RequestIndicators";
 import SelectedRequestOverview from "../components/SelectedRequestOverview";
-import TransportRequestFormPage from "./TransportRequestFormPage";
+import ExecutionTripsView from "../components/ExecutionTripsView";
+import WorkflowKpiStrip from "../components/WorkflowKpiStrip";
 import { humanize as label } from "../../../utils/text";
 import { getRequestRoute, getRequests, getSummary } from "../api";
 import {
@@ -21,12 +24,12 @@ import {
 import { distanceLabel, durationLabel, delayLabel } from "../routeFormat";
 
 type Tab =
-  | "Requests"
+  | "All Requests"
   | "For Approval"
   | "Dispatch Queue"
   | "Active Trips"
   | "Completed"
-  | "Calendar View";
+  | "Calendar";
 type AdvancedFilters = {
   priority: string;
   source_system: string;
@@ -42,39 +45,33 @@ const emptyFilters: AdvancedFilters = {
   scheduled_date: "",
 };
 const tabs: Tab[] = [
-  "Requests",
+  "All Requests",
   "For Approval",
   "Dispatch Queue",
   "Active Trips",
   "Completed",
-  "Calendar View",
+  "Calendar",
 ];
 const tabStatus: Partial<Record<Tab, string>> = {
   "For Approval": "FOR_APPROVAL,NEEDS_MORE_DETAILS",
   "Dispatch Queue": "APPROVED",
 };
 const tabCount = (tab: Tab, summary: Summary | null) =>
-  tab === "Requests"
+  tab === "All Requests"
     ? summary?.total
     : tab === "For Approval"
       ? summary?.approval_queue
       : tab === "Dispatch Queue"
         ? summary?.dispatch_queue
+        : tab === "Active Trips"
+          ? summary?.active_trips
+          : tab === "Completed"
+            ? summary?.completed_trips
         : undefined;
 type RouteEntry = {
   state: "loading" | "ready" | "error";
   data: TransportRoute | null;
 };
-const kpiTone = (name: string) =>
-  ["Needs details", "High priority"].includes(name)
-    ? "attention"
-    : ["Dispatch queue", "Vehicle assigned", "Ready for dispatch"].includes(
-          name,
-        )
-      ? "dispatch"
-      : ["Awaiting decision", "Unassigned"].includes(name)
-        ? "review"
-        : "schedule";
 const isTransportRoute = (value: TransportRoute) =>
   value?.geometry?.type === "LineString" &&
   Array.isArray(value.geometry.coordinates) &&
@@ -83,7 +80,9 @@ const isTransportRoute = (value: TransportRoute) =>
   Number.isFinite(value.traffic_delay_seconds);
 
 export default function TransportRequestsPage() {
-  const [tab, setTab] = useState<Tab>("Requests");
+  const { user } = useAuth();
+  const [tab, setTab] = useState<Tab>("All Requests");
+  const [pageNumber, setPageNumber] = useState(1);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState<RequestPage | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -99,20 +98,16 @@ export default function TransportRequestsPage() {
   const [summaryVisible, setSummaryVisible] = useState(true);
   const [drawerRequestId, setDrawerRequestId] = useState<string | null>(null);
   const [queueMenuId, setQueueMenuId] = useState<string | null>(null);
-  const drawerTriggerRef = useRef<HTMLElement | null>(null);
-  const [creatingRequest, setCreatingRequest] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
   const load = useCallback(
     (signal?: AbortSignal) => {
       const values = new URLSearchParams(query);
       const requestedStatus = tabStatus[tab];
-      values.set("page_size", "100");
+      values.set("page", String(pageNumber));
+      values.set("page_size", "15");
       if (requestedStatus) values.set("status", requestedStatus);
       else values.delete("status");
-      const listRequired = ![
-        "Active Trips",
-        "Completed",
-        "Calendar View",
-      ].includes(tab);
+      const listRequired = !["Active Trips", "Completed", "Calendar"].includes(tab);
       return Promise.all([
         listRequired
           ? getRequests(values.toString(), signal)
@@ -122,6 +117,10 @@ export default function TransportRequestsPage() {
         .then(([requests, counts]) => {
           setSummary(counts);
           if (requests) {
+            if (requests.count > 0 && requests.results.length === 0 && pageNumber > 1) {
+              setPageNumber((current) => Math.max(1, current - 1));
+              return;
+            }
             const previousId = selectedIdRef.current;
             const selected =
               requests.results.find((item) => item.id === previousId) ??
@@ -144,7 +143,7 @@ export default function TransportRequestsPage() {
             setState("error");
         });
     },
-    [query, tab],
+    [pageNumber, query, tab],
   );
   useEffect(() => {
     const controller = new AbortController();
@@ -166,6 +165,7 @@ export default function TransportRequestsPage() {
   const updateQuery = useCallback(
     (search: string, advanced: AdvancedFilters) => {
       const nextQuery = buildQuery(search, advanced);
+      setPageNumber(1);
       setState("loading");
       setQuery((current) => (current === nextQuery ? current : nextQuery));
     },
@@ -253,54 +253,17 @@ export default function TransportRequestsPage() {
     },
     [],
   );
-  const closeDrawer = useCallback(() => {
-    setDrawerRequestId(null);
-    requestAnimationFrame(() => drawerTriggerRef.current?.focus());
-  }, []);
   const choose = (item: TransportRequestListItem) => {
     if (item.id !== selectedIdRef.current) setSummaryVisible(true);
     selectedIdRef.current = item.id;
     setSelectedId(item.id);
   };
-  const viewDetails = (
-    item: TransportRequestListItem,
-    trigger: HTMLElement,
-  ) => {
+  const viewDetails = (item: TransportRequestListItem) => {
     choose(item);
-    drawerTriggerRef.current = trigger;
     setQueueMenuId(null);
     setDrawerRequestId(item.id);
   };
-  const cards = useMemo(
-    () =>
-      summary
-        ? [
-            ["Awaiting decision", summary.for_approval, "For approval"],
-            [
-              "Needs details",
-              summary.needs_more_details,
-              "Corrections requested",
-            ],
-            ["Dispatch queue", summary.dispatch_queue, "Approved requests"],
-            [
-              "Unassigned",
-              summary.approved_unassigned,
-              "Approved without vehicle",
-            ],
-            ["Vehicle assigned", summary.approved_assigned, "Ready to prepare"],
-            [
-              "Ready for dispatch",
-              summary.ready_for_dispatch,
-              "Future trip handoff",
-            ],
-            ["Scheduled today", summary.scheduled_today, "Real pickup date"],
-            ["High priority", summary.high_priority, "High and urgent"],
-          ]
-        : [],
-    [summary],
-  );
   const selectedAssignedVehicle = selected?.assigned_vehicle ?? null;
-  const planned = tab === "Active Trips" || tab === "Completed";
   const activeFilterCount = Object.entries(filters).filter(
     ([key, value]) => value && !(key === "assignment" && value === "all"),
   ).length;
@@ -361,9 +324,7 @@ export default function TransportRequestsPage() {
             >
               <option value="">All sources</option>
               <option>HOTEL_MANAGEMENT_SYSTEM</option>
-              <option>RESTAURANT_MANAGEMENT_SYSTEM</option>
-              <option>MANUAL_STAFF_ENTRY</option>
-              <option>OTHER_SUBSYSTEM</option>
+              <option>SUPPLY_CHAIN_MANAGEMENT_SYSTEM</option>
             </select>
           </label>
           <label>
@@ -375,7 +336,7 @@ export default function TransportRequestsPage() {
               }
             >
               <option value="">All types</option>
-              {requestTypes.map((value) => (
+              {requestTypes.filter((value) => ["AIRPORT_PICKUP", "AIRPORT_DROPOFF", "GUEST_TRANSFER", "SUPPLIER_PICKUP", "BRANCH_TRANSFER"].includes(value)).map((value) => (
                 <option key={value}>{value}</option>
               ))}
             </select>
@@ -414,25 +375,9 @@ export default function TransportRequestsPage() {
       )}
     </div>
   );
-  const kpiStrip = (
-    <div
-      className="kpi-grid kpi-grid--wide kpi-grid--workspace"
-      aria-label="Transport request status summary"
-    >
-      {cards.map(([name, value]) => (
-        <article
-          className={`kpi-card kpi-card--${kpiTone(String(name))}`}
-          key={String(name)}
-        >
-          <strong>{String(value)}</strong>
-          <span>{String(name)}</span>
-        </article>
-      ))}
-    </div>
-  );
   return (
     <section
-      className={`transport-page transport-page--workspace${tab === "Calendar View" ? " transport-page--calendar" : !planned ? " transport-page--operational" : " transport-page--planned"}`}
+      className={`transport-page transport-page--workspace${tab === "Calendar" ? " transport-page--calendar" : " transport-page--operational"}`}
     >
       <div className="transport-header d-flex align-items-start justify-content-between gap-3">
         <div>
@@ -458,6 +403,7 @@ export default function TransportRequestsPage() {
                 key={item}
                 onClick={() => {
                   setTab(item);
+                  setPageNumber(1);
                   setPage(null);
                   setState("loading");
                 }}
@@ -470,37 +416,27 @@ export default function TransportRequestsPage() {
             );
           })}
         </div>
-        <div className="header-actions d-flex align-items-center gap-2 mb-2">
-          <button
-            type="button"
-            className="btn-action--filled btn-sm"
-            title="Temporary development/testing intake"
-            onClick={() => setCreatingRequest(true)}
-          >
-            ＋ Add Request
-          </button>
-        </div>
       </div>
       <div
         className={`transport-tab-panel d-flex flex-column w-100 transport-tab-panel--${tab.toLowerCase().replaceAll(" ", "-")}`}
         role="tabpanel"
       >
-        {planned ? (
-          <section className="planned-module d-grid text-center">
-            <span>Planned capability</span>
-            <strong>
-              {tab === "Active Trips"
-                ? "Active trip execution is not available yet"
-                : "Completed trip history is not available yet"}
-            </strong>
-            <p>
-              {tab === "Active Trips"
-                ? "Active trip execution will appear here once driver assignment and trip lifecycle functionality are available."
-                : "Completed lifecycle records will appear here once real trip completion functionality is available. No completed trips are fabricated."}
-            </p>
-          </section>
-        ) : tab === "Calendar View" ? (
-          <CalendarView />
+        {tab === "Calendar" ? (
+          <>
+            <CalendarView onViewRequest={setDrawerRequestId} />
+            {drawerRequestId && (
+              <RequestDetailsDrawer
+                requestId={drawerRequestId}
+                mode="readOnly"
+                onClose={() => setDrawerRequestId(null)}
+              />
+            )}
+          </>
+        ) : tab === "Active Trips" || tab === "Completed" ? (
+          <ExecutionTripsView
+            scope={tab === "Active Trips" ? "active" : "completed"}
+            summary={summary}
+          />
         ) : (
           <>
             {state === "loading" && !page && (
@@ -519,11 +455,11 @@ export default function TransportRequestsPage() {
                 Unable to load transport requests. Try refreshing.
               </div>
             )}
-            {tab === "Dispatch Queue" && (
-              <p className="dispatch-handoff-note">
-                Approved requests ready for dispatch planning. Assignment and
-                optimization are handled in Dispatch Board.
-              </p>
+            {successMessage && (
+              <div className="message message--success" role="status">
+                <span>{successMessage}</span>{" "}
+                <Link to="/dispatch-board">Open Dispatch Board</Link>
+              </div>
             )}
             {page && (
               <div
@@ -543,7 +479,7 @@ export default function TransportRequestsPage() {
                     </strong>
                     <div className="queue-header-controls d-flex align-items-center gap-2">
                       <span className="queue-count">
-                        {page.count} request{page.count === 1 ? "" : "s"}
+                        {page.count} matching request{page.count === 1 ? "" : "s"}
                       </span>
                       {queueFilter}
                     </div>
@@ -563,6 +499,7 @@ export default function TransportRequestsPage() {
                       onChange={(event) => updateSearch(event.target.value)}
                     />
                   </div>
+                  <div className="request-list-scroll">
                   {page.results.length === 0 ? (
                     <div className="request-picker-empty">
                       <span>No transport requests match your filters.</span>
@@ -607,11 +544,6 @@ export default function TransportRequestsPage() {
                                 item.scheduled_pickup_at,
                               ).toLocaleString()}
                             </time>
-                            {tab === "Dispatch Queue" && (
-                              <span className="dispatch-awaiting">
-                                Awaiting dispatch planning
-                              </span>
-                            )}
                           </span>
                         </button>
                         <div className="request-queue-actions">
@@ -642,15 +574,7 @@ export default function TransportRequestsPage() {
                                 type="button"
                                 className="dropdown-item"
                                 role="menuitem"
-                                onClick={(event) => {
-                                  const trigger = event.currentTarget
-                                    .closest(".request-queue-actions")
-                                    ?.querySelector(
-                                      ".request-queue-menu-toggle",
-                                    );
-                                  if (trigger instanceof HTMLElement)
-                                    viewDetails(item, trigger);
-                                }}
+                                onClick={() => viewDetails(item)}
                               >
                                 View details
                               </button>
@@ -660,12 +584,44 @@ export default function TransportRequestsPage() {
                       </div>
                     ))
                   )}
+                  </div>
+                  {page.count > 0 && (
+                    <nav className="request-pagination" aria-label="Request pages">
+                      <span>
+                        Showing {(pageNumber - 1) * 15 + 1}–
+                        {Math.min(pageNumber * 15, page.count)} of {page.count}
+                      </span>
+                      <div>
+                        <button
+                          type="button"
+                          className="btn-filter"
+                          disabled={!page.previous}
+                          onClick={() =>
+                            setPageNumber((current) => Math.max(1, current - 1))
+                          }
+                        >
+                          Previous
+                        </button>
+                        <span>
+                          Page {pageNumber} of {Math.max(1, Math.ceil(page.count / 15))}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-filter"
+                          disabled={!page.next}
+                          onClick={() => setPageNumber((current) => current + 1)}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </nav>
+                  )}
                 </div>
                 <div
                   className="request-right-workspace"
                   aria-label="Request workspace"
                 >
-                  {kpiStrip}
+                  <WorkflowKpiStrip summary={summary} />
                   <div className="map-side" aria-label="Request map">
                     <RequestMap
                       request={selected}
@@ -778,23 +734,41 @@ export default function TransportRequestsPage() {
                     request={selected}
                     route={selectedRoute?.data}
                     routeState={selectedRoute?.state ?? "idle"}
-                    onViewDetails={(trigger) => {
-                      if (selected) viewDetails(selected, trigger);
+                    onViewDetails={() => {
+                      if (selected) viewDetails(selected);
                     }}
                   />
                   {drawerRequestId && (
                     <RequestDetailsDrawer
                       requestId={drawerRequestId}
+                      mode={
+                        tab === "For Approval"
+                          ? "review"
+                          : tab === "Dispatch Queue"
+                            ? "dispatchPreparation"
+                            : "readOnly"
+                      }
                       route={
                         drawerRequestId === selected?.id
                           ? selectedRoute?.data
                           : null
                       }
-                      allowReviewActions={tab === "For Approval"}
-                      onRequestChanged={() => {
+                      onRequestChanged={(updated) => {
+                        if (
+                          tab === "For Approval" &&
+                          updated.status !== "FOR_APPROVAL"
+                        ) {
+                          setDrawerRequestId(null);
+                        }
+                        if (updated.status === "READY_FOR_DISPATCH") {
+                          setSuccessMessage(
+                            "Request prepared for dispatch and is now available on the Dispatch Board.",
+                          );
+                          if (tab === "Dispatch Queue") setDrawerRequestId(null);
+                        }
                         void load();
                       }}
-                      onClose={closeDrawer}
+                      onClose={() => setDrawerRequestId(null)}
                     />
                   )}
                 </div>
@@ -803,41 +777,6 @@ export default function TransportRequestsPage() {
           </>
         )}
       </div>
-      {creatingRequest && (
-        <div className="request-create-backdrop">
-          <aside
-            className="request-create-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Add Transport Request"
-          >
-            <header>
-              <div>
-                <small>Temporary development intake</small>
-                <h2>Add Transport Request</h2>
-              </div>
-              <button
-                type="button"
-                className="btn-cancel"
-                aria-label="Close Add Transport Request"
-                onClick={() => setCreatingRequest(false)}
-              >
-                ×
-              </button>
-            </header>
-            <div className="request-create-drawer-body">
-              <TransportRequestFormPage
-                embedded
-                onClose={() => setCreatingRequest(false)}
-                onSaved={() => {
-                  setCreatingRequest(false);
-                  void load();
-                }}
-              />
-            </div>
-          </aside>
-        </div>
-      )}
     </section>
   );
 }

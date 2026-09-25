@@ -18,3 +18,13 @@ export type {
   DriverTripVehicle,
   DriverVehiclePosition,
 } from './driverTrips';
+export type {
+  CreateTripExpenseReceiptInput,
+  ReceiptImageInput,
+  ReceiptOcrCandidates,
+  ReceiptOcrPreviewResponse,
+  TripExpenseReceipt,
+  TripReceiptExpenseType,
+  TripReceiptFuelGrade,
+  TripReceiptFuelType,
+} from './driverReceipts';

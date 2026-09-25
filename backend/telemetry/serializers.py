@@ -10,6 +10,11 @@ from telemetry.models import TelemetryDevice, TelemetryDeviceBinding, TelemetryE
 
 
 class TelemetryDeviceRegistrationSerializer(serializers.ModelSerializer):
+    device_id = serializers.RegexField(
+        regex=r"^[A-Z0-9][A-Z0-9._-]{0,63}$",
+        max_length=64,
+    )
+
     class Meta:
         model = TelemetryDevice
         fields = ("device_id",)
@@ -40,6 +45,31 @@ class TelemetryDevicePairSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+class VehicleEmergencySOSActionSerializer(serializers.Serializer):
+    device_id = serializers.RegexField(regex=r"^[A-Z0-9][A-Z0-9._-]{0,63}$", max_length=64)
+    action = serializers.ChoiceField(choices=("ACTIVATE", "CLEAR"))
+
+    def to_internal_value(self, data):
+        if not isinstance(data, dict):
+            raise serializers.ValidationError("A JSON object is required.")
+        unknown = set(data) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError(
+                {"non_field_errors": [f"Unknown fields: {', '.join(sorted(unknown))}."]}
+            )
+        return super().to_internal_value(data)
+
+    def validate_device_id(self, value):
+        try:
+            device = TelemetryDevice.objects.get(device_id=value)
+        except TelemetryDevice.DoesNotExist as exc:
+            raise serializers.ValidationError("Unknown device_id.") from exc
+        if device.registration_status != TelemetryDevice.RegistrationStatus.REGISTERED:
+            raise serializers.ValidationError("Device is not registered for operation.")
+        self.context["device"] = device
+        return value
+
+
 class AwareDateTimeField(serializers.DateTimeField):
     default_error_messages = {"timezone": "A timezone-aware timestamp is required."}
 
@@ -64,7 +94,11 @@ class TelemetryEventInputSerializer(serializers.Serializer):
         max_value=180,
     )
     position_source = serializers.ChoiceField(
-        choices=TelemetryEvent.PositionSource.values, required=False
+        choices=(
+            TelemetryEvent.PositionSource.GNSS,
+            TelemetryEvent.PositionSource.CELLULAR_LBS,
+        ),
+        required=False,
     )
     position_accuracy_m = serializers.DecimalField(
         max_digits=10, decimal_places=2, min_value=0, allow_null=True, required=False

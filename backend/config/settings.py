@@ -63,8 +63,27 @@ DATABASES = {
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 TWO_FACTOR_ENCRYPTION_KEY = os.getenv("TWO_FACTOR_ENCRYPTION_KEY", "")
 TOMTOM_API_KEY = os.getenv("TOMTOM_API_KEY", "")
+TOMTOM_MATRIX_API_KEY = os.getenv(
+    "TOMTOM_MATRIX_API_KEY",
+    TOMTOM_API_KEY,
+)
+# Search can use a separately provisioned key. In local Compose, this falls back
+# to the browser map key so an older Orbis-only server key cannot break search.
+TOMTOM_SEARCH_API_KEY = os.getenv("TOMTOM_SEARCH_API_KEY", "")
+FLIGHTRADAR24_API_TOKEN = os.getenv("FLIGHTRADAR24_API_TOKEN", "")
+# Intentionally have no defaults: airport-pickup timing is blocked until operations
+# explicitly approves these values.
+AIRPORT_PASSENGER_READY_ALLOWANCE_MINUTES = os.getenv(
+    "AIRPORT_PASSENGER_READY_ALLOWANCE_MINUTES", ""
+)
+DISPATCH_OPERATIONAL_BUFFER_MINUTES = os.getenv(
+    "DISPATCH_OPERATIONAL_BUFFER_MINUTES", ""
+)
 DISPATCH_TELEMETRY_MAX_AGE_SECONDS = int(
     os.getenv("DISPATCH_TELEMETRY_MAX_AGE_SECONDS", "300")
+)
+DISPATCH_SIMULATED_TELEMETRY_MAX_AGE_SECONDS = int(
+    os.getenv("DISPATCH_SIMULATED_TELEMETRY_MAX_AGE_SECONDS", "86400")
 )
 FTMS_TELEMETRY_CLOCK_SKEW_SECONDS = int(
     os.getenv("FTMS_TELEMETRY_CLOCK_SKEW_SECONDS", "300")
@@ -90,7 +109,10 @@ CELERY_RESULT_BACKEND = REDIS_URL
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -114,10 +136,10 @@ SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = os.getenv("DJANGO_SESSION_COOKIE_SECURE", "true").lower() == "true"
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 FTMS_SESSION_IDLE_TIMEOUT_SECONDS = int(
-    os.getenv("FTMS_SESSION_IDLE_TIMEOUT_SECONDS", "900")
+    os.getenv("FTMS_SESSION_IDLE_TIMEOUT_SECONDS", "43200")
 )
 FTMS_SESSION_ABSOLUTE_TIMEOUT_SECONDS = int(
-    os.getenv("FTMS_SESSION_ABSOLUTE_TIMEOUT_SECONDS", "28800")
+    os.getenv("FTMS_SESSION_ABSOLUTE_TIMEOUT_SECONDS", "86400")
 )
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = os.getenv("DJANGO_CSRF_COOKIE_SECURE", "true").lower() == "true"
@@ -136,6 +158,8 @@ DRIVER_MOBILE_ACCOUNT_SETUP_URL = os.getenv(
     "DRIVER_MOBILE_ACCOUNT_SETUP_URL", "ftms-driver://setup-password"
 )
 STAFF_ACCOUNT_SETUP_URL = os.getenv("STAFF_ACCOUNT_SETUP_URL", "")
+STAFF_PASSWORD_RESET_URL = os.getenv("STAFF_PASSWORD_RESET_URL", "")
+PASSWORD_RESET_TIMEOUT = int(os.getenv("DJANGO_PASSWORD_RESET_TIMEOUT", "3600"))
 DRIVER_MOBILE_APP_DOWNLOAD_URL = os.getenv("DRIVER_MOBILE_APP_DOWNLOAD_URL", "")
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.authentication.StaffSessionAuthentication"],
@@ -143,5 +167,9 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": os.getenv("DJANGO_LOGIN_THROTTLE", "5/min"),
         "two_factor_verify": os.getenv("DJANGO_TWO_FACTOR_VERIFY_THROTTLE", "10/min"),
+        "password_reset": os.getenv("DJANGO_PASSWORD_RESET_THROTTLE", "5/hour"),
+        "password_reset_completion": os.getenv(
+            "DJANGO_PASSWORD_RESET_COMPLETION_THROTTLE", "10/hour"
+        ),
     },
 }

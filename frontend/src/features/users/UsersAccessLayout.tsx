@@ -7,7 +7,6 @@ export default function UsersAccessLayout({ children }: { children: ReactNode })
     <div className="users-access-breadcrumb">Administration / Users &amp; Access</div>
     <header className="users-access-header">
       <h1>Users Roles &amp; Audit Logs</h1>
-      <p>Manage staff accounts, access roles, and administrative activity.</p>
     </header>
     <nav className="users-access-tabs" aria-label="Users Roles and Audit Logs">
       <NavLink to="/users" exact activeClassName="active">Staff Users</NavLink>

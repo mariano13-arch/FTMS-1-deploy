@@ -30,6 +30,7 @@ export default function SelectedRequestOverview({
       </section>
     );
   const delivery = request.request_category === "DELIVERY_LOGISTICS";
+  const supply = delivery && ["SUPPLIER_PICKUP", "BRANCH_TRANSFER"].includes(request.request_type);
   return (
     <section
       className="selected-request-overview"
@@ -135,7 +136,7 @@ export default function SelectedRequestOverview({
               </dl>
             </section>
             <section className="selected-overview-summary">
-              <h3>{delivery ? "Delivery summary" : "Passenger summary"}</h3>
+              <h3>{supply ? "Supply / load summary" : delivery ? "Delivery summary" : "Passenger summary"}</h3>
               <dl>
                 {delivery ? (
                   <>
@@ -185,6 +186,13 @@ export default function SelectedRequestOverview({
                   </>
                 )}
               </dl>
+              {request.request_type === "AIRPORT_PICKUP" && (
+                <p className="selected-overview-state">
+                  {request.flight_context
+                    ? `${request.flight_context.flight_number} · ${request.flight_context.provider_flight_status || label(request.flight_context.refresh_status)}`
+                    : "Flight data unavailable"}
+                </p>
+              )}
             </section>
           </div>
         )}

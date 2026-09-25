@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import UsersPage from "./UsersPage";
 
 const mocks = vi.hoisted(() => ({
-  role: "SUPER_ADMIN",
+  role: "FLEET_ADMIN",
   listStaff: vi.fn(),
   createStaff: vi.fn(),
   updateStaffRole: vi.fn(),
@@ -38,7 +38,7 @@ function openActions(username: string) {
 const renderUsers = () => render(<MemoryRouter initialEntries={["/users"]}><UsersPage /></MemoryRouter>);
 
 beforeEach(() => {
-  mocks.role = "SUPER_ADMIN";
+  mocks.role = "FLEET_ADMIN";
   mocks.listStaff.mockReset().mockResolvedValue([pendingUser, readyUser]);
   mocks.createStaff.mockReset();
   mocks.updateStaffRole.mockReset();
@@ -140,7 +140,7 @@ describe("staff users page", () => {
     openActions("fleet.manager");
     fireEvent.click(screen.getByRole("menuitem", { name: "Change Role" }));
     const role = screen.getByLabelText("New role for fleet.manager");
-    expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["Fleet Manager", "Dispatcher"]);
+    expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["Fleet Manager", "Dispatcher", "Fleet Staff"]);
     fireEvent.change(role, { target: { value: "DISPATCHER" } });
     expect(mocks.updateStaffRole).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Save Role" }));
@@ -186,7 +186,7 @@ describe("staff users page", () => {
     expect(screen.getByLabelText("Staff account summary")).toHaveTextContent("Active1Inactive1");
   });
 
-  test("denies non-Super-Admins without loading management data", () => {
+  test("denies non-Fleet-Admins without loading management data", () => {
     mocks.role = "FLEET_MANAGER";
     renderUsers();
     expect(screen.getByRole("heading", { name: "Access denied" })).toBeInTheDocument();

@@ -22,12 +22,15 @@ import {
   fetchSidebarCounts,
   SidebarCounts,
 } from "../services/sidebarService";
+import { useAuth } from "../contexts/AuthContext";
+import { hasCapability } from "../services/auth";
 
 interface NavItem {
   label: string;
   path: string;
   icon: LucideIcon;
   badge?: string | number;
+  capability?: [string, string];
 }
 
 interface NavSection {
@@ -51,24 +54,24 @@ const navSections: NavSection[] = [
       {
         label: "Transport Requests",
         path: "/transport-requests",
-        icon: FileText,
+        icon: FileText, capability: ["TRANSPORT_REQUESTS", "VIEW"],
       },
       {
         label: "Dispatch Board",
         path: "/dispatch-board",
-        icon: Kanban,
+        icon: Kanban, capability: ["DISPATCH_BOARD", "VIEW"],
       },
-      { label: "Live Map", path: "/live-map", icon: MapIcon },
+      { label: "Live Map", path: "/live-map", icon: MapIcon, capability: ["LIVE_MAP", "VIEW"] },
     ],
   },
   {
     title: "FLEET & SAFETY",
     items: [
-      { label: "Drivers & Safety Scores", path: "/drivers", icon: UserCheck },
+      { label: "Drivers & Safety Scores", path: "/drivers", icon: UserCheck, capability: ["DRIVERS", "VIEW"] },
       {
         label: "Vehicles & Inspections",
         path: "/vehicles",
-        icon: ClipboardCheck,
+        icon: ClipboardCheck, capability: ["VEHICLES", "VIEW"],
       },
       {
         label: "Alerts & Incidents",
@@ -80,11 +83,11 @@ const navSections: NavSection[] = [
   {
     title: "INTELLIGENCE",
     items: [
-      { label: "Fuel Analytics", path: "/fuel-analytics", icon: Fuel },
+      { label: "Fuel Analytics", path: "/fuel-analytics", icon: Fuel, capability: ["FUEL_ANALYTICS", "VIEW"] },
       {
         label: "Maintenance & Predictions",
         path: "/maintenance",
-        icon: Wrench,
+        icon: Wrench, capability: ["MAINTENANCE", "VIEW"],
       },
       { label: "Reports", path: "/reports", icon: BarChart3 },
     ],
@@ -92,13 +95,13 @@ const navSections: NavSection[] = [
   {
     title: "ADMINISTRATION",
     items: [
-      { label: "Devices", path: "/devices", icon: Cpu },
+      { label: "Devices", path: "/devices", icon: Cpu, capability: ["VEHICLES", "EDIT"] },
       {
         label: "Users Roles & Audit Logs",
         path: "/users",
-        icon: ShieldCheck,
+        icon: ShieldCheck, capability: ["USERS_ACCESS", "VIEW_USERS"],
       },
-      { label: "System Rules & Settings", path: "/settings", icon: Settings },
+      { label: "System Rules & Settings", path: "/settings", icon: Settings, capability: ["SYSTEM_SETTINGS", "VIEW"] },
     ],
   },
 ];
@@ -119,6 +122,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   toggleCollapsed,
 }) => {
   const location = useLocation();
+  const { user } = useAuth();
   const [liveCounts, setLiveCounts] = useState<SidebarCounts>({});
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -181,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {section.title}
                 </div>
               )}
-              {section.items.map((item) => {
+              {section.items.filter((item) => !item.capability || hasCapability(user, ...item.capability)).map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
                 const badgeValue = resolveBadge(item);

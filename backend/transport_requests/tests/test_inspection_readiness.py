@@ -49,7 +49,7 @@ class InspectionDispatchReadinessTests(TestCase):
             estimated_duration_minutes=60,
             required_vehicle_type=Vehicle.VehicleType.VAN,
             passenger_count=4,
-            status=TransportRequest.Status.APPROVED,
+            status=TransportRequest.Status.READY_FOR_DISPATCH,
             created_by=self.user,
         )
 
@@ -163,7 +163,7 @@ class InspectionDispatchReadinessTests(TestCase):
             scheduled_pickup_at=self.request.scheduled_pickup_at,
             estimated_duration_minutes=60,
             passenger_count=1,
-            status=TransportRequest.Status.APPROVED,
+            status=TransportRequest.Status.READY_FOR_DISPATCH,
             assigned_vehicle=self.vehicle,
             created_by=self.user,
         )
@@ -221,7 +221,7 @@ class InspectionDispatchReadinessTests(TestCase):
             format="json",
         )
         self.assertEqual(direct.status_code, 400)
-        self.assertIn("Inspection failed", direct.json()["vehicle"])
+        self.assertIn("status", direct.json())
         self.assertFalse(DispatchAssignment.objects.exists())
         self.assertIsNone(TransportRequest.objects.get(pk=self.request.pk).assigned_vehicle_id)
 
@@ -229,14 +229,6 @@ class InspectionDispatchReadinessTests(TestCase):
         passed = self.inspect(self.vehicle, VehicleInspection.Result.PASSED)
         self.assertEqual(self.confirmation().status_code, 201)
         failed = self.inspect(self.vehicle, VehicleInspection.Result.FAILED)
-        self.assertEqual(
-            self.client.post(
-                f"/api/v1/transport-requests/{self.request.pk}/prepare-dispatch/",
-                {},
-                format="json",
-            ).status_code,
-            200,
-        )
         assignment = DispatchAssignment.objects.get(transport_request=self.request)
         self.assertEqual(assignment.vehicle, self.vehicle)
         self.assertEqual(list(self.vehicle.inspections.all()), [failed, passed])

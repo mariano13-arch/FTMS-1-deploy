@@ -18,21 +18,30 @@ export default function GisPreview({
   recommendation,
   request,
   route,
+  plannedRoute,
+  vehiclePosition,
   routeState,
   stops,
 }: {
   recommendation: Recommendation;
   request: TransportRequestListItem;
   route: TransportRoute | null;
+  plannedRoute: TransportRoute | null;
+  vehiclePosition: {
+    latitude: number;
+    longitude: number;
+    positionStatus: "CURRENT" | "STALE";
+  } | null;
   routeState: "idle" | "loading" | "ready" | "error";
   stops?: ConsolidationStop[];
 }) {
-  const gis = recommendation.gis_preview;
-  const vehicleLocation = gis.vehicle_location
+  const vehicleLocation = vehiclePosition
     ? {
-        latitude: gis.vehicle_location.latitude,
-        longitude: gis.vehicle_location.longitude,
+        latitude: vehiclePosition.latitude,
+        longitude: vehiclePosition.longitude,
         label: recommendation.recommended_vehicle.display_name,
+        plateNumber: recommendation.recommended_vehicle.plate_number,
+        positionStatus: vehiclePosition.positionStatus,
       }
     : null;
   return (
@@ -43,12 +52,19 @@ export default function GisPreview({
           <RequestMap
             request={request}
             route={route}
+            plannedRoute={plannedRoute}
             routeState={routeState}
             operationalLocation={vehicleLocation}
+            recommendationPreview={!stops?.length}
             numberedStops={stops}
           />
         </Suspense>
       </div>
+      {!stops?.length && !vehicleLocation && (
+        <small className="dispatch-gis-position-note">
+          Recommended vehicle position unavailable.
+        </small>
+      )}
       <p>
         TomTom vehicle-to-pickup metrics:{" "}
         {duration(recommendation.travel_time_seconds)} ·{" "}
@@ -57,7 +73,9 @@ export default function GisPreview({
       <small>
         {stops?.length
           ? "Consolidation stops use real coordinates; multi-stop geometry is unavailable, so no route line is drawn."
-          : "Vehicle-to-pickup road geometry unavailable; no route line is drawn. Pickup-to-destination uses the real TomTom request route when available."}
+          : routeState === "error"
+            ? "Route geometry temporarily unavailable"
+            : "Road route preview: selected vehicle to pickup, then pickup to destination."}
       </small>
     </section>
   );

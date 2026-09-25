@@ -1,22 +1,24 @@
 import json
 import math
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+from django.core.cache import cache
 
-SUGGEST_URL = "https://api.tomtom.com/maps/orbis/places/suggest"
-DETAILS_URL = "https://api.tomtom.com/maps/orbis/places/details"
+SEARCH_URL = "https://api.tomtom.com/search/2/search"
 TIMEOUT_SECONDS = 8
 ALLOWED_TYPES = {"poi", "address", "street", "intersection", "area"}
-TYPE_PATHS = {
-    "poi": "pois",
-    "address": "addresses",
-    "street": "streets",
-    "intersection": "intersections",
-    "area": "areas",
+RESULT_TYPES = {
+    "POI": "poi",
+    "Point Address": "address",
+    "Address Range": "address",
+    "Street": "street",
+    "Cross Street": "intersection",
+    "Geography": "area",
 }
+CACHE_SECONDS = 15 * 60
 
 
 class PlacesConfigurationError(Exception):
@@ -35,21 +37,11 @@ class PlacesNotFoundError(PlacesServiceError):
     pass
 
 
-def _headers(session_id, attributes, *, content=False):
-    key = settings.TOMTOM_API_KEY.strip()
+def _api_key():
+    key = settings.TOMTOM_SEARCH_API_KEY.strip() or settings.TOMTOM_API_KEY.strip()
     if not key:
         raise PlacesConfigurationError
-    headers = {
-        "Accept": "application/json",
-        "Accept-Language": "en-PH,en",
-        "TomTom-Api-Version": "3",
-        "TomTom-Api-Key": key,
-        "Session-Id": str(session_id),
-        "Attributes": attributes,
-    }
-    if content:
-        headers["Content-Type"] = "application/json"
-    return headers
+    return key
 
 
 def _read(request):
@@ -68,98 +60,71 @@ def _read(request):
         raise PlacesServiceError from error
 
 
-def suggest(query, session_id):
-    body = {
-        "query": query,
-        "maxResults": 5,
-        "filters": {
-            "types": ["poi", "address", "street", "intersection", "area"],
-            "countryCodesIso2": ["PH"],
-        },
-    }
-    request = Request(
-        SUGGEST_URL,
-        data=json.dumps(body).encode(),
-        method="POST",
-        headers=_headers(session_id, "results(id,type,title,subtitles)", content=True),
+def _cache_key(session_id, place_type, place_id):
+    return f"places:{session_id}:{place_type}:{place_id}"
+
+
+def _normalize(result):
+    if not isinstance(result, dict):
+        return None
+    place_type = RESULT_TYPES.get(result.get("type"))
+    address = result.get("address")
+    display_address = (
+        address.get("freeformAddress", "").strip() if isinstance(address, dict) else ""
     )
-    payload = _read(request)
+    poi = result.get("poi")
+    title = poi.get("name") if isinstance(poi, dict) else display_address
+    try:
+        latitude = float(result["position"]["lat"])
+        longitude = float(result["position"]["lon"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if not place_type or not result.get("id") or not title or not display_address:
+        return None
+    if not (math.isfinite(latitude) and math.isfinite(longitude)):
+        return None
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return None
+    return {
+        "id": str(result["id"]),
+        "type": place_type,
+        "title": str(title),
+        "subtitles": [] if display_address == title else [display_address],
+        "display_address": display_address,
+        "latitude": latitude,
+        "longitude": longitude,
+    }
+
+
+def suggest(query, session_id):
+    params = urlencode(
+        {
+            "key": _api_key(),
+            "countrySet": "PH",
+            "limit": 5,
+            "typeahead": "true",
+            "view": "Unified",
+            "language": "en-US",
+        }
+    )
+    payload = _read(Request(f"{SEARCH_URL}/{quote(query, safe='')}.json?{params}"))
     results = payload.get("results") if isinstance(payload, dict) else None
     if not isinstance(results, list):
         raise PlacesServiceError
-    normalized = []
+    suggestions = []
     for result in results:
-        if not isinstance(result, dict) or result.get("type") not in ALLOWED_TYPES:
+        detail = _normalize(result)
+        if detail is None:
             continue
-        if not all(
-            isinstance(result.get(field), str) and result[field] for field in ("id", "title")
-        ):
-            continue
-        subtitles = result.get("subtitles", [])
-        normalized.append(
-            {
-                "id": result["id"],
-                "type": result["type"],
-                "title": result["title"],
-                "subtitles": [value for value in subtitles if isinstance(value, str)][:3]
-                if isinstance(subtitles, list)
-                else [],
-            }
-        )
-    return {"results": normalized[:5]}
-
-
-def _display_address(payload):
-    subtitles = payload.get("subtitles")
-    if isinstance(subtitles, list):
-        useful = [value.strip() for value in subtitles if isinstance(value, str) and value.strip()]
-        if useful:
-            return ", ".join(useful)
-    address = payload.get("address")
-    if not isinstance(address, dict):
-        return ""
-    street = " ".join(
-        str(address.get(key, "")).strip() for key in ("houseNumber", "street")
-    ).strip()
-    parts = [
-        street,
-        address.get("municipalitySubdivision"),
-        address.get("municipality"),
-        address.get("postalCode"),
-        address.get("country"),
-    ]
-    return ", ".join(str(value).strip() for value in parts if value and str(value).strip())
+        cache.set(_cache_key(session_id, detail["type"], detail["id"]), detail, CACHE_SECONDS)
+        suggestions.append({key: detail[key] for key in ("id", "type", "title", "subtitles")})
+    return {"results": suggestions[:5]}
 
 
 def details(place_type, place_id, session_id):
-    if place_type not in TYPE_PATHS:
+    if place_type not in ALLOWED_TYPES:
         raise ValueError("Unsupported place type")
-    url = f"{DETAILS_URL}/{TYPE_PATHS[place_type]}/{quote(place_id, safe='')}"
-    request = Request(
-        url,
-        headers=_headers(session_id, "id,type,title,subtitles,position,address"),
-        method="GET",
-    )
-    payload = _read(request)
-    try:
-        coordinates = payload["position"]["coordinates"]
-        longitude, latitude = float(coordinates[0]), float(coordinates[1])
-        if payload["position"]["type"] != "Point" or not (
-            -180 <= longitude <= 180 and -90 <= latitude <= 90
-        ):
-            raise ValueError
-        if not math.isfinite(longitude) or not math.isfinite(latitude):
-            raise ValueError
-        display_address = _display_address(payload)
-        if not display_address:
-            raise ValueError
-        return {
-            "id": str(payload["id"]),
-            "type": str(payload["type"]),
-            "title": str(payload["title"]),
-            "display_address": display_address,
-            "latitude": latitude,
-            "longitude": longitude,
-        }
-    except (KeyError, IndexError, TypeError, ValueError, OverflowError) as error:
-        raise PlacesServiceError from error
+    result = cache.get(_cache_key(session_id, place_type, place_id))
+    if not isinstance(result, dict):
+        raise PlacesNotFoundError
+    return result

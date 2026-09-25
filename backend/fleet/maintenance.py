@@ -5,6 +5,9 @@ from django.db.models import Exists, OuterRef, QuerySet
 from django.utils import timezone
 from rest_framework import serializers
 
+from accounts.models import UserNotification
+from accounts.notifications import notify_capability_users
+
 from .models import Vehicle, VehicleMaintenanceRecord
 
 ACTIVE_MAINTENANCE_STATUSES = (
@@ -59,9 +62,7 @@ def transition_maintenance(record_id, new_status, scheduled_at=None):
             {"status": f"Cannot transition from {record.status} to {new_status}."}
         )
     if new_status == VehicleMaintenanceRecord.Status.SCHEDULED and scheduled_at is None:
-        raise serializers.ValidationError(
-            {"scheduled_at": "Scheduled date and time are required."}
-        )
+        raise serializers.ValidationError({"scheduled_at": "Scheduled date and time are required."})
     if scheduled_at is not None and new_status != VehicleMaintenanceRecord.Status.SCHEDULED:
         raise serializers.ValidationError(
             {"scheduled_at": "Only the SCHEDULED transition accepts this field."}
@@ -79,4 +80,19 @@ def transition_maintenance(record_id, new_status, scheduled_at=None):
         record.completed_at = now
         fields.append("completed_at")
     record.save(update_fields=fields)
+    if new_status == VehicleMaintenanceRecord.Status.COMPLETED:
+        transaction.on_commit(
+            lambda: notify_capability_users(
+                module="MAINTENANCE",
+                action="VIEW",
+                notification_type=UserNotification.Type.MAINTENANCE_COMPLETED,
+                title="Maintenance Completed",
+                message=(
+                    f"Maintenance completed for {record.vehicle.display_name}: {record.title}."
+                ),
+                target_url="/maintenance",
+                source_key=f"vehicle-maintenance:{record.pk}:completed",
+            ),
+            robust=True,
+        )
     return record

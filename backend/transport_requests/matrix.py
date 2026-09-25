@@ -20,6 +20,7 @@ MATRIX_URL = "https://api.tomtom.com/routing/matrix/2"
 MATRIX_TIMEOUT_SECONDS = 12
 MATRIX_CACHE_TTL_SECONDS = 60
 MAX_CELLS = 100
+DEVELOPMENT_SIMULATED_VEHICLE_PREFIXES = ("DEMO-V", "FT-GT-", "FT-ST-")
 
 
 class MatrixError(Exception):
@@ -42,6 +43,28 @@ class MatrixLimitError(MatrixError):
     pass
 
 
+def simulated_position_is_allowed(vehicle, event):
+    return (
+        event.position_source == TelemetryEvent.PositionSource.SIMULATED_TEST
+        and settings.DEBUG
+        and vehicle.device_id.startswith(DEVELOPMENT_SIMULATED_VEHICLE_PREFIXES)
+    )
+
+
+def dispatch_position_is_eligible(vehicle, event, *, now=None):
+    if event is None:
+        return False
+    reference_time = now or timezone.now()
+    simulated = event.position_source == TelemetryEvent.PositionSource.SIMULATED_TEST
+    if simulated:
+        if not simulated_position_is_allowed(vehicle, event):
+            return False
+        max_age = settings.DISPATCH_SIMULATED_TELEMETRY_MAX_AGE_SECONDS
+    else:
+        max_age = settings.DISPATCH_TELEMETRY_MAX_AGE_SECONDS
+    return event.recorded_at >= reference_time - timedelta(seconds=max_age)
+
+
 def _coordinate(value, *, latitude):
     try:
         number = float(value)
@@ -54,7 +77,7 @@ def _coordinate(value, *, latitude):
 
 
 def eligible_vehicle_origins(vehicle_ids=None):
-    cutoff = timezone.now() - timedelta(seconds=settings.DISPATCH_TELEMETRY_MAX_AGE_SECONDS)
+    now = timezone.now()
     latest = TelemetryEvent.objects.filter(vehicle_id=OuterRef("pk")).order_by(
         "-recorded_at", "-sequence_number", "-received_at", "-pk"
     )
@@ -62,9 +85,7 @@ def eligible_vehicle_origins(vehicle_ids=None):
         Vehicle.objects.filter(is_active=True)
         .annotate(
             latest_telemetry_id=Subquery(latest.values("pk")[:1]),
-            latest_telemetry_recorded_at=Subquery(latest.values("recorded_at")[:1]),
         )
-        .filter(latest_telemetry_recorded_at__gte=cutoff)
         .order_by("device_id")
     )
     if vehicle_ids is not None:
@@ -79,6 +100,10 @@ def eligible_vehicle_origins(vehicle_ids=None):
     origins = []
     for vehicle in vehicles:
         event = events.get(vehicle.latest_telemetry_id)
+        if event is None:
+            continue
+        if not dispatch_position_is_eligible(vehicle, event, now=now):
+            continue
         try:
             latitude = _coordinate(event.location.y, latitude=True)
             longitude = _coordinate(event.location.x, latitude=False)
@@ -92,7 +117,7 @@ def eligible_vehicle_origins(vehicle_ids=None):
 
 def eligible_request_destinations(request_ids=None, *, include_assigned=False):
     queryset = TransportRequest.objects.filter(
-        status=TransportRequest.Status.APPROVED
+        status=TransportRequest.Status.READY_FOR_DISPATCH
     ).order_by("id")
     if not include_assigned:
         queryset = queryset.filter(assigned_vehicle__isnull=True)
@@ -188,7 +213,7 @@ def _normalize(payload, origins, destinations):
 
 
 def _call_tomtom(origins, destinations):
-    key = settings.TOMTOM_API_KEY.strip()
+    key = settings.TOMTOM_MATRIX_API_KEY.strip()
     if not key:
         raise MatrixConfigurationError
     body = {

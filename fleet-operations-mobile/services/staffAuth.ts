@@ -12,7 +12,7 @@ type LoginResponse =
   | { user: UserPayload; csrf_token: string }
   | { two_factor_required: true; challenge_token: string };
 
-const allowedRoles = new Set<StaffRole>(['DISPATCHER', 'FLEET_MANAGER', 'SUPER_ADMIN']);
+const allowedRoles = new Set<StaffRole>(['FLEET_ADMIN', 'FLEET_MANAGER', 'FLEET_STAFF']);
 
 function mapStaff(payload: UserPayload): StaffIdentity {
   if (!allowedRoles.has(payload.role as StaffRole)) {

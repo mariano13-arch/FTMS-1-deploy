@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./api")>()),
   getFleetLiveVehicles: mocks.getFleet,
+  getFleetActiveAssignmentRoute: mocks.getRoute,
   getFleetVehicleTrail: mocks.getTrail,
   getFleetSafetyEvents: mocks.getSafetyEvents,
   getGeofences: mocks.getGeofences,
@@ -30,9 +31,6 @@ vi.mock("./api", async (importOriginal) => ({
   getGeofenceActivity: mocks.getGeofenceActivity,
   createGeofence: mocks.createGeofence,
   updateGeofence: mocks.updateGeofence,
-}));
-vi.mock("../transport-requests/api", () => ({
-  getRequestRoute: mocks.getRoute,
 }));
 vi.mock("../../services/drivers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../services/drivers")>()),
@@ -43,7 +41,7 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
     fleetLocations,
     fleetTrail = [],
     fleetPopup,
-    safetyEvents,
+    safetyEvents = [],
     geofenceActivityEvent,
     onVehicleSelect,
     onVehicleStatus,
@@ -51,9 +49,12 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
     onSafetyEventSelect,
     onGeofenceCreateAt,
     routeState,
+    route,
+    plannedRoute,
+    routeCameraKey,
     focusedVehicleId,
   }: {
-    fleetLocations: Array<{ deviceId: string; label: string }>;
+    fleetLocations: Array<{ deviceId: string; label: string; emergencySOS?: { activatedAt: string } | null }>;
     fleetTrail?: Array<unknown>;
     fleetPopup: null | {
       deviceId: string;
@@ -69,6 +70,7 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
       obdSource?: "SIMULATED_TEST" | "PHYSICAL_OBD" | null;
       driverName?: string;
       assignmentStatus?: string;
+      activeRouteSummary?: string;
       telemetrySource: string;
     };
     safetyEvents: Array<{ event_id: string; vehicle_name: string }>;
@@ -85,11 +87,17 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
       longitude: number;
     }) => void;
     routeState: string;
+    route?: { distance_meters: number } | null;
+    plannedRoute?: { distance_meters: number } | null;
+    routeCameraKey?: string;
     focusedVehicleId?: string;
   }) => (
     <div
       data-testid="fleet-map"
       data-route-state={routeState}
+      data-active-route={route ? "primary" : "none"}
+      data-planned-route={plannedRoute ? "secondary" : "none"}
+      data-route-camera-key={routeCameraKey}
       data-trail-points={fleetTrail.length}
       data-focused-vehicle={focusedVehicleId ?? ""}
     >
@@ -103,6 +111,7 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
       {fleetLocations.map((item) => (
         <button
           key={item.deviceId}
+          data-emergency={item.emergencySOS ? "active" : "normal"}
           onClick={() => onVehicleSelect(item.deviceId)}
         >
           Marker {item.label}
@@ -141,6 +150,7 @@ vi.mock("../transport-requests/components/RequestMap", () => ({
           </span>
           <span>{fleetPopup.driverName ?? "No active driver"}</span>
           <span>{fleetPopup.assignmentStatus ?? "No active dispatch"}</span>
+          {fleetPopup.activeRouteSummary && <span>{fleetPopup.activeRouteSummary}</span>}
           {fleetPopup.obdSource === "SIMULATED_TEST" && (
             <strong>SIMULATED TEST OBD DATA</strong>
           )}
@@ -321,19 +331,28 @@ beforeEach(() => {
     ],
   });
   mocks.getRoute.mockResolvedValue({
-    request_id: "request-1",
-    traffic_mode: "live",
-    distance_meters: 1000,
-    duration_seconds: 300,
-    traffic_delay_seconds: 20,
-    departure_time: "2026-08-21T08:00:00Z",
-    arrival_time: "2026-08-21T08:05:00Z",
-    geometry: {
-      type: "LineString",
-      coordinates: [
-        [121.02, 14.56],
-        [121.0198, 14.5086],
-      ],
+    route: {
+      phase: "TO_DESTINATION",
+      execution_status: "IN_TRANSIT",
+      route_status: "AVAILABLE",
+      position_state: "CURRENT",
+      position_recorded_at: "2026-08-21T07:59:50Z",
+      position_age_seconds: 10,
+      route_basis: "CURRENT_VEHICLE_POSITION",
+      vehicle_position: { latitude: 14.56, longitude: 121.02, recorded_at: "2026-08-21T07:59:50Z", is_stale: false, source: "GNSS" },
+      pickup: { name: "FTMS Hotel", latitude: 14.56, longitude: 121.02 },
+      destination: { name: "NAIA Terminal 3", latitude: 14.5086, longitude: 121.0198 },
+      route: {
+        traffic_mode: "live",
+        distance_meters: 1000,
+        duration_seconds: 300,
+        traffic_delay_seconds: 20,
+        departure_time: "2026-08-21T08:00:00Z",
+        arrival_time: "2026-08-21T08:05:00Z",
+        geometry: { type: "LineString", coordinates: [[121.02, 14.56], [121.0198, 14.5086]] },
+      },
+      planned_route_status: "NOT_APPLICABLE",
+      planned_route: null,
     },
   });
   mocks.getGeofences.mockResolvedValue({ results: [geofence] });
@@ -372,10 +391,11 @@ test("renders authoritative telemetry states and confirmed assignment context", 
   ).not.toBeInTheDocument();
   await waitFor(() =>
     expect(mocks.getRoute).toHaveBeenCalledWith(
-      "request-1",
+      1,
       expect.any(AbortSignal),
     ),
   );
+  expect(within(popup).getByText("Active leg — To Destination: 1.0 km · 5 min TomTom route estimate")).toBeInTheDocument();
   expect(mocks.getTrail).not.toHaveBeenCalled();
   expect(screen.getByTestId("fleet-map")).toHaveAttribute(
     "data-trail-points",
@@ -395,6 +415,26 @@ test("opens vehicle status instantly from the current snapshot without navigatin
   expect(screen.queryByRole("complementary", { name: "Fleet navigator" })).not.toBeInTheDocument();
   expect(screen.getByTestId("fleet-map")).toHaveAttribute("data-focused-vehicle", "LIVE-001");
   expect(mocks.getFleet).toHaveBeenCalledTimes(1);
+});
+
+test("restores active SOS from the fleet snapshot while preserving marker selection", async () => {
+  const emergencySnapshot = {
+    ...snapshot,
+    vehicles: snapshot.vehicles.map((item) => item.device_id === "LIVE-001" ? {
+      ...item,
+      emergency_sos: {
+        id: 9, device_id: "LIVE-001", vehicle_id: 1, driver_id: null,
+        status: "ACTIVE", source: "PHYSICAL_BUTTON",
+        activated_at: "2026-09-24T01:02:03Z", cleared_at: null,
+      },
+    } : { ...item, emergency_sos: null }),
+  };
+  mocks.getFleet.mockResolvedValue(emergencySnapshot);
+  render(<LiveFleetOperationsPage />);
+  const marker = await screen.findByRole("button", { name: "Marker Hotel Shuttle" });
+  expect(marker).toHaveAttribute("data-emergency", "active");
+  fireEvent.click(marker);
+  expect(screen.getByRole("article", { name: "Hotel Shuttle map details" })).toBeInTheDocument();
 });
 
 test("removes completed trip context while preserving its real vehicle marker", async () => {
@@ -520,7 +560,7 @@ test("focuses the status vehicle and keeps the fleet navigator collapsed", async
   );
 });
 
-test("switches between real vehicle and driver lists and controls marker visibility", async () => {
+test("uses Vehicles and Drivers tabs while preserving existing driver behavior", async () => {
   render(<LiveFleetOperationsPage />);
   await screen.findByText("ABC-123 · Van");
   const navigatorHeader = screen.getByTestId("fleet-navigator-header");
@@ -537,7 +577,12 @@ test("switches between real vehicle and driver lists and controls marker visibil
   ).toBeInTheDocument();
   expect(scrollRegion).not.toContainElement(navigatorHeader);
   expect(scrollRegion).not.toContainElement(navigatorFooter);
-  expect(navigatorFooter).toHaveTextContent("hidden from map");
+  expect(within(navigatorHeader).getByRole("tab", { name: "Vehicles" })).toHaveAttribute("aria-selected", "true");
+  expect(within(navigatorHeader).getByRole("tab", { name: "Drivers" })).toHaveAttribute("aria-selected", "false");
+  expect(within(navigatorHeader).queryByText("Groups")).not.toBeInTheDocument();
+  expect(within(navigatorHeader).queryByRole("button", { name: "Drivers" })).not.toBeInTheDocument();
+  expect(within(navigatorHeader).getByRole("button", { name: "Uncheck all visible vehicles" })).toHaveTextContent("Uncheck All");
+  expect(navigatorFooter).toHaveTextContent("3 of 3 visible");
   const visibilityCheckbox = screen.getByRole("checkbox", {
     name: "Show Hotel Shuttle on map",
   });
@@ -550,28 +595,57 @@ test("switches between real vehicle and driver lists and controls marker visibil
   expect(screen.getByTestId("fleet-navigator-footer")).toBe(navigatorFooter);
   expect(scrollRegion.scrollTop).toBe(24);
   expect(visibilityCheckbox).not.toBeChecked();
-  expect(navigatorFooter).toHaveTextContent("1 hidden from map");
+  expect(navigatorFooter).toHaveTextContent("2 of 3 visible");
+  expect(within(navigatorHeader).getByRole("button", { name: "Check all visible vehicles" })).toHaveTextContent("Check All");
   expect(
     screen.queryByRole("button", { name: "Marker Hotel Shuttle" }),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Show drivers" }));
+  fireEvent.click(within(navigatorHeader).getByRole("tab", { name: "Drivers" }));
   expect(
     await screen.findByRole("button", { name: /Ana Santos/ }),
   ).toBeInTheDocument();
   expect(screen.getByText("Assigned to Hotel Shuttle")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /Drivers/ }));
-  fireEvent.click(screen.getByRole("menuitem", { name: /Groups/ }));
-  expect(screen.getByText("No groups configured")).toBeInTheDocument();
+  expect(within(navigatorHeader).queryByRole("button", { name: /all visible vehicles/i })).not.toBeInTheDocument();
+  fireEvent.click(within(navigatorHeader).getByRole("tab", { name: "Vehicles" }));
+  expect(screen.getByRole("checkbox", { name: "Show Hotel Shuttle on map" })).not.toBeChecked();
 });
 
-test("opens the associated vehicle popup when a safety marker is selected", async () => {
+test("uses one visibility action derived from the current filtered vehicle set", async () => {
   render(<LiveFleetOperationsPage />);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Safety marker Hotel Shuttle" }),
-  );
-  expect(
-    screen.getByRole("article", { name: "Hotel Shuttle map details" }),
-  ).toBeInTheDocument();
+  await screen.findByText("ABC-123 · Van");
+  const header = screen.getByTestId("fleet-navigator-header");
+
+  expect(within(header).getAllByRole("button", { name: /check all visible vehicles/i })).toHaveLength(1);
+  fireEvent.click(within(header).getByRole("button", { name: "Uncheck all visible vehicles" }));
+  expect(screen.getByRole("checkbox", { name: "Show Hotel Shuttle on map" })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Show Service Van on map" })).not.toBeChecked();
+  expect(within(header).getByRole("button", { name: "Check all visible vehicles" })).toHaveTextContent("Check All");
+
+  fireEvent.click(within(header).getByRole("button", { name: "Check all visible vehicles" }));
+  expect(screen.getByRole("checkbox", { name: "Show Hotel Shuttle on map" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Show Service Van on map" })).toBeChecked();
+  expect(within(header).getByRole("button", { name: "Uncheck all visible vehicles" })).toHaveTextContent("Uncheck All");
+
+  fireEvent.click(screen.getByRole("checkbox", { name: "Show Hotel Shuttle on map" }));
+  expect(within(header).getByRole("button", { name: "Check all visible vehicles" })).toBeInTheDocument();
+
+  fireEvent.click(within(header).getByRole("button", { name: "Attention" }));
+  expect(within(header).getByRole("button", { name: "Uncheck all visible vehicles" })).toBeInTheDocument();
+  fireEvent.click(within(header).getByRole("button", { name: "Uncheck all visible vehicles" }));
+  expect(screen.getByRole("checkbox", { name: "Show Service Van on map" })).not.toBeChecked();
+  fireEvent.click(within(header).getByRole("button", { name: "All" }));
+  expect(screen.getByRole("checkbox", { name: "Show Hotel Shuttle on map" })).not.toBeChecked();
+
+  fireEvent.click(within(header).getByRole("tab", { name: "Drivers" }));
+  expect(screen.queryAllByRole("button", { name: "Marker Hotel Shuttle" })).toHaveLength(0);
+  expect(await screen.findByRole("button", { name: /Ana Santos/ })).toBeInTheDocument();
+  expect(screen.queryByText("Groups")).not.toBeInTheDocument();
+});
+
+test("does not overlay safety-event markers on clickable vehicle markers", async () => {
+  render(<LiveFleetOperationsPage />);
+  await screen.findByRole("button", { name: "Marker Hotel Shuttle" });
+  expect(screen.queryByRole("button", { name: /Safety marker/ })).not.toBeInTheDocument();
 });
 
 test("clearly labels opt-in simulated telemetry without presenting it as real", async () => {
@@ -625,15 +699,89 @@ test("keeps the page usable when fleet loading or an operational route fails", a
   );
 });
 
+test("labels an active route from stale telemetry as last known", async () => {
+  mocks.getRoute.mockResolvedValueOnce({
+    route: {
+      phase: "TO_DESTINATION",
+      execution_status: "IN_TRANSIT",
+      route_status: "AVAILABLE",
+      position_state: "STALE",
+      position_recorded_at: "2026-08-19T20:13:50Z",
+      position_age_seconds: 128160,
+      route_basis: "LAST_KNOWN_VEHICLE_POSITION",
+      vehicle_position: { latitude: 14.56, longitude: 121.02, recorded_at: "2026-08-19T20:13:50Z", is_stale: true, source: "GNSS" },
+      pickup: { name: "FTMS Hotel", latitude: 14.56, longitude: 121.02 },
+      destination: { name: "NAIA Terminal 3", latitude: 14.5086, longitude: 121.0198 },
+      route: {
+        traffic_mode: "live", distance_meters: 12400, duration_seconds: 1860,
+        traffic_delay_seconds: 0, departure_time: "", arrival_time: "",
+        geometry: { type: "LineString", coordinates: [[121.02, 14.56], [121.0198, 14.5086]] },
+      },
+    },
+  });
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
+  const popup = await screen.findByRole("article", { name: "Hotel Shuttle map details" });
+  expect(within(popup).getByText("Active leg — From last known position: 12.4 km · 31 min TomTom route estimate · 35h 36m old")).toBeInTheDocument();
+  expect(within(popup).queryByText(/Current ETA/i)).not.toBeInTheDocument();
+});
+
+test("renders pre-pickup TomTom legs as primary and secondary without refitting on telemetry refresh", async () => {
+  mocks.getFleet.mockResolvedValue({
+    ...snapshot,
+    vehicles: snapshot.vehicles.map((vehicle) =>
+      vehicle.device_id === "LIVE-001"
+        ? { ...vehicle, active_assignment: { ...assignment, execution_status: "EN_ROUTE_TO_PICKUP" } }
+        : vehicle,
+    ),
+  });
+  mocks.getRoute.mockResolvedValueOnce({
+    route: {
+      phase: "TO_PICKUP",
+      execution_status: "EN_ROUTE_TO_PICKUP",
+      route_status: "AVAILABLE",
+      position_state: "CURRENT",
+      position_recorded_at: "2026-08-21T07:59:50Z",
+      position_age_seconds: 10,
+      route_basis: "CURRENT_VEHICLE_POSITION",
+      vehicle_position: { latitude: 14.56, longitude: 121.02, recorded_at: "2026-08-21T07:59:50Z", is_stale: false, source: "GNSS" },
+      pickup: { name: "FTMS Hotel", latitude: 14.56, longitude: 121.02 },
+      destination: { name: "NAIA Terminal 3", latitude: 14.5086, longitude: 121.0198 },
+      route: { traffic_mode: "live", distance_meters: 4200, duration_seconds: 720, traffic_delay_seconds: 60, departure_time: "", arrival_time: "", geometry: { type: "LineString", coordinates: [[121.05, 14.58], [121.02, 14.56]] } },
+      planned_route_status: "AVAILABLE",
+      planned_route: { traffic_mode: "live", distance_meters: 7400, duration_seconds: 1140, traffic_delay_seconds: 80, departure_time: "", arrival_time: "", geometry: { type: "LineString", coordinates: [[121.02, 14.56], [121.0198, 14.5086]] } },
+    },
+  });
+
+  render(<LiveFleetOperationsPage />);
+  const map = await screen.findByTestId("fleet-map");
+  await waitFor(() => expect(map).toHaveAttribute("data-active-route", "primary"));
+  expect(map).toHaveAttribute("data-planned-route", "secondary");
+  expect(map).toHaveAttribute("data-route-camera-key", "1:EN_ROUTE_TO_PICKUP");
+  fireEvent.click(screen.getByRole("button", { name: "Marker Hotel Shuttle" }));
+  expect(await screen.findByText(/Next — Pickup to Destination: 7.4 km · 19 min/)).toBeInTheDocument();
+});
+
 test("lists geofence occupancy and activity and creates a customizable map boundary", async () => {
   render(<LiveFleetOperationsPage />);
   await screen.findByText("ABC-123 · Van");
   fireEvent.click(screen.getByRole("button", { name: /Geofences/ }));
+  expect(screen.getByRole("complementary", { name: "Geofence workspace" })).toHaveClass(
+    "live-fleet-geofence-panel--browser",
+  );
+  expect(await screen.findByText("Saved Geofences")).toBeInTheDocument();
+  expect(screen.getByText("Saved Geofences").parentElement).toHaveTextContent("1");
   fireEvent.click(await screen.findByRole("button", { name: /Oxford Zone/ }));
+  expect(screen.getByRole("button", { name: /Oxford Zone/ })).toHaveAttribute("aria-pressed", "true");
   const detail = await screen.findByRole("region", { name: "Oxford Zone geofence details" });
+  expect(within(detail).getByText("Selected Geofence")).toBeInTheDocument();
+  expect(within(detail).getByText("150 m radius · Circle")).toBeInTheDocument();
+  expect(within(detail).getByText("Monitoring")).toBeInTheDocument();
   expect(within(detail).getByText("Assets inside")).toHaveTextContent("1Assets inside");
   expect(within(detail).getByText("Entries today")).toHaveTextContent("1Entries today");
   expect(within(detail).getByText("Exits today")).toHaveTextContent("1Exits today");
+  expect(within(detail).getByText("Latest activity").parentElement).not.toHaveTextContent("—");
   expect(await within(detail).findByText("Restricted Entry")).toBeInTheDocument();
   expect(within(detail).getAllByText("EXIT")).toHaveLength(2);
   fireEvent.click(within(detail).getAllByRole("button", { name: "View on map" })[0]);
@@ -644,7 +792,7 @@ test("lists geofence occupancy and activity and creates a customizable map bound
   fireEvent.change(within(detail).getByLabelText("Geofence activity date from"), { target: { value: "2026-08-01" } });
   fireEvent.change(within(detail).getByLabelText("Geofence activity date to"), { target: { value: "2026-08-21" } });
   await waitFor(() => expect(mocks.getGeofenceActivity).toHaveBeenLastCalledWith(expect.objectContaining({ vehicle: 2, date_from: "2026-08-01", date_to: "2026-08-21" }), expect.any(AbortSignal)));
-  fireEvent.click(screen.getByRole("button", { name: "+ New geofence" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ New Geofence" }));
   fireEvent.click(
     screen.getByRole("button", { name: "Place geofence on map" }),
   );
@@ -656,8 +804,64 @@ test("lists geofence occupancy and activity and creates a customizable map bound
   });
   fireEvent.click(screen.getByRole("button", { name: "Create geofence" }));
   await waitFor(() => expect(mocks.createGeofence).toHaveBeenCalledWith(expect.objectContaining({ name: "New Depot", radius_meters: 300, shape_type: "CIRCLE" })));
-  await screen.findByRole("button", { name: "+ New geofence" });
+  await screen.findByRole("button", { name: "+ New Geofence" });
   expect(await screen.findByText("Restricted Entry")).toBeInTheDocument();
+});
+
+test("edits a geofence with populated compact sections and the existing payload", async () => {
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: /Geofences/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Oxford Zone/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+  const panel = screen.getByRole("complementary", { name: "Geofence workspace" });
+  expect(panel).toHaveClass("live-fleet-geofence-panel--editor");
+  expect(within(panel).getByText("Geofence Details")).toBeInTheDocument();
+  expect(within(panel).getByText("Boundary Settings")).toBeInTheDocument();
+  expect(within(panel).getByText("Appearance & Monitoring")).toBeInTheDocument();
+  expect(screen.getByLabelText("Geofence name")).toHaveValue("Oxford Zone");
+  expect(screen.getByLabelText("Geofence category")).toHaveValue("RESTRICTED");
+  expect(screen.getByLabelText("Geofence boundary shape")).toHaveValue("CIRCLE");
+  expect(screen.getByLabelText("Geofence radius")).toHaveValue("150");
+  expect(screen.getByLabelText("Geofence description")).toHaveValue("Hotel loading area");
+  expect(screen.getByLabelText("Geofence color")).toHaveValue("#008f8c");
+  expect(screen.getByRole("checkbox", { name: /Show on map/ })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: /Track activity/ })).toBeChecked();
+
+  fireEvent.change(screen.getByLabelText("Geofence name"), { target: { value: "Oxford Operations Zone" } });
+  fireEvent.change(screen.getByLabelText("Geofence category"), { target: { value: "DEPOT" } });
+  fireEvent.change(screen.getByLabelText("Geofence radius"), { target: { value: "300" } });
+  fireEvent.change(screen.getByLabelText("Geofence description"), { target: { value: "Updated operating notes" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: /Show on map/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: /Track activity/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+
+  await waitFor(() => expect(mocks.updateGeofence).toHaveBeenCalledWith("geo-1", expect.objectContaining({
+    name: "Oxford Operations Zone",
+    category: "DEPOT",
+    shape_type: "CIRCLE",
+    radius_meters: 300,
+    description: "Updated operating notes",
+    color: "#008F8C",
+    show_on_map: false,
+    is_active: false,
+  })));
+  await waitFor(() =>
+    expect(screen.queryByLabelText("Geofence name")).not.toBeInTheDocument(),
+  );
+});
+
+test("cancels geofence editing without saving", async () => {
+  render(<LiveFleetOperationsPage />);
+  await screen.findByText("ABC-123 · Van");
+  fireEvent.click(screen.getByRole("button", { name: /Geofences/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Oxford Zone/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Geofence name"), { target: { value: "Unsaved" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByLabelText("Geofence name")).not.toBeInTheDocument();
+  expect(mocks.updateGeofence).not.toHaveBeenCalled();
 });
 
 test("shows geofence activity loading and empty states", async () => {

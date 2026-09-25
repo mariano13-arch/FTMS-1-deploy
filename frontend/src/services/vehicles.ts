@@ -1,18 +1,26 @@
 import { api } from "./api";
 
 export const vehicleTypes = ["SEDAN","SUV","VAN","SHUTTLE_BUS","SERVICE_TRUCK","MOTORCYCLE","OTHER"] as const;
-export const fuelTypes = ["GASOLINE", "DIESEL", "HYBRID", "ELECTRIC", "OTHER"] as const;
+export const fuelTypes = ["GASOLINE", "DIESEL"] as const;
+export const fuelGrades = ["UNLEADED_91", "PREMIUM_95", "PREMIUM_97", "REGULAR_DIESEL", "PREMIUM_DIESEL"] as const;
+export type FuelType = typeof fuelTypes[number] | "";
+export type FuelGrade = typeof fuelGrades[number] | "";
+export const fuelGradesByType: Record<Exclude<FuelType, "">, readonly FuelGrade[]> = {
+  GASOLINE: ["UNLEADED_91", "PREMIUM_95", "PREMIUM_97"],
+  DIESEL: ["REGULAR_DIESEL", "PREMIUM_DIESEL"],
+};
 export const transmissionTypes = ["MANUAL", "AUTOMATIC", "CVT", "OTHER"] as const;
 export const ownershipTypes = ["COMPANY_OWNED", "LEASED", "RENTED", "OTHER"] as const;
 export const documentTypes = ["OFFICIAL_RECEIPT", "CERTIFICATE_OF_REGISTRATION", "INSURANCE", "PURCHASE_ORDER", "SALES_INVOICE", "WARRANTY", "LEASE_AGREEMENT", "EMISSION_CERTIFICATE", "PMVIC_CERTIFICATE", "VEHICLE_PHOTO", "OTHER"] as const;
 export type VehicleType = typeof vehicleTypes[number];
 export type Vehicle = {
-  device_id: string; plate_number: string; display_name: string;
+  id?: number; device_id: string; plate_number: string; display_name: string;
   vehicle_type: VehicleType; manufacturer: string; model: string;
   model_year: number | null; passenger_capacity: number | null;
   payload_capacity_kg: string | null; gvwr_kg: string | null;
   vin: string; engine_number: string; chassis_number: string; color: string;
-  fuel_type: typeof fuelTypes[number] | ""; transmission_type: typeof transmissionTypes[number] | "";
+  fuel_type: FuelType; fuel_grade: FuelGrade;
+  transmission_type: typeof transmissionTypes[number] | "";
   ownership_type: typeof ownershipTypes[number] | ""; supplier_name: string;
   purchase_order_number: string; acquisition_date: string | null; purchase_price: string | null;
   purchase_currency: string; warranty_expiry_date: string | null;

@@ -7,6 +7,8 @@ type AuthState = {
   user: StaffUser | null; loading: boolean; sessionMessage: string;
   signIn: (username: string, password: string) => Promise<LoginResult>;
   completeTwoFactor: (challengeToken: string, method: "totp" | "recovery", code: string) => Promise<void>;
+  completeRequiredMfaEnrollment: (challengeToken: string, code: string) => Promise<string[]>;
+  activateEnrolledSession: () => Promise<void>;
   signOut: () => Promise<void>; expire: () => void;
 };
 const Context = createContext<AuthState | null>(null);
@@ -32,6 +34,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       auth.clearClientAuthentication();
     };
     window.addEventListener("ftms:session-expired", expire);
+    const passwordChanged = () => { if (active) { setUser(null); setSessionMessage(""); } };
+    window.addEventListener("ftms:password-changed", passwordChanged);
     auth.bootstrapCsrf(controller.signal)
       .then(() => auth.me(controller.signal))
       .then((restored) => { if (active) setUser(restored); })
@@ -48,11 +52,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       controllers.forEach((item) => item.abort());
       controllers.clear();
       window.removeEventListener("ftms:session-expired", expire);
+      window.removeEventListener("ftms:password-changed", passwordChanged);
     };
   }, []);
   useEffect(() => {
     if (!user) return undefined;
-    const idleTimeoutMs = Number(import.meta.env.VITE_SESSION_IDLE_TIMEOUT_SECONDS ?? "900") * 1000;
+    const idleTimeoutMs = Number(import.meta.env.VITE_SESSION_IDLE_TIMEOUT_SECONDS ?? "43200") * 1000;
     const reportIntervalMs = 60_000;
     let lastInteraction = Date.now();
     let lastReport = Date.now();
@@ -123,6 +128,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (mounted.current) setSessionMessage("");
         const signedIn = await auth.verifyTwoFactor(challengeToken, method, code, controller.signal);
         if (mounted.current) setUser(signedIn);
+      } finally { actionControllers.current.delete(controller); }
+    },
+    completeRequiredMfaEnrollment: async (challengeToken, code) => {
+      const controller = new AbortController(); actionControllers.current.add(controller);
+      try {
+        if (mounted.current) setSessionMessage("");
+        const result = await auth.confirmRequiredMfaEnrollment(
+          challengeToken, code, controller.signal,
+        );
+        return result.recoveryCodes;
+      } finally { actionControllers.current.delete(controller); }
+    },
+    activateEnrolledSession: async () => {
+      const controller = new AbortController(); actionControllers.current.add(controller);
+      try {
+        const enrolledUser = await auth.me(controller.signal);
+        if (mounted.current) setUser(enrolledUser);
       } finally { actionControllers.current.delete(controller); }
     },
     signOut: async () => {

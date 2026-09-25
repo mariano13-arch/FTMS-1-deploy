@@ -19,6 +19,14 @@ DELIVERY_REQUEST_TYPES = frozenset(
     }
 )
 AMBIGUOUS_REQUEST_TYPES = frozenset({"BRANCH_TRANSFER", "OTHER"})
+SUPPLY_REQUEST_TYPES = frozenset({"SUPPLIER_PICKUP", "BRANCH_TRANSFER"})
+
+
+def is_supply_request(request):
+    return (
+        request.request_type in SUPPLY_REQUEST_TYPES
+        and request.request_category == DELIVERY_LOGISTICS
+    )
 
 
 def category_for_request_type(request_type):

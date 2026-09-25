@@ -3,18 +3,20 @@ import { getDrivers, type Driver } from "../../services/drivers";
 import RequestMap, {
   type FleetPopupInfo,
 } from "../transport-requests/components/RequestMap";
-import { getRequestRoute } from "../transport-requests/api";
 import type { TransportRoute } from "../transport-requests/types";
 import GeofenceWorkspace from "./GeofenceWorkspace";
 import { VehicleStatusDrawer } from "./VehicleStatusPage";
 import {
   getFleetLiveVehicles,
+  getFleetActiveAssignmentRoute,
   getFleetSafetyEvents,
   createGeofence as createGeofenceRecord,
   getGeofence,
   getGeofences,
   updateGeofence,
   type FleetLiveResponse,
+  type FleetLiveVehicle,
+  type FleetActiveRoute,
   type FleetSafetyEvent,
   type Geofence,
   type GeofenceCoordinate,
@@ -24,10 +26,20 @@ import {
 } from "./api";
 
 type FleetFilter = "all" | "assigned" | "live" | "attention";
-type NavigatorView = "vehicles" | "drivers" | "groups" | "assets";
+type NavigatorView = "vehicles" | "drivers";
 type AsyncState = "idle" | "loading" | "ready" | "error";
 
 const pollIntervalMs = 15_000;
+const routeRefreshIntervalMs = 60_000;
+
+const routeDistance = (meters: number) =>
+  meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${meters} m`;
+const routeDuration = (seconds: number) => `${Math.max(1, Math.ceil(seconds / 60))} min`;
+const positionAge = (seconds: number) => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m old` : `${Math.max(1, minutes)}m old`;
+};
 
 const words = (value: string) =>
   value
@@ -45,8 +57,6 @@ const stateLabel: Record<TelemetryState, string> = {
 const navigatorLabel: Record<NavigatorView, string> = {
   vehicles: "Vehicles",
   drivers: "Drivers",
-  groups: "Groups",
-  assets: "Assets",
 };
 
 type GeofenceDraft = GeofenceWrite & { id?: string };
@@ -97,27 +107,52 @@ function geofenceDraftFromPoint(
   };
 }
 
-function NavigatorIcon({
-  kind,
+function FleetVehicleLayerRow({
+  vehicle,
+  selected,
+  hidden,
+  onToggleVisibility,
+  onSelect,
 }: {
-  kind: "fleet" | "driver";
+  vehicle: FleetLiveVehicle;
+  selected: boolean;
+  hidden: boolean;
+  onToggleVisibility: () => void;
+  onSelect: () => void;
 }) {
-  if (kind === "fleet") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="9" y="2" width="6" height="5" rx="1" />
-        <rect x="2" y="17" width="6" height="5" rx="1" />
-        <rect x="16" y="17" width="6" height="5" rx="1" />
-        <path d="M12 7v5M5 17v-5h14v5" />
-      </svg>
-    );
-  }
-
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="9" cy="7" r="4" />
-      <path d="M2.5 21v-3.5A5.5 5.5 0 0 1 8 12h2a5.5 5.5 0 0 1 5.5 5.5V21M17 9h5M19.5 6.5v5" />
-    </svg>
+    <div className={`live-fleet-asset-row ${selected ? "selected" : ""}`}>
+      <label
+        className="live-fleet-marker-toggle"
+        title={`${hidden ? "Show" : "Hide"} ${vehicle.display_name} on map`}
+      >
+        <input
+          type="checkbox"
+          checked={!hidden}
+          onChange={onToggleVisibility}
+          aria-label={`Show ${vehicle.display_name} on map`}
+        />
+        <span />
+      </label>
+      <button type="button" onClick={onSelect}>
+        <span className="live-fleet-asset-icon" aria-hidden="true">▰</span>
+        <span>
+          <strong>{vehicle.display_name}</strong>
+          <small>{vehicle.plate_number} · {words(vehicle.vehicle_type)}</small>
+          <small>
+            {vehicle.active_assignment
+              ? `${vehicle.active_assignment.driver_name} · ${vehicle.active_assignment.driver_code}`
+              : "No assigned driver"}
+          </small>
+        </span>
+        <span
+          className={`live-fleet-row-state live-fleet-row-state--${vehicle.telemetry_state}`}
+          title={stateLabel[vehicle.telemetry_state]}
+          aria-label={stateLabel[vehicle.telemetry_state]}
+          role="img"
+        />
+      </button>
+    </div>
   );
 }
 
@@ -140,6 +175,8 @@ export default function LiveFleetOperationsPage({
   const [search, setSearch] = useState("");
 
   const [route, setRoute] = useState<TransportRoute | null>(null);
+  const [plannedRoute, setPlannedRoute] = useState<TransportRoute | null>(null);
+  const [activeRoute, setActiveRoute] = useState<FleetActiveRoute | null>(null);
   const [routeState, setRouteState] =
     useState<AsyncState>("idle");
 
@@ -155,9 +192,6 @@ export default function LiveFleetOperationsPage({
 
   const [navigatorView, setNavigatorView] =
     useState<NavigatorView>("vehicles");
-  const [navigatorMenuOpen, setNavigatorMenuOpen] =
-    useState(false);
-
   const [hiddenVehicleIds, setHiddenVehicleIds] = useState<
     Set<string>
   >(() => new Set());
@@ -378,8 +412,16 @@ export default function LiveFleetOperationsPage({
       (vehicle) => vehicle.device_id === selectedId,
     ) ?? null;
 
-  const selectedRequestId =
-    selected?.active_assignment?.request_id ?? "";
+  const selectedAssignment = selected?.active_assignment ?? null;
+  const routeRefreshFingerprint = selectedAssignment
+    ? [
+        selectedAssignment.assignment_id,
+        selectedAssignment.execution_status,
+        selected?.telemetry?.latitude.toFixed(3) ?? "none",
+        selected?.telemetry?.longitude.toFixed(3) ?? "none",
+        Math.floor(Date.parse(data?.generated_at ?? "") / routeRefreshIntervalMs),
+      ].join(":")
+    : "";
 
   const statusVehicle = data?.vehicles.find(
     (vehicle) => vehicle.device_id === statusVehicleId,
@@ -391,18 +433,48 @@ export default function LiveFleetOperationsPage({
 
     const timer = window.setTimeout(() => {
       setRoute(null);
+      setPlannedRoute(null);
+      setActiveRoute(null);
 
-      if (!selectedRequestId) {
+      if (!selectedAssignment) {
         setRouteState("idle");
         return;
       }
 
       setRouteState("loading");
 
-      getRequestRoute(selectedRequestId, controller.signal)
-        .then((result) => {
-          setRoute(result);
-          setRouteState("ready");
+      getFleetActiveAssignmentRoute(selectedAssignment.assignment_id, controller.signal)
+        .then(({ route: result }) => {
+          setActiveRoute(result);
+          setRoute(
+            result.route
+              ? {
+                  request_id: selectedAssignment.request_id,
+                  geometry: result.route.geometry,
+                  distance_meters: result.route.distance_meters,
+                  duration_seconds: result.route.duration_seconds,
+                  traffic_delay_seconds: result.route.traffic_delay_seconds,
+                  departure_time: result.route.departure_time,
+                  arrival_time: result.route.arrival_time,
+                  traffic_mode: result.route.traffic_mode,
+                }
+              : null,
+          );
+          setPlannedRoute(
+            result.planned_route
+              ? {
+                  request_id: selectedAssignment.request_id,
+                  ...result.planned_route,
+                }
+              : null,
+          );
+          setRouteState(
+            result.route || result.planned_route
+              ? "ready"
+              : result.route_status === "NOT_ACTIVE"
+                ? "idle"
+                : "error",
+          );
         })
         .catch((reason) => {
           if (
@@ -420,7 +492,7 @@ export default function LiveFleetOperationsPage({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedRequestId]);
+  }, [routeRefreshFingerprint, selectedAssignment?.assignment_id]);
 
   const selectVehicle = useCallback(
     (deviceId: string) => {
@@ -436,20 +508,6 @@ export default function LiveFleetOperationsPage({
       setPopupVehicleId(deviceId);
     },
     [],
-  );
-
-  const selectSafetyEvent = useCallback(
-    (eventId: string) => {
-      const event = safetyEvents.find(
-        (item) => item.event_id === eventId,
-      );
-
-      if (event) {
-        setSelectedId(event.device_id);
-        setPopupVehicleId(event.device_id);
-      }
-    },
-    [safetyEvents],
   );
 
   const fleetLocations = useMemo(
@@ -468,6 +526,9 @@ export default function LiveFleetOperationsPage({
                 positionSource: vehicle.telemetry.position_source,
                 selected:
                   vehicle.device_id === selectedId,
+                emergencySOS: vehicle.emergency_sos
+                  ? { activatedAt: vehicle.emergency_sos.activated_at }
+                  : null,
               },
             ],
       ),
@@ -504,8 +565,24 @@ export default function LiveFleetOperationsPage({
                 popupVehicle.active_assignment.execution_status,
               )}`
             : undefined,
+          activeRouteSummary:
+            popupVehicle.device_id === selectedId && activeRoute && (activeRoute.route || activeRoute.planned_route)
+              ? [
+                  activeRoute.route
+                    ? `Active leg — ${activeRoute.position_state === "STALE" ? "From last known position" : activeRoute.phase === "TO_PICKUP" ? "To Pickup" : "To Destination"}: ${routeDistance(activeRoute.route.distance_meters)} · ${routeDuration(activeRoute.route.duration_seconds)} TomTom route estimate${activeRoute.position_state === "STALE" && activeRoute.position_age_seconds !== null ? ` · ${positionAge(activeRoute.position_age_seconds)}` : ""}`
+                    : "Active leg unavailable",
+                  activeRoute.planned_route
+                    ? `Next — Pickup to Destination: ${routeDistance(activeRoute.planned_route.distance_meters)} · ${routeDuration(activeRoute.planned_route.duration_seconds)} TomTom route estimate`
+                    : null,
+                ].filter(Boolean).join(" · ")
+              : popupVehicle.device_id === selectedId && popupVehicle.active_assignment && routeState === "error"
+                ? "Active route unavailable"
+                : undefined,
           telemetrySource:
             popupVehicle.telemetry.telemetry_source,
+          emergencySOS: popupVehicle.emergency_sos
+            ? { activatedAt: popupVehicle.emergency_sos.activated_at }
+            : null,
         }
       : null;
 
@@ -559,9 +636,13 @@ export default function LiveFleetOperationsPage({
   const navigatorCount =
     navigatorView === "vehicles"
       ? visibleVehicles.length
-      : navigatorView === "drivers"
-        ? visibleDrivers.length
-        : 0;
+      : visibleDrivers.length;
+
+  const allApplicableChecked =
+    visibleVehicles.length > 0 &&
+    visibleVehicles.every(
+      (vehicle) => !hiddenVehicleIds.has(vehicle.device_id),
+    );
 
   const toggleVehicleVisibility = (deviceId: string) =>
     setHiddenVehicleIds((current) => {
@@ -573,6 +654,19 @@ export default function LiveFleetOperationsPage({
         next.add(deviceId);
       }
 
+      return next;
+    });
+
+  const toggleApplicableVehicleVisibility = () =>
+    setHiddenVehicleIds((current) => {
+      const next = new Set(current);
+      visibleVehicles.forEach((vehicle) => {
+        if (allApplicableChecked) {
+          next.add(vehicle.device_id);
+        } else {
+          next.delete(vehicle.device_id);
+        }
+      });
       return next;
     });
 
@@ -826,11 +920,16 @@ export default function LiveFleetOperationsPage({
             <RequestMap
               request={mapRequest}
               route={route}
+              plannedRoute={plannedRoute}
               routeState={routeState}
+              routeCameraKey={
+                selectedAssignment
+                  ? `${selectedAssignment.assignment_id}:${selectedAssignment.execution_status}`
+                  : undefined
+              }
               fleetLocations={fleetLocations}
               focusedVehicleId={mapFocusedVehicleId || undefined}
               fleetPopup={fleetPopup}
-              safetyEvents={safetyEvents}
               onVehicleSelect={openVehiclePopup}
               onVehicleStatus={(deviceId) => {
                 setSelectedId(deviceId);
@@ -841,7 +940,6 @@ export default function LiveFleetOperationsPage({
               onVehiclePopupClose={() =>
                 setPopupVehicleId("")
               }
-              onSafetyEventSelect={selectSafetyEvent}
               geofenceActivityEvent={
                 geofenceActivitySelection
                   ? {
@@ -904,6 +1002,10 @@ export default function LiveFleetOperationsPage({
                   ? startGeofenceDraft(point)
                   : addGeofenceVertex(point)
               }
+              onUtilityPanelOpen={() => {
+                setVehiclePanelOpen(false);
+                setGeofencePanelOpen(false);
+              }}
             />
           </div>
 
@@ -998,133 +1100,38 @@ export default function LiveFleetOperationsPage({
                 className="live-fleet-navigator-header"
                 data-testid="fleet-navigator-header"
               >
-              <nav
-                className="live-fleet-navigator-tabs"
-                aria-label="Fleet navigator shortcuts"
-              >
-                <button
-                  type="button"
-                  className={
-                    navigatorView === "vehicles"
-                      ? "selected"
-                      : ""
-                  }
-                  aria-label="Show vehicles"
-                  onClick={() => {
-                    setNavigatorView("vehicles");
-                    setSearch("");
-                  }}
-                >
-                  <NavigatorIcon kind="fleet" />
-                </button>
-
-                <button
-                  type="button"
-                  className={
-                    navigatorView === "drivers"
-                      ? "selected"
-                      : ""
-                  }
-                  aria-label="Show drivers"
-                  onClick={() => {
-                    setNavigatorView("drivers");
-                    setSearch("");
-                  }}
-                >
-                  <NavigatorIcon kind="driver" />
-                </button>
-
+              <div className="live-fleet-navigator-titlebar">
+                <strong>Fleet Map Layers</strong>
+                <span>{data.vehicles.length}</span>
                 <button
                   type="button"
                   aria-label="Collapse fleet navigator"
-                  onClick={() =>
-                    setVehiclePanelOpen(false)
-                  }
+                  onClick={() => setVehiclePanelOpen(false)}
                 >
-                  <span aria-hidden="true">
-                    −
-                  </span>
+                  <span aria-hidden="true">−</span>
                 </button>
-              </nav>
+              </div>
 
-              <div className="live-fleet-navigator-select">
-                <button
-                  type="button"
-                  aria-expanded={
-                    navigatorMenuOpen
-                  }
-                  aria-haspopup="menu"
-                  onClick={() =>
-                    setNavigatorMenuOpen(
-                      (open) => !open,
-                    )
-                  }
-                >
-                  <span>
-                    {navigatorLabel[
-                      navigatorView
-                    ]}
-                  </span>
-
-                  <small>
-                    {navigatorCount}
-                  </small>
-
-                  <b aria-hidden="true">
-                    ⌄
-                  </b>
-                </button>
-
-                {navigatorMenuOpen && (
-                  <div
-                    className="live-fleet-navigator-menu"
-                    role="menu"
+              <div
+                className="live-fleet-view-switcher"
+                role="tablist"
+                aria-label="Fleet map layer view"
+              >
+                {(["vehicles", "drivers"] as const).map((value) => (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={navigatorView === value}
+                    className={navigatorView === value ? "selected" : ""}
+                    key={value}
+                    onClick={() => {
+                      setNavigatorView(value);
+                      setSearch("");
+                    }}
                   >
-                    {(
-                      [
-                        "vehicles",
-                        "drivers",
-                        "groups",
-                        "assets",
-                      ] as NavigatorView[]
-                    ).map((value) => (
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className={
-                          navigatorView ===
-                          value
-                            ? "selected"
-                            : ""
-                        }
-                        key={value}
-                        onClick={() => {
-                          setNavigatorView(
-                            value,
-                          );
-                          setNavigatorMenuOpen(
-                            false,
-                          );
-                          setSearch("");
-                        }}
-                      >
-                        {
-                          navigatorLabel[
-                            value
-                          ]
-                        }
-
-                        {value === "groups" ||
-                        value ===
-                          "assets" ? (
-                          <small>
-                            Not configured
-                          </small>
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                    {navigatorLabel[value]}
+                  </button>
+                ))}
               </div>
 
               <label className="live-fleet-navigator-search">
@@ -1134,20 +1141,15 @@ export default function LiveFleetOperationsPage({
 
                 <input
                   aria-label={
-                    navigatorView ===
-                    "vehicles"
+                    navigatorView === "vehicles"
                       ? "Search fleet vehicles"
-                      : `Search ${navigatorLabel[
-                          navigatorView
-                        ].toLowerCase()}`
+                      : "Search drivers"
                   }
                   placeholder={
                     navigatorView ===
                     "drivers"
                       ? "Search driver or code"
-                      : `Search ${navigatorLabel[
-                          navigatorView
-                        ].toLowerCase()}`
+                      : "Search vehicles"
                   }
                   value={search}
                   onChange={(event) =>
@@ -1158,8 +1160,7 @@ export default function LiveFleetOperationsPage({
                 />
               </label>
 
-              {navigatorView ===
-                "vehicles" && (
+              {navigatorView === "vehicles" && (
                 <div
                   className="live-fleet-filters"
                   role="group"
@@ -1190,14 +1191,31 @@ export default function LiveFleetOperationsPage({
                   ))}
                 </div>
               )}
+
+              {navigatorView === "vehicles" && (
+                <div className="live-fleet-visibility-controls">
+                  <span>Map Visibility</span>
+                  <button
+                    type="button"
+                    onClick={toggleApplicableVehicleVisibility}
+                    disabled={visibleVehicles.length === 0}
+                    aria-label={
+                      allApplicableChecked
+                        ? "Uncheck all visible vehicles"
+                        : "Check all visible vehicles"
+                    }
+                  >
+                    {allApplicableChecked ? "Uncheck All" : "Check All"}
+                  </button>
+                </div>
+              )}
               </div>
 
               <div
                 className="live-fleet-rows"
                 data-testid="fleet-navigator-scroll-region"
               >
-                {navigatorView ===
-                  "vehicles" &&
+                {navigatorView === "vehicles" &&
                   (data.vehicles.length ===
                   0 ? (
                     <p>
@@ -1212,115 +1230,18 @@ export default function LiveFleetOperationsPage({
                       view.
                     </p>
                   ) : (
-                    visibleVehicles.map(
-                      (vehicle) => (
-                        <div
-                          className={`live-fleet-asset-row ${
-                            vehicle.device_id ===
-                            selectedId
-                              ? "selected"
-                              : ""
-                          }`}
-                          key={
-                            vehicle.device_id
-                          }
-                        >
-                          <label
-                            className="live-fleet-marker-toggle"
-                            title={`${
-                              hiddenVehicleIds.has(
-                                vehicle.device_id,
-                              )
-                                ? "Show"
-                                : "Hide"
-                            } ${
-                              vehicle.display_name
-                            } on map`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={
-                                !hiddenVehicleIds.has(
-                                  vehicle.device_id,
-                                )
-                              }
-                              onChange={() =>
-                                toggleVehicleVisibility(
-                                  vehicle.device_id,
-                                )
-                              }
-                              aria-label={`Show ${vehicle.display_name} on map`}
-                            />
-                            <span />
-                          </label>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              selectVehicle(
-                                vehicle.device_id,
-                              )
-                            }
-                          >
-                            <span
-                              className="live-fleet-asset-icon"
-                              aria-hidden="true"
-                            >
-                              ▰
-                            </span>
-
-                            <span>
-                              <strong>
-                                {
-                                  vehicle.display_name
-                                }
-                              </strong>
-
-                              <small>
-                                {
-                                  vehicle.plate_number
-                                }{" "}
-                                ·{" "}
-                                {words(
-                                  vehicle.vehicle_type,
-                                )}
-                              </small>
-
-                              {vehicle.active_assignment ? (
-                                <small>
-                                  {
-                                    vehicle
-                                      .active_assignment
-                                      .driver_name
-                                  }{" "}
-                                  ·{" "}
-                                  {
-                                    vehicle
-                                      .active_assignment
-                                      .driver_code
-                                  }
-                                </small>
-                              ) : (
-                                <small>
-                                  No assigned
-                                  driver
-                                </small>
-                              )}
-                            </span>
-
-                            <span
-                              className={`live-fleet-row-state live-fleet-row-state--${vehicle.telemetry_state}`}
-                              title={
-                                stateLabel[
-                                  vehicle
-                                    .telemetry_state
-                                ]
-                              }
-                            />
-                          </button>
-                        </div>
-                      ),
-                    )
+                    visibleVehicles.map((vehicle) => (
+                      <FleetVehicleLayerRow
+                        key={vehicle.device_id}
+                        vehicle={vehicle}
+                        selected={vehicle.device_id === selectedId}
+                        hidden={hiddenVehicleIds.has(vehicle.device_id)}
+                        onToggleVisibility={() =>
+                          toggleVehicleVisibility(vehicle.device_id)
+                        }
+                        onSelect={() => selectVehicle(vehicle.device_id)}
+                      />
+                    ))
                   ))}
 
                 {navigatorView ===
@@ -1413,41 +1334,12 @@ export default function LiveFleetOperationsPage({
                     )
                   ))}
 
-                {navigatorView ===
-                  "groups" && (
-                  <p className="live-fleet-navigator-empty">
-                    <strong>
-                      No groups configured
-                    </strong>
-                    <span>
-                      Fleet grouping is not
-                      available in the current
-                      data model.
-                    </span>
-                  </p>
-                )}
-
-                {navigatorView ===
-                  "assets" && (
-                  <p className="live-fleet-navigator-empty">
-                    <strong>
-                      No non-vehicle assets
-                      configured
-                    </strong>
-                    <span>
-                      Only registered fleet
-                      vehicles currently
-                      provide map locations.
-                    </span>
-                  </p>
-                )}
               </div>
 
               <footer data-testid="fleet-navigator-footer">
                 <span>
-                  {navigatorView ===
-                  "vehicles"
-                    ? `${hiddenVehicleIds.size} hidden from map`
+                  {navigatorView === "vehicles"
+                    ? `${data.vehicles.length - hiddenVehicleIds.size} of ${data.vehicles.length} visible`
                     : `${navigatorCount} ${navigatorLabel[
                         navigatorView
                       ].toLowerCase()}`}

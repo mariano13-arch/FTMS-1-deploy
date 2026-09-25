@@ -2,7 +2,15 @@ from django.urls import path
 
 from .views import (
     DeactivateVehicleView,
+    FuelPriceImportView,
+    NumberCodingRuleDetailView,
+    NumberCodingRuleListView,
+    NumberCodingSuspensionDetailView,
+    NumberCodingSuspensionListView,
+    PartnerFuelPriceSettingsView,
     ReactivateVehicleView,
+    VehicleCodingExemptionDetailView,
+    VehicleCodingExemptionListView,
     VehicleDetailView,
     VehicleDocumentDetailView,
     VehicleDocumentFileView,
@@ -18,6 +26,42 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "partner-fuel-prices/",
+        PartnerFuelPriceSettingsView.as_view(),
+        name="partner-fuel-price-settings",
+    ),
+    path(
+        "partner-fuel-prices/import/",
+        FuelPriceImportView.as_view(),
+        name="partner-fuel-price-import",
+    ),
+    path("number-coding/rules/", NumberCodingRuleListView.as_view(), name="number-coding-rules"),
+    path(
+        "number-coding/rules/<int:record_id>/",
+        NumberCodingRuleDetailView.as_view(),
+        name="number-coding-rule-detail",
+    ),
+    path(
+        "number-coding/suspensions/",
+        NumberCodingSuspensionListView.as_view(),
+        name="number-coding-suspensions",
+    ),
+    path(
+        "number-coding/suspensions/<int:record_id>/",
+        NumberCodingSuspensionDetailView.as_view(),
+        name="number-coding-suspension-detail",
+    ),
+    path(
+        "number-coding/exemptions/",
+        VehicleCodingExemptionListView.as_view(),
+        name="number-coding-exemptions",
+    ),
+    path(
+        "number-coding/exemptions/<int:record_id>/",
+        VehicleCodingExemptionDetailView.as_view(),
+        name="number-coding-exemption-detail",
+    ),
     path("maintenance/", VehicleMaintenanceListView.as_view(), name="vehicle-maintenance-list"),
     path(
         "maintenance/<int:record_id>/",

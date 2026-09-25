@@ -38,6 +38,9 @@ function RootNavigator() {
         <Stack.Protected guard={Boolean(driver)}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="trips/[tripId]" options={{ title: 'Trip Details' }} />
+          <Stack.Screen name="trip-receipts" options={{ title: 'Trip Receipts' }} />
+          <Stack.Screen name="trip-receipt-new" options={{ title: 'Add Receipt' }} />
+          <Stack.Screen name="trip-receipt-detail" options={{ title: 'Receipt Detail' }} />
           <Stack.Screen name="inspection" options={{ title: 'Pre-Trip Inspection' }} />
           <Stack.Screen name="active-trip" options={{ title: 'Active Trip' }} />
           <Stack.Screen name="incident" options={{ title: 'Incident Report' }} />

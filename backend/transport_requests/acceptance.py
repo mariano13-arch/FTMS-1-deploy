@@ -1,6 +1,9 @@
 from django.db import transaction
 from django.utils import timezone
 
+from accounts.models import UserNotification
+from accounts.notifications import notify_capability_users
+
 from .models import DispatchAssignment, DispatchAssignmentEvent, TransportRequest
 
 
@@ -27,7 +30,7 @@ def accept_driver_assignment(*, assignment_id, driver, user, expected_confirmed_
     assignment.accepted_at = timezone.now()
     assignment.accepted_by = user
     assignment.save(update_fields=["accepted_at", "accepted_by", "updated_at"])
-    DispatchAssignmentEvent.objects.create(
+    event = DispatchAssignmentEvent.objects.create(
         assignment=assignment,
         event_type=DispatchAssignmentEvent.EventType.DRIVER_ACCEPTED,
         previous_driver=assignment.driver,
@@ -37,5 +40,20 @@ def accept_driver_assignment(*, assignment_id, driver, user, expected_confirmed_
         performed_by=user,
         selection_mode=assignment.selection_mode,
         reason="",
+    )
+    transaction.on_commit(
+        lambda: notify_capability_users(
+            module="DISPATCH_BOARD",
+            action="VIEW",
+            notification_type=UserNotification.Type.DRIVER_ACCEPTED,
+            title="Driver Accepted Assignment",
+            message=(
+                f"{assignment.driver} accepted the assignment for "
+                f"{assignment.transport_request.request_number}."
+            ),
+            target_url=f"/transport-requests/{assignment.transport_request_id}",
+            source_key=f"dispatch-assignment-event:{event.pk}:driver-accepted",
+        ),
+        robust=True,
     )
     return assignment, True

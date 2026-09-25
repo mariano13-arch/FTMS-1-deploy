@@ -57,7 +57,10 @@ class SeedDispatchDemoTests(TestCase):
             ["ELIGIBLE", "ELIGIBLE", "RESTRICTED", "NOT_ELIGIBLE"],
         )
         self.assertEqual(requests.count(), 5)
-        self.assertFalse(requests.exclude(status=TransportRequest.Status.APPROVED).exists())
+        self.assertEqual(
+            requests.filter(status=TransportRequest.Status.READY_FOR_DISPATCH).count(), 1
+        )
+        self.assertEqual(requests.filter(status=TransportRequest.Status.APPROVED).count(), 4)
         self.assertFalse(requests.filter(pickup_latitude__isnull=True).exists())
         self.assertFalse(requests.filter(destination_latitude__isnull=True).exists())
         self.assertFalse(requests.filter(passenger_count__lt=1).exists())

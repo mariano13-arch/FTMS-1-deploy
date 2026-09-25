@@ -8,6 +8,7 @@ from telemetry.geofences import evaluate_geofence_transitions
 from telemetry.models import TelemetryEvent
 from telemetry.presentation import current_event_for_vehicle, semantic_values
 from telemetry.realtime import broadcast_vehicle_status
+from telemetry.safety import attribute_driver_safety_event
 from telemetry.serializers import TelemetryEventInputSerializer
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ def ingest_telemetry(payload):
     try:
         with transaction.atomic():
             event = TelemetryEvent.objects.create(**serializer.create_model_values())
+            attribute_driver_safety_event(event)
             evaluate_geofence_transitions(event)
             transaction.on_commit(lambda: _broadcast_if_latest(event.event_id))
     except IntegrityError:

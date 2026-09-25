@@ -133,11 +133,23 @@ def _calculate(origin, destination):
 
 def get_route(item):
     origin, destination = _request_coordinates(item)
-    material = json.dumps([str(item.pk), origin, destination, "live"], separators=(",", ":"))
+    return get_route_between(str(item.pk), origin, destination)
+
+
+def get_route_between(identity, origin, destination):
+    origin = [
+        _coordinate(origin[0], latitude=False),
+        _coordinate(origin[1], latitude=True),
+    ]
+    destination = [
+        _coordinate(destination[0], latitude=False),
+        _coordinate(destination[1], latitude=True),
+    ]
+    material = json.dumps([str(identity), origin, destination, "live"], separators=(",", ":"))
     cache_key = f"transport-route:v1:{hashlib.sha256(material.encode()).hexdigest()}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    result = {"request_id": str(item.pk), "traffic_mode": "live", **_calculate(origin, destination)}
+    result = {"traffic_mode": "live", **_calculate(origin, destination)}
     cache.set(cache_key, result, ROUTE_CACHE_TTL_SECONDS)
     return result

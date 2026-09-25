@@ -68,20 +68,24 @@ class TelemetryDevicePairingApiTests(TestCase):
         response = self.client.get("/api/v1/telemetry-devices/LEGACY-001/")
 
         self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["device_id"], "LEGACY-001")
+        self.assertEqual(data["registration_status"], "REGISTERED")
+        self.assertTrue(data["is_paired"])
         self.assertEqual(
-            response.json(),
+            data["current_vehicle"],
             {
-                "device_id": "LEGACY-001",
-                "registration_status": "REGISTERED",
-                "is_paired": True,
-                "current_vehicle": {
-                    "vehicle_id": self.vehicle.pk,
-                    "plate_number": "PAIR-001",
-                    "display_name": "Pairing Vehicle",
-                    "compatibility_device_id": "LEGACY-001",
-                },
+                "vehicle_id": self.vehicle.pk,
+                "plate_number": "PAIR-001",
+                "display_name": "Pairing Vehicle",
+                "compatibility_device_id": "LEGACY-001",
             },
         )
+        self.assertEqual(
+            data["current_binding"]["id"],
+            TelemetryDeviceBinding.objects.get(vehicle=self.vehicle).pk,
+        )
+        self.assertEqual(data["binding_history"][0]["vehicle_id"], self.vehicle.pk)
         self.assertNotContains(response, "password")
         self.assertEqual(
             self.client.get("/api/v1/telemetry-devices/UNKNOWN/").status_code,
@@ -247,6 +251,11 @@ class TelemetryDevicePairingApiTests(TestCase):
         self.client.force_authenticate(dispatcher)
 
         detail = self.client.get("/api/v1/telemetry-devices/LEGACY-001/")
+        register = self.client.post(
+            "/api/v1/telemetry-devices/",
+            {"device_id": "DISPATCHER-FORBIDDEN-001"},
+            format="json",
+        )
         pair = self.client.post(
             "/api/v1/telemetry-devices/LEGACY-001/pair/",
             {"vehicle_id": self.other_vehicle.pk, "replace_current": True},
@@ -258,8 +267,8 @@ class TelemetryDevicePairingApiTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(detail.status_code, 200)
-        self.assertTrue(detail.json()["is_paired"])
+        self.assertEqual(detail.status_code, 403)
+        self.assertEqual(register.status_code, 403)
         self.assertEqual(pair.status_code, 403)
         self.assertEqual(unpair.status_code, 403)
 
@@ -299,3 +308,63 @@ class TelemetryDevicePairingApiTests(TestCase):
         self.assertFalse(created.json()["is_paired"])
         self.assertEqual(unknown_pair.status_code, 404)
         self.assertFalse(TelemetryDevice.objects.filter(device_id="NEVER-SEEN").exists())
+
+    def test_registration_is_idempotent_and_never_auto_pairs(self):
+        first = self.client.post(
+            "/api/v1/telemetry-devices/",
+            {"device_id": "QR-DEVICE-001"},
+            format="json",
+        )
+        second = self.client.post(
+            "/api/v1/telemetry-devices/",
+            {"device_id": "QR-DEVICE-001"},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(TelemetryDevice.objects.filter(device_id="QR-DEVICE-001").count(), 1)
+        self.assertFalse(first.json()["is_paired"])
+        self.assertFalse(TelemetryDeviceBinding.objects.filter(device__device_id="QR-DEVICE-001").exists())
+
+    def test_invalid_registration_creates_nothing(self):
+        response = self.client.post(
+            "/api/v1/telemetry-devices/",
+            {"device_id": "invalid device id"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(TelemetryDevice.objects.filter(device_id="invalid device id").exists())
+
+    def test_registry_list_has_real_counts_unpaired_state_and_history(self):
+        self.register("UNPAIRED-LIST-001")
+        response = self.client.get(
+            "/api/v1/telemetry-devices/?binding=unpaired&search=UNPAIRED-LIST&page_size=15"
+        )
+        detail = self.client.get("/api/v1/telemetry-devices/LEGACY-001/")
+        telemetry = self.client.post(
+            "/api/v1/telemetry/",
+            self.payload("LEGACY-001", "registry-summary-event"),
+            format="json",
+        )
+        detail_with_telemetry = self.client.get(
+            "/api/v1/telemetry-devices/LEGACY-001/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+        self.assertFalse(response.json()["results"][0]["is_paired"])
+        self.assertIsNone(response.json()["results"][0]["latest_telemetry"])
+        self.assertGreaterEqual(response.json()["summary"]["total_registered"], 2)
+        self.assertTrue(response.json()["can_manage"])
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["binding_history"][0]["vehicle_id"], self.vehicle.pk)
+        self.assertEqual(telemetry.status_code, 201)
+        self.assertEqual(
+            detail_with_telemetry.json()["latest_telemetry"]["position_source"],
+            "GNSS",
+        )
+        self.assertEqual(
+            detail_with_telemetry.json()["latest_telemetry"]["latitude"],
+            14.5186,
+        )

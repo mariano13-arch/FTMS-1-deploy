@@ -2,15 +2,17 @@ import secrets
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.utils import timezone
 
-from .models import DispatchAssignment, IntegrationClient, TransportRequest
+from .models import DispatchAssignment, IntegrationClient, SourceResultOutbox, TransportRequest
 
 TRUSTED_SOURCE_SYSTEMS = frozenset(
     {
         TransportRequest.SourceSystem.HOTEL_MANAGEMENT_SYSTEM,
         TransportRequest.SourceSystem.RESTAURANT_MANAGEMENT_SYSTEM,
+        TransportRequest.SourceSystem.SUPPLY_CHAIN_MANAGEMENT_SYSTEM,
     }
 )
 
@@ -53,7 +55,9 @@ def _new_credential():
 @transaction.atomic
 def create_integration_client(*, name, source_system):
     if source_system not in TRUSTED_SOURCE_SYSTEMS:
-        raise ValueError("Integration clients are limited to HMS and RMS source systems.")
+        raise ValueError(
+            "Integration clients are limited to trusted HMS, RMS, and supply-chain sources."
+        )
     key_identifier, credential = _new_credential()
     user_model = get_user_model()
     user = user_model(username=f"integration-{key_identifier}", is_active=True)
@@ -87,6 +91,7 @@ def rotate_integration_credential(client):
 
 
 def ingestion_values_match(instance, validated_data):
+    flight_context = validated_data.get("flight_context", None)
     for field_name in SOURCE_INGESTION_FIELDS:
         if field_name in validated_data:
             expected = validated_data[field_name]
@@ -95,6 +100,16 @@ def ingestion_values_match(instance, validated_data):
             expected = field.get_default() if field.has_default() else None
         if getattr(instance, field_name) != expected:
             return False
+    if flight_context is not None:
+        try:
+            existing_flight = instance.flight_context
+        except ObjectDoesNotExist:
+            return False
+        for field_name, expected in flight_context.items():
+            if getattr(existing_flight, field_name) != expected:
+                return False
+    elif hasattr(instance, "flight_context"):
+        return False
     return True
 
 
@@ -146,6 +161,12 @@ def source_result(item):
     if status == "REJECTED":
         event = item.events.filter(event_type="REJECTED").order_by("-created_at", "-pk").first()
         rejection_note = event.note if event and event.note else None
+    delivery = item.source_result_outbox.filter(event_type="TRIP_COMPLETED").first()
+    delivery_status = (
+        delivery.delivery_status
+        if delivery is not None
+        else SourceResultOutbox.DeliveryStatus.UNCONFIGURED
+    )
     return {
         "ftms_request_id": str(item.pk),
         "request_number": item.request_number,
@@ -156,4 +177,15 @@ def source_result(item):
         "execution_status": assignment.execution_status if assignment else None,
         "completion_timestamp": assignment.completed_at if status == "COMPLETED" else None,
         "rejection_note": rejection_note,
+        "result_delivery": {
+            "status": delivery_status,
+            "attempts": delivery.delivery_attempts if delivery is not None else 0,
+            "delivered_at": delivery.delivered_at if delivery is not None else None,
+            "last_error": delivery.last_error if delivery is not None else "",
+            "message": (
+                "No source callback contract is configured; poll this result endpoint."
+                if delivery_status == SourceResultOutbox.DeliveryStatus.UNCONFIGURED
+                else "Completion delivery state is recorded in the FTMS outbox."
+            ),
+        },
     }

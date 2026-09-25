@@ -40,6 +40,12 @@
 .vehicle-status-grid dd { margin: 0; font-size: .76rem; font-weight: 700; }
 .vehicle-status-simulated { padding: 3px 5px; border-radius: 4px; color: #ad3d25; background: #fff0eb; font-size: .57rem; }
 .vehicle-status-empty { display: grid; gap: 6px; padding: 12px; }
+.vehicle-status-emergency { display: grid; gap: 8px; padding: 10px 12px; border: 2px solid #be1424; border-radius: 8px; background: #fff1f2; box-shadow: 0 2px 9px rgb(190 20 36 / 14%); }
+.vehicle-status-emergency > div { display: flex; align-items: center; justify-content: space-between; color: #970f1e; }
+.vehicle-status-emergency > div span { padding: 2px 7px; border-radius: 999px; color: #fff; background: #be1424; font-size: .68rem; font-weight: 750; }
+.vehicle-status-emergency dl { display: grid; margin: 0; }
+.vehicle-status-emergency dl div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-block: 4px; border-top: 1px solid rgb(190 20 36 / 18%); }
+.vehicle-status-emergency dd { margin: 0; font-size: .76rem; font-weight: 700; }
 @media (max-width: 1100px) { .vehicle-status-page { width: min(68vw, 720px); } .vehicle-status-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .vehicle-status-page { width: 100%; } .vehicle-status-hero, .vehicle-status-summary, .vehicle-status-grid { grid-template-columns: 1fr; } .vehicle-status-photo { min-height: 110px; } .vehicle-status-grid > section:last-child { grid-column: auto; } }
 @media (prefers-reduced-motion: reduce) { .vehicle-status-page { animation: none; } }

@@ -7,8 +7,15 @@ import App from "./App";
 import type { Role } from "./services/auth";
 
 const auth = vi.hoisted(() => ({
-  user: { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" as Role },
-  loading: false, sessionMessage: "", signIn: vi.fn(), completeTwoFactor: vi.fn(), signOut: vi.fn(), expire: vi.fn(),
+  user: { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" as Role, capabilities: [
+    "TRANSPORT_REQUESTS.VIEW", "TRANSPORT_REQUESTS.EDIT", "DISPATCH_BOARD.VIEW",
+    "DISPATCH_BOARD.DISPATCH", "LIVE_MAP.VIEW", "DRIVERS.VIEW", "VEHICLES.VIEW",
+    "VEHICLES.EDIT", "FUEL_ANALYTICS.VIEW", "MAINTENANCE.VIEW",
+    "ALERTS_SOS.VIEW", "SYSTEM_SETTINGS.VIEW", "USERS_ACCESS.VIEW_USERS",
+  ] },
+  loading: false, sessionMessage: "", signIn: vi.fn(), completeTwoFactor: vi.fn(),
+  completeRequiredMfaEnrollment: vi.fn(), signOut: vi.fn(), expire: vi.fn(),
+  activateEnrolledSession: vi.fn(),
 }));
 vi.mock("./contexts/AuthContext", () => ({ useAuth: () => auth }));
 vi.mock("./services/sidebarService", () => ({
@@ -25,7 +32,7 @@ const vehicle = {
   device_id: "LILYGO-001", plate_number: "DEMO-001", display_name: "Sprint 1 Demo Vehicle",
   vehicle_type: "OTHER", manufacturer: "", model: "", model_year: null,
   passenger_capacity: null, payload_capacity_kg: null, gvwr_kg: null, is_active: true,
-  vin: "", engine_number: "", chassis_number: "", color: "", fuel_type: "",
+  vin: "", engine_number: "", chassis_number: "", color: "", fuel_type: "", fuel_grade: "",
   transmission_type: "", ownership_type: "", supplier_name: "",
   purchase_order_number: "", acquisition_date: null, purchase_price: null,
   purchase_currency: "", warranty_expiry_date: null, registration_expiry_date: null,
@@ -75,19 +82,36 @@ class FakeIntersectionObserver {
 }
 
 beforeEach(() => {
-  auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" };
-  auth.loading = false; auth.sessionMessage = ""; auth.signIn.mockReset(); auth.completeTwoFactor.mockReset(); auth.signOut.mockReset();
+  auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER", capabilities: [
+    "TRANSPORT_REQUESTS.VIEW", "TRANSPORT_REQUESTS.EDIT", "DISPATCH_BOARD.VIEW",
+    "DISPATCH_BOARD.DISPATCH", "LIVE_MAP.VIEW", "DRIVERS.VIEW", "VEHICLES.VIEW",
+    "VEHICLES.EDIT", "FUEL_ANALYTICS.VIEW", "MAINTENANCE.VIEW",
+    "ALERTS_SOS.VIEW", "SYSTEM_SETTINGS.VIEW", "USERS_ACCESS.VIEW_USERS",
+  ] };
+  auth.loading = false; auth.sessionMessage = ""; auth.signIn.mockReset(); auth.completeTwoFactor.mockReset();
+  auth.completeRequiredMfaEnrollment.mockReset(); auth.signOut.mockReset();
+  auth.activateEnrolledSession.mockReset();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   intersectionCallback = null;
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("administration workspace routing", () => {
+  test("renders the real Alerts & Incidents route instead of the planned placeholder", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({
+      count: 0, next: null, previous: null, results: [],
+      summary: { active_attention: 0, safety_events_today: 0, restricted_entries_today: 0, vehicle_device_attention: 0 },
+    }));
+    renderAt("/alerts");
+    expect(await screen.findByRole("heading", { name: "Alerts & Incidents" })).toBeInTheDocument();
+    expect(screen.queryByText("Planned module")).not.toBeInTheDocument();
+  });
+
   test.each([
     ["/settings", "Settings Overview"],
     ["/settings/security", "Security"],
-    ["/settings/operational-rules", "Operational Rules"],
+    ["/settings/operational-rules", /Operational Rules/],
     ["/settings/integrations", "Integrations"],
   ])("renders the Settings workspace route %s", async (path, heading) => {
     renderAt(path);
@@ -95,7 +119,7 @@ describe("administration workspace routing", () => {
   });
 
   test("redirects the retired Settings permission route to Users & Access", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({
       definitions: { TRANSPORT_REQUESTS: ["VIEW"] },
       roles: { FLEET_MANAGER: { TRANSPORT_REQUESTS: ["VIEW"] }, DISPATCHER: { TRANSPORT_REQUESTS: ["VIEW"] } },
@@ -106,7 +130,7 @@ describe("administration workspace routing", () => {
   });
 
   test("renders the truthful Audit Logs placeholder at its Users route", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     renderAt("/users/audit-logs");
     expect(await screen.findByText("Centralized administrative audit logging is not available yet.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
@@ -130,6 +154,23 @@ describe("Sprint 3 secure registry", () => {
     expect(screen.queryByText(/internal credential detail/)).not.toBeInTheDocument();
     expect(screen.getByText("Sign in")).toBeEnabled();
   });
+  test("temporary login lockout displays a safe wait message and countdown", async () => {
+    auth.user = null as unknown as typeof auth.user;
+    auth.signIn.mockRejectedValueOnce({ code: "temporarily_locked", retryAfterSeconds: 60 });
+    renderAt("/login");
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "staff" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByText("Sign in"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many failed sign-in attempts. Please try again in 1 minute.",
+    );
+    expect(screen.queryByText(/staff is locked|account exists|failed attempt/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Sign in")).toBeDisabled();
+
+    fireEvent.click(screen.getByText("Sign in"));
+    expect(auth.signIn).toHaveBeenCalledTimes(1);
+  });
   test("login displays the authenticated-session expiration reason", async () => {
     auth.user = null as unknown as typeof auth.user;
     auth.sessionMessage = "Your session expired due to inactivity. Please sign in again.";
@@ -139,7 +180,7 @@ describe("Sprint 3 secure registry", () => {
   test("successful login follows a safe internal redirect under StrictMode", async () => {
     auth.user = null as unknown as typeof auth.user;
     auth.signIn.mockImplementationOnce(async () => {
-      auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER" };
+      auth.user = { id: 1, username: "staff", display_name: "Staff User", role: "DISPATCHER", capabilities: ["VEHICLES.VIEW"] };
       return { kind: "authenticated", user: auth.user };
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response(vehicle));
@@ -167,6 +208,42 @@ describe("Sprint 3 secure registry", () => {
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await waitFor(() => expect(auth.completeTwoFactor).toHaveBeenCalledWith("memory-only-challenge", "totp", "123456"));
   });
+  test("mandatory MFA enrollment blocks navigation until setup is confirmed", async () => {
+    auth.user = null as unknown as typeof auth.user;
+    auth.signIn.mockResolvedValueOnce({
+      kind: "mfa_enrollment_required",
+      challengeToken: "enrollment-challenge",
+      setup: {
+        provisioning_uri: "otpauth://totp/FTMS:manager?secret=TEST",
+        manual_setup_key: "TEST-MANUAL-KEY",
+        issuer: "FTMS",
+        account_label: "manager",
+      },
+    });
+    auth.completeRequiredMfaEnrollment.mockResolvedValueOnce(["RECOVERY-ONE", "RECOVERY-TWO"]);
+    auth.activateEnrolledSession.mockImplementationOnce(async () => {
+      auth.user = {
+        id: 2, username: "manager", display_name: "Fleet Manager",
+        role: "FLEET_MANAGER", capabilities: ["DASHBOARD.VIEW"],
+      };
+    });
+    const { history } = renderWithHistory("/login", { from: "/dashboard" });
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "manager" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByText("Sign in"));
+
+    expect(await screen.findByRole("heading", { name: "Set Up Two-Factor Authentication" })).toBeInTheDocument();
+    expect(screen.getByText("TEST-MANUAL-KEY")).toBeInTheDocument();
+    expect(history.location.pathname).toBe("/login");
+    expect(auth.user).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Authenticator code"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enable MFA and continue" }));
+    expect(await screen.findByText(/RECOVERY-ONE/)).toBeInTheDocument();
+    expect(history.location.pathname).toBe("/login");
+    fireEvent.click(screen.getByRole("button", { name: "I have saved these codes" }));
+    await waitFor(() => expect(history.location.pathname).toBe("/dashboard"));
+  });
   test("rapid login submissions invoke sign-in once", async () => {
     auth.user = null as unknown as typeof auth.user;
     const pending = deferred<{ kind: "authenticated"; user: typeof auth.user }>(); auth.signIn.mockReturnValue(pending.promise);
@@ -190,7 +267,9 @@ describe("Sprint 3 secure registry", () => {
     expect(within(row).getByText("Incomplete")).toBeInTheDocument();
     expect(within(row).getByText("Active")).toBeInTheDocument();
     fireEvent.click(within(row).getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" }));
-    expect(within(row).getByRole("menuitem", { name: "View vehicle" })).toBeInTheDocument();
+    const menu = within(row).getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "View vehicle" })).toBeInTheDocument();
+    expect(menu).toHaveClass("vehicle-row-menu-popover--above");
     expect(screen.queryByText("+ Add Vehicle")).not.toBeInTheDocument();
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
     expect(screen.queryByText("Deactivate")).not.toBeInTheDocument();
@@ -225,6 +304,7 @@ describe("Sprint 3 secure registry", () => {
   });
   test("fleet manager receives row Edit but not status actions", async () => {
     auth.user.role = "FLEET_MANAGER";
+    auth.user.capabilities.push("INSPECTIONS.CREATE");
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [vehicle] }));
     const { history } = renderWithHistory("/vehicles");
     const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!;
@@ -237,7 +317,7 @@ describe("Sprint 3 secure registry", () => {
     expect(within(editDrawer).getByLabelText("Display name")).toHaveValue("Sprint 1 Demo Vehicle");
   });
   test("super admin receives compact row status action", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 1, next: null, previous: null, results: [vehicle] }));
     renderAt("/vehicles");
     const row = (await screen.findByText("Sprint 1 Demo Vehicle")).closest("tr")!;
@@ -253,7 +333,7 @@ describe("Sprint 3 secure registry", () => {
     expect(screen.queryByText("Deactivate")).not.toBeInTheDocument();
   });
   test("super admin receives create and status controls", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ count: 0, next: null, previous: null, results: [] }));
     renderAt("/vehicles");
     expect(await screen.findByText("+ Add Vehicle")).toBeInTheDocument();
@@ -417,15 +497,15 @@ describe("Sprint 3 secure registry", () => {
     await waitFor(() => expect(screen.queryByLabelText("Title")).not.toBeInTheDocument()); expect(submitted).not.toBeNull(); expect(submitted!.has("uploaded_by")).toBe(false);
   });
   test("fleet manager creates an inspection once and the authenticated inspector is not submitted", async () => {
-    auth.user.role = "FLEET_MANAGER"; const pending = deferred<Response>(); let submitted = ""; let posts = 0;
+    auth.user.role = "FLEET_MANAGER"; auth.user.capabilities.push("INSPECTIONS.CREATE"); const pending = deferred<Response>(); let submitted = ""; let posts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => { const url = String(input); if (url.includes("/inspections/") && init?.method === "POST") { posts += 1; submitted = String(init.body); return pending.promise; } if (url.includes("/inspections/")) return response({ count: 0, previous: null, next: null, results: [] }); return response({ count: 1, next: null, previous: null, results: [vehicle] }); });
     renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "Add inspection" }));
     fireEvent.change(screen.getByLabelText("Inspection Date"), { target: { value: "2026-08-12" } }); fireEvent.change(screen.getByLabelText("Inspection Type"), { target: { value: "PRE_TRIP" } }); fireEvent.change(screen.getByLabelText("Result"), { target: { value: "NEEDS_ATTENTION" } });
     const save = screen.getByRole("button", { name: "Save Inspection" }); fireEvent.click(save); fireEvent.click(save); expect(posts).toBe(1); expect(submitted).not.toContain("inspected_by"); pending.resolve(await response(inspection));
-    expect(await screen.findByText("Rear tire wear")).toBeInTheDocument(); expect(screen.getByText("Fleet Manager")).toBeInTheDocument();
+    expect(await screen.findByText("Rear tire wear")).toBeInTheDocument(); expect(screen.getAllByText("Fleet Manager").length).toBeGreaterThan(0);
   });
   test("inspection creation reports API validation errors without closing the form", async () => {
-    auth.user.role = "FLEET_MANAGER"; vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => String(input).includes("/inspections/") && init?.method === "POST" ? response({ result: ["Invalid result."] }, 400) : String(input).includes("/inspections/") ? response({ count: 0, previous: null, next: null, results: [] }) : response({ count: 1, next: null, previous: null, results: [vehicle] }));
+    auth.user.role = "FLEET_MANAGER"; auth.user.capabilities.push("INSPECTIONS.CREATE"); vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => String(input).includes("/inspections/") && init?.method === "POST" ? response({ result: ["Invalid result."] }, 400) : String(input).includes("/inspections/") ? response({ count: 0, previous: null, next: null, results: [] }) : response({ count: 1, next: null, previous: null, results: [vehicle] }));
     renderAt("/vehicles"); await screen.findByText("Sprint 1 Demo Vehicle"); fireEvent.click(screen.getByRole("button", { name: "More actions for Sprint 1 Demo Vehicle" })); fireEvent.click(screen.getByRole("menuitem", { name: "Add inspection" })); fireEvent.change(screen.getByLabelText("Inspection Date"), { target: { value: "2026-08-12" } }); fireEvent.change(screen.getByLabelText("Inspection Type"), { target: { value: "PRE_TRIP" } }); fireEvent.change(screen.getByLabelText("Result"), { target: { value: "FAILED" } }); fireEvent.click(screen.getByRole("button", { name: "Save Inspection" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Please correct the inspection information."); expect(screen.getByLabelText("Inspection Date")).toHaveValue("2026-08-12");
   });
@@ -439,7 +519,7 @@ describe("Sprint 3 secure registry", () => {
     expect(await screen.findByText("Waiting for the first telemetry event…")).toBeInTheDocument();
   });
   test("failed status change is accessible and preserves the previous state", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     vi.spyOn(globalThis, "fetch").mockImplementation(input => {
       const url = String(input);
       if (url.includes("deactivate")) return response({ detail: "internal" }, 500);
@@ -455,7 +535,7 @@ describe("Sprint 3 secure registry", () => {
     expect(screen.getByText("Deactivate")).toBeInTheDocument();
   });
   test("successful status change updates state and rapid clicks mutate once", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     const mutation = deferred<Response>();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
@@ -473,7 +553,7 @@ describe("Sprint 3 secure registry", () => {
     expect(await screen.findByText("Reactivate")).toBeInTheDocument();
   });
   test("backend field errors render safely on corresponding form fields", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ plate_number: ["Already exists."] }, 400));
     renderAt("/vehicles/new");
     fireEvent.change(screen.getByLabelText("Device ID"), { target: { value: "TEST-001" } });
@@ -484,7 +564,7 @@ describe("Sprint 3 secure registry", () => {
     expect(screen.queryByText(/traceback|exception|internal/i)).not.toBeInTheDocument();
   });
   test("successful create navigates once and rapid submits create once", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     const mutation = deferred<Response>();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (init?.method === "POST") return mutation.promise;
@@ -523,7 +603,7 @@ describe("Sprint 3 secure registry", () => {
     expect(signal?.aborted).toBe(true);
   });
   test("unmount aborts an unresolved vehicle form mutation", () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     let signal: AbortSignal | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
       signal = init?.signal ?? undefined;
@@ -538,7 +618,7 @@ describe("Sprint 3 secure registry", () => {
     expect(signal?.aborted).toBe(true);
   });
   test("unmount aborts an unresolved status mutation", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     let mutationSignal: AbortSignal | undefined;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (String(input).includes("deactivate")) {
@@ -615,7 +695,7 @@ describe("Sprint 3 secure registry", () => {
     expect(screen.queryByDisplayValue("A-PLATE")).not.toBeInTheDocument();
   });
   test("status errors clear when navigating to another vehicle", async () => {
-    auth.user.role = "SUPER_ADMIN";
+    auth.user.role = "FLEET_ADMIN";
     const next: Array<ReturnType<typeof deferred<Response>>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);

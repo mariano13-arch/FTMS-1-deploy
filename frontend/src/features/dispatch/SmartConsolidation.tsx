@@ -1,4 +1,4 @@
-import LoadingIndicator from "../../components/common/LoadingIndicator";
+import { useEffect, useState } from "react";
 import type { ConsolidationResponse, DispatchPlan } from "../../services/dispatch";
 import { humanize as label } from "../../utils/text";
 
@@ -36,27 +36,31 @@ export default function SmartConsolidation({
   result,
   plan,
   busy,
-  onAnalyze,
   onKeepSeparate,
   onConfirm,
   onPrepare,
+  currentRequestNumber,
 }: {
   loading: boolean;
   result: ConsolidationResponse | null;
   plan: DispatchPlan | null;
   busy: boolean;
-  onAnalyze: () => void;
   onKeepSeparate: () => void;
   onConfirm: () => void;
   onPrepare: () => void;
+  currentRequestNumber: string;
 }) {
   const suggestion = result?.recommendation;
+  const [reviewing, setReviewing] = useState(false);
+  useEffect(() => setReviewing(false), [suggestion?.recommendation_token]);
+  const compatible = suggestion?.requests.filter(
+    (item) => item.request_number !== currentRequestNumber,
+  ) ?? [];
+  if (loading || (!plan && !suggestion)) return null;
   return (
     <section className="dispatch-consolidation">
-      <h3>Smart Consolidation</h3>
-      {loading ? (
-        <LoadingIndicator variant="card" message="Analyzing consolidation…" />
-      ) : plan ? (
+      <h3>Consolidation Opportunity</h3>
+      {plan ? (
         <>
           <strong>Confirmed Consolidated Dispatch</strong>
           <p>
@@ -77,40 +81,19 @@ export default function SmartConsolidation({
         </>
       ) : suggestion ? (
         <>
-          <strong>Optimized consolidation recommendation</strong>
-          <p>
-            {suggestion.requests.map((item) => item.request_number).join(" + ")}
-          </p>
-          <dl>
-            <Metric name="Driver" value={suggestion.driver.full_name} />
-            <Metric
-              name="Vehicle"
-              value={suggestion.vehicle.display_name}
-              detail={suggestion.vehicle.plate_number}
-            />
-            <Metric
-              name="Peak load"
-              value={`${suggestion.route.peak_load_kg} / ${suggestion.route.capacity_kg} kg`}
-              detail={`${suggestion.route.capacity_utilization_percent}%`}
-            />
-            <Metric
-              name="Planned stops"
-              value={String(suggestion.route.stops.length)}
-            />
-            <Metric
-              name="Separate"
-              value={`${suggestion.route.separate.vehicles} vehicles · ${distance(suggestion.route.separate.distance_meters)} · ${duration(suggestion.route.separate.travel_time_seconds)}`}
-            />
-            <Metric
-              name="Consolidated"
-              value={`${suggestion.route.consolidated.vehicles} vehicle · ${distance(suggestion.route.consolidated.distance_meters)} · ${duration(suggestion.route.consolidated.travel_time_seconds)}`}
-            />
-            <Metric
-              name="Potential reduction"
-              value={`${suggestion.route.difference.vehicles} vehicle · ${distance(suggestion.route.difference.distance_meters)} · ${duration(suggestion.route.difference.travel_time_seconds)}`}
-            />
+          <strong>{suggestion.requests.length} compatible delivery requests</strong>
+          <div className="dispatch-consolidation-context">
+            <p><b>Current request</b><span>{currentRequestNumber}</span></p>
+            <p><b>Can be consolidated with</b><span>{compatible.map((item) => item.request_number).join(" · ")}</span></p>
+          </div>
+          <dl className="dispatch-consolidation-summary">
+            <Metric name="Vehicle" value={suggestion.vehicle.display_name} detail={suggestion.vehicle.plate_number} />
+            <Metric name="Driver" value={suggestion.driver.full_name} detail={suggestion.driver.driver_code} />
+            <Metric name="Separate travel" value={duration(suggestion.route.separate.travel_time_seconds)} />
+            <Metric name="Consolidated travel" value={duration(suggestion.route.consolidated.travel_time_seconds)} />
+            <Metric name="Estimated reduction" value={duration(suggestion.route.difference.travel_time_seconds)} detail={distance(suggestion.route.difference.distance_meters)} />
           </dl>
-          <h4>Planned Stops</h4>
+          <h4>Pickup/Delivery Sequence</h4>
           <ol>
             {suggestion.route.stops.map((stop) => (
               <li key={`${stop.sequence}-${stop.request_id}`}>
@@ -120,47 +103,26 @@ export default function SmartConsolidation({
               </li>
             ))}
           </ol>
-          <h4>Why consolidate?</h4>
-          <ul>
-            {suggestion.explanation.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-          <p className="dispatch-state-note">
-            Multi-stop geometry unavailable; no route line is drawn. Metrics use
-            the TomTom road matrix.
-          </p>
-          <div className="dispatch-consolidation-actions">
-            <button className="btn-cancel" onClick={onKeepSeparate}>
-              Keep Separate
+          {!reviewing ? (
+            <button className="btn-action--filled" onClick={() => setReviewing(true)}>
+              Review Consolidation
             </button>
-            <button className="btn-confirm" disabled={busy} onClick={onConfirm}>
-              Confirm Consolidation
-            </button>
-          </div>
+          ) : <div className="dispatch-consolidation-review">
+            <dl>
+              <Metric name="Peak load" value={`${suggestion.route.peak_load_kg} / ${suggestion.route.capacity_kg} kg`} detail={`${suggestion.route.capacity_utilization_percent}% capacity utilization`} />
+              <Metric name="Separate distance" value={distance(suggestion.route.separate.distance_meters)} />
+              <Metric name="Consolidated distance" value={distance(suggestion.route.consolidated.distance_meters)} />
+            </dl>
+            <h4>Why consolidate?</h4>
+            <ul>{suggestion.explanation.map((item) => <li key={item}>{item}</li>)}</ul>
+            <p className="dispatch-state-note">Multi-stop geometry unavailable; no route line is drawn. Metrics use the TomTom road matrix.</p>
+            <div className="dispatch-consolidation-actions">
+              <button className="btn-cancel" onClick={onKeepSeparate}>Keep Separate</button>
+              <button className="btn-confirm" disabled={busy} onClick={onConfirm}>Confirm Consolidation</button>
+            </div>
+          </div>}
         </>
-      ) : result ? (
-        <>
-          <p>No feasible consolidation opportunity.</p>
-          {result.exclusions.length > 0 && (
-            <>
-              <h4>Why not?</h4>
-              <ul>
-                {result.exclusions.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </>
-          )}
-          <button className="btn-action--filled" onClick={onAnalyze}>
-            Analyze Consolidation
-          </button>
-        </>
-      ) : (
-        <button className="btn-action--filled" onClick={onAnalyze}>
-          Analyze Consolidation
-        </button>
-      )}
+      ) : null}
     </section>
   );
 }
